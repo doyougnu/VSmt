@@ -51,6 +51,7 @@ newtype VariantFormula = VariantFormula { getVarFormula :: (Prop Dim) }
 
 instance Semigroup VariantFormula where
   (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula (OpBB Or x y)
+
 instance Monoid VariantFormula where mempty = false
                                      mappend = (<>)
 
