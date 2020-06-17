@@ -1,0 +1,16 @@
+#+AUTHOR: Jeffrey Young
+#+TITLE: Reading List
+#+DATE: <2020-06-17 Wed>
+#+DESCRIPTION: Relevant papers for VSMT
+# Remove section numbers, no table of contents
+#+OPTIONS: toc:nil
+#+options: num:nil
+
+* Compilers
+  The design behind VSMT is essentially a compiler to the SMTLIB2 language. The
+  compiler design is as nanopass compiler where each single pass is subject to
+  fusion.
+** See
+   - [[https://dl.acm.org/doi/epdf/10.1145/2500365.2500618 ][A Nanopass Framework for Commercial Compiler Development]]
+   - [[https://legacy.cs.indiana.edu/~dyb/papers/inlining.pdf][Fast and Effective Procedure Inlining]]
+   - [[http://www.cs.utexas.edu/~wcook/tutorial/][Partial Evaluation Tutorial]]

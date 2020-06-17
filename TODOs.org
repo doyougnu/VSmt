@@ -2,36 +2,15 @@
 ** TODO Redirect dante to the nix directory
     I had setup .dir-locals.el to do this but dante still died for some reason
 
-* Variational Models
-** Goals
-   Given a v-model you can:
-     1. solve for all configurations a specific variable as a specific value or a range of values
-     2. Given a configuration, solve for the value of a or all variables
-     3. Figure out which variants were sat
-** This works, satisfies the goals, and is compatible with the most solvers
-   #+begin_src
-   (declare-const p Bool)
-   (declare-const q Bool)
-   (declare-const r Int)
-   (assert (=> (and p q) (= r 1)))
-   (assert (=> (and p (not q)) (= r 12)))
-   (assert (=> (and (not p) q) (= r 123)))
-   (assert (=> (and (not p) (not q)) (= r 1234)))
-   ;; these cannot be used together
-   (assert (= r 12)) ;; return models were the variable as a specific value
-   (assert (and p q)) ;; what is the value of r when p and q are true?
-   (check-sat)
-   (get-model)
-   #+end_src
-   Except that it is too permissive ~ite~ works though
-
 * Variational Core
 
-** Goals
-    1. Should be exposed to the user
-    2. Should be able to be changed after found/generated
-    3. Should be able to be stored, or loaded to/from a file
-    4. Should be loggable, I'm sick of the debug.trace shenanigans
-*** Design
-    - nano-pass compiler
-    - Partial evaluation
+** Optimizations
+
+*** TODO Constant Folding
+
+*** TODO Copy Propagation
+    If we find a statement like:
+    #+begin_example
+    (assert (== x 2))
+    #+end_example
+    then do we perform propagation for x -> 2?
