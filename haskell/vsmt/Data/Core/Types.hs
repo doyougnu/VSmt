@@ -9,7 +9,7 @@
 -- Internal Types for the vsmt library
 -----------------------------------------------------------------------------
 
-
+{-# OPTIONS_GHC -Wall -Werror #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -24,9 +24,9 @@ module Data.Core.Types where
 
 import           Control.Monad         (liftM2)
 import           Control.DeepSeq       (NFData)
-import           Data.Data             (Data, Typeable)
-import           Data.Text             (pack, Text)
+import           Data.Text             (Text)
 import           Data.Fixed            (mod')
+import qualified Data.Sequence         as Seq
 import qualified Data.SBV              as S
 import           Data.String           (IsString)
 import           GHC.Generics          (Generic)
@@ -49,6 +49,10 @@ type Config  = Dim -> Bool
 newtype VariantFormula = VariantFormula { getVarFormula :: (Prop Dim) }
   deriving (Eq,Generic,Ord,Show)
 
+-- | An SMT Program is a sequence of statements interacting with the base solver
+type Prog a = Seq.Seq a
+type SMTProg = Prog (Stmt Var)
+
 instance Semigroup VariantFormula where
   (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula (OpBB Or x y)
 
@@ -56,9 +60,9 @@ instance Monoid VariantFormula where mempty = false
                                      mappend = (<>)
 
 -- | Top level Syntax
-data Prog a = Assert !(Prop a)  -- ^ constraint the prop
+data Stmt a = Assert !(Prop a)         -- ^ constraint the prop
             | Call SolverOp     -- ^ side effectual interact with the solver
-            | IfThenElse !(Prop a) (Prop a) (Prop a)
+            | IfThenElse !(Prop a) (Stmt a) (Stmt a)
             deriving (Eq,Generic,Ord,Functor,Traversable,Foldable)
 
 data SolverOp = IsSat      -- ^ call sat
@@ -79,7 +83,7 @@ data Prop a
    -- we leave choices to be lazy for performance in selection/configuration. It
    -- may be the case that one alternative is never selected for
    | ChcB !Dim (Prop a) (Prop a)     -- ^ Choices
-  deriving (Eq,Generic,Show,Typeable,Functor,Traversable,Foldable,Ord)
+  deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
 -- | Expressions with Choices
 data Expr a
@@ -88,7 +92,7 @@ data Expr a
   | OpI  N_N  !(Expr a)             -- ^ Unary Operators
   | OpII NN_N !(Expr a) !(Expr a)   -- ^ Binary Operators
   | ChcI Dim  (Expr a) (Expr a)     -- ^ SMT Choices
-  deriving (Eq,Generic,Show,Typeable,Functor,Traversable,Foldable,Ord)
+  deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
 -- | Mirroring NPrim with Symbolic types for the solver
 data SNum = SI !S.SInt64
@@ -97,25 +101,25 @@ data SNum = SI !S.SInt64
 
 -- | data constructor for Numeric operations
 data NPrim = I {-# UNPACK #-} !Int | D {-# UNPACK #-} !Double
-  deriving (Eq,Generic,Typeable,Ord,Show)
+  deriving (Eq,Generic,Ord,Show)
 
 -- | Reference types
-data RefN = RefI | RefD deriving (Eq,Generic,Typeable,Ord,Show)
+data RefN = RefI | RefD deriving (Eq,Generic,Ord,Show)
 
 -- | Unary Numeric Operator
-data N_N = Neg | Abs | Sign deriving (Eq,Generic,Data,Typeable,Ord,Show)
+data N_N = Neg | Abs | Sign deriving (Eq,Generic,Ord,Show)
 
 -- | Binary Boolean operators
-data B_B = Not deriving (Eq,Generic,Data,Typeable,Ord,Show)
+data B_B = Not deriving (Eq,Generic,Ord,Show)
 
 -- | Binary Numeric Operators
-data NN_N = Add | Sub | Mult | Div | Mod deriving (Eq,Generic,Data,Typeable,Ord,Show)
+data NN_N = Add | Sub | Mult | Div | Mod deriving (Eq,Generic,Ord,Show)
 
 -- | Binary Boolean operators
-data BB_B = And | Or | Impl | BiImpl | XOr deriving (Eq,Generic,Data,Typeable,Ord,Show)
+data BB_B = And | Or | Impl | BiImpl | XOr deriving (Eq,Generic,Ord,Show)
 
 -- | Binary Numeric predicate operators
-data NN_B = LT | LTE | GT | GTE | EQ | NEQ deriving (Eq,Generic,Data,Typeable,Ord,Show)
+data NN_B = LT | LTE | GT | GTE | EQ | NEQ deriving (Eq,Generic,Ord,Show)
 
 -- | add div and mod to num
 class Num n => PrimN n where

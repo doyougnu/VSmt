@@ -24,3 +24,14 @@
    (get-model)
    #+end_src
    Except that it is too permissive ~ite~ works though
+
+* Variational Core
+
+** Goals
+    1. Should be exposed to the user
+    2. Should be able to be changed after found/generated
+    3. Should be able to be stored, or loaded to/from a file
+    4. Should be loggable, I'm sick of the debug.trace shenanigans
+*** Design
+    - nano-pass compiler
+    - Partial evaluation
