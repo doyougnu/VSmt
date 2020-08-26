@@ -12,12 +12,9 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Data.Core.Types where
@@ -46,23 +43,24 @@ type Config  = Dim -> Bool
 -- restricted to dimensions only. We could choose to force that the dimensions
 -- \in prop they describe but this artificially restricts the expressiveness of
 -- the system and is best left to the end-user
-newtype VariantFormula = VariantFormula { getVarFormula :: (Prop Dim) }
+newtype VariantContext = VariantContext { getVarFormula :: Prop Dim }
   deriving (Eq,Generic,Ord,Show)
 
 -- | An SMT Program is a sequence of statements interacting with the base solver
 type Prog a = Seq.Seq a
 type SMTProg = Prog (Stmt Var)
 
-instance Semigroup VariantFormula where
-  (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula (OpBB Or x y)
+instance Semigroup VariantContext where
+  (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext (OpBB Or x y)
 
-instance Monoid VariantFormula where mempty = false
+instance Monoid VariantContext where mempty = false
                                      mappend = (<>)
 
 -- | Top level Syntax
 data Stmt a = Assert !(Prop a)         -- ^ constraint the prop
-            | Call SolverOp     -- ^ side effectual interact with the solver
+            | Call SolverOp            -- ^ side effectual interact with the solver
             | IfThenElse !(Prop a) (Stmt a) (Stmt a)
+            | Define Var Type
             deriving (Eq,Generic,Ord,Functor,Traversable,Foldable)
 
 data SolverOp = IsSat      -- ^ call sat
@@ -75,24 +73,30 @@ data SolverOp = IsSat      -- ^ call sat
 -- | Boolean expressions with choices, value and spine strict
 -- TODO combine using GADTS
 data Prop a
-   = LitB Bool                       -- ^ boolean literals
-   | RefB !a                         -- ^ Bool References
-   | OpB  B_B  !(Prop a)             -- ^ Unary Operators
-   | OpBB BB_B !(Prop a)  !(Prop a)  -- ^ Binary Operators
-   | OpIB NN_B !(Expr a) !(Expr a)   -- ^ SMT Arithmetic
+   = LitB Bool                         -- ^ boolean literals
+   | RefB !a                           -- ^ Bool References
+   | OpB  B_B  !(Prop a)               -- ^ Unary Operators
+   | OpBB BB_B !(Prop a)  !(Prop a)    -- ^ Binary Operators
+   | OpIB NN_B !(NExpr a) !(NExpr a)   -- ^ SMT Arithmetic
    -- we leave choices to be lazy for performance in selection/configuration. It
    -- may be the case that one alternative is never selected for
-   | ChcB !Dim (Prop a) (Prop a)     -- ^ Choices
+   | ChcB !Dim (Prop a) (Prop a)       -- ^ Choices
   deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
--- | Expressions with Choices
-data Expr a
+-- | Numerical Expressions with Choices
+data NExpr a
   = LitI NPrim                      -- ^ Arithmetic Literals
-  | Ref  RefN !a                    -- ^ Arithmetic References
-  | OpI  N_N  !(Expr a)             -- ^ Unary Operators
-  | OpII NN_N !(Expr a) !(Expr a)   -- ^ Binary Operators
-  | ChcI Dim  (Expr a) (Expr a)     -- ^ SMT Choices
+  | RefI  !a                        -- ^ Arithmetic References
+  | OpI  N_N  !(NExpr a)            -- ^ Unary Operators
+  | OpII NN_N !(NExpr a) !(NExpr a) -- ^ Binary Operators
+  | ChcI Dim   (NExpr a) (NExpr a)  -- ^ SMT Choices
   deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
+
+-- | Types of references
+data Type = TBool
+          | TInt
+          | TDouble
+          deriving (Eq,Generic,Show,Ord)
 
 -- | Mirroring NPrim with Symbolic types for the solver
 data SNum = SI !S.SInt64
@@ -102,9 +106,6 @@ data SNum = SI !S.SInt64
 -- | data constructor for Numeric operations
 data NPrim = I {-# UNPACK #-} !Int | D {-# UNPACK #-} !Double
   deriving (Eq,Generic,Ord,Show)
-
--- | Reference types
-data RefN = RefI | RefD deriving (Eq,Generic,Ord,Show)
 
 -- | Unary Numeric Operator
 data N_N = Neg | Abs | Sign deriving (Eq,Generic,Ord,Show)
@@ -134,19 +135,19 @@ infixl 7 ./, .%
 
 -- | some not so smart constructors, pinning a to string because we will be
 -- using String the most
-iRef :: IsString a => a -> Expr a
+iRef :: IsString a => a -> NExpr a
 iRef = Ref RefI
 {-# INLINE iRef #-}
 
-iLit :: Int -> Expr a
+iLit :: Int -> NExpr a
 iLit = LitI . I
 {-# INLINE iLit #-}
 
-dLit :: Double -> Expr a
+dLit :: Double -> NExpr a
 dLit = LitI . D
 {-# INLINE dLit #-}
 
-dRef :: IsString a => a -> Expr a
+dRef :: IsString a => a -> NExpr a
 dRef = Ref RefD
 {-# INLINE dRef #-}
 
@@ -158,7 +159,7 @@ bChc :: Dim -> Prop a -> Prop a -> Prop a
 bChc = ChcB
 {-# INLINE bChc #-}
 
-iChc :: Dim -> Expr a -> Expr a -> Expr a
+iChc :: Dim -> NExpr a -> NExpr a -> NExpr a
 iChc = ChcI
 {-# INLINE iChc #-}
 
@@ -220,8 +221,8 @@ instance Num SNum where
   signum (SD d) = SD $ signum (S.fromSDouble S.sRoundNearestTiesToAway d)
 
   (SI i) + (SI i') = SI $ i + i'
-  (SD d) + (SI i)  = SD $ d + (S.sFromIntegral i)
-  (SI i) + (SD d)  = SD $ (S.sFromIntegral i) + d
+  (SD d) + (SI i)  = SD $ d + S.sFromIntegral i
+  (SI i) + (SD d)  = SD $ S.sFromIntegral i + d
   (SD d) + (SD d') = SD $ d + d'
 
   (SI i) - (SI i') = SI $ i - i'
@@ -236,14 +237,14 @@ instance Num SNum where
 
 instance PrimN SNum where
   (SI i) ./ (SI i') = SI $ i ./ i'
-  (SD d) ./ (SI i)  = SD $ d ./ (S.sFromIntegral i)
-  (SI i) ./ (SD d)  = SD $ (S.sFromIntegral i) ./ d
+  (SD d) ./ (SI i)  = SD $ d ./ S.sFromIntegral i
+  (SI i) ./ (SD d)  = SD $ S.sFromIntegral i ./ d
   (SD d) ./ (SD d') = SD $ d ./ d'
 
 
   (SI i) .% (SI i') = SI $ i .% i'
-  (SD d) .% (SI i)  = SI $ (S.fromSDouble S.sRoundNearestTiesToAway d) .% i
-  (SI i) .% (SD d)  = SI $ i .% (S.fromSDouble S.sRoundNearestTiesToAway d)
+  (SD d) .% (SI i)  = SI $ S.fromSDouble S.sRoundNearestTiesToAway d .% i
+  (SI i) .% (SD d)  = SI $ i .% S.fromSDouble S.sRoundNearestTiesToAway d
   (SD d) .% (SD d') = SD $ S.fpRem d d'
 
 instance PrimN S.SDouble where
@@ -404,10 +405,10 @@ class Boolean b where
   a <=> b = (a ==> b) &&& (b ==> a)
 
   (==>) :: b -> b -> b
-  a ==> b = (bnot a) ||| b
+  a ==> b = bnot a ||| b
 
   (<+>) :: b -> b -> b
-  a <+> b = (a ||| b) &&& (bnot (a &&& b))
+  a <+> b = (a ||| b) &&& bnot (a &&& b)
 
 instance Boolean S.SBool where
   true  = S.sTrue
@@ -457,18 +458,18 @@ instance Boolean (Prop a) where
   (==>) = OpBB Impl
   (<=>) = OpBB BiImpl
 
-instance Boolean VariantFormula where
-  true  = VariantFormula $ LitB True
-  false = VariantFormula $ LitB False
-  bnot  = VariantFormula . OpB Not . getVarFormula
-  (&&&) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula $ OpBB And    x y
-  (|||) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula $ OpBB Or     x y
-  (<+>) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula $ OpBB XOr    x y
-  (==>) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula $ OpBB Impl   x y
-  (<=>) (getVarFormula -> x) (getVarFormula -> y) = VariantFormula $ OpBB BiImpl x y
+instance Boolean VariantContext where
+  true  = VariantContext $ LitB True
+  false = VariantContext $ LitB False
+  bnot  = VariantContext . OpB Not . getVarFormula
+  (&&&) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB And    x y
+  (|||) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Or     x y
+  (<+>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB XOr    x y
+  (==>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Impl   x y
+  (<=>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB BiImpl x y
 
--- | Boilerplate to make Num (Expr a) work out
-instance Num (NPrim) where
+-- | Boilerplate to make Num (NExpr a) work out
+instance Num NPrim where
   fromInteger = I . fromInteger
   abs = abs
   negate = negate
@@ -478,7 +479,7 @@ instance Num (NPrim) where
   (*) = (*)
 
 -- | We can treat Variational integer expressions like nums
-instance Num (Expr a) where
+instance Num (NExpr a) where
   fromInteger = LitI . fromInteger
   abs    = OpI Abs
   negate = OpI Neg
@@ -488,11 +489,11 @@ instance Num (Expr a) where
   (*)    = OpII Mult
 
 -- | the other num instances
-instance PrimN (Expr a) where
+instance PrimN (NExpr a) where
   (./) = OpII Div
   (.%) = OpII Mod
 
-instance Prim (Prop d) (Expr d) where
+instance Prim (Prop d) (NExpr d) where
   (.<)  = OpIB LT
   (.<=) = OpIB LTE
   (.==) = OpIB EQ
@@ -503,7 +504,7 @@ instance Prim (Prop d) (Expr d) where
 
 -- | conveniences
 instance (NFData a) => NFData (Prop a)
-instance (NFData a) => NFData (Expr a)
+instance (NFData a) => NFData (NExpr a)
 instance NFData NPrim
 instance NFData B_B
 instance NFData N_N
