@@ -1,16 +1,22 @@
+{ compiler ? "ghc884" }:
+
 let
   config = {
     allowBroken = true;
     packageOverrides = pkgs: rec {
-      haskellPackages = pkgs.haskellPackages.override {
-        overrides = haskellPackagesNew: haskellPackagesOld: rec {
-          project2 =
-            haskellPackagesNew.callPackage ./vsmt.nix {
-              z3 = pkgs.z3;
-              zlib = pkgs.zlib;
-            };
+      haskell = pkgs.haskell // {
+        packages = pkgs.haskell.packages // {
+          "${compiler}" = pkgs.haskell.packages.${compiler}.override {
+            overrides = haskellPackagesNew: haskellPackagesOld: rec {
 
-          sbv = haskellPackagesNew.callPackage ./sbv.nix { };
+              vsmt = haskellPackagesNew.callPackage ./vsmt.nix {
+                z3 = pkgs.z3;
+                zlib = pkgs.zlib;
+              };
+
+              sbv = haskellPackagesNew.callPackage ./sbv.nix { };
+            };
+          };
         };
       };
     };
@@ -20,5 +26,15 @@ let
 
 in
   rec {
-    vsmt = pkgs.haskellPackages.project2;
+    vsmt = pkgs.haskell.packages.${compiler}.vsmt;
+
+    vsmt-shell = pkgs.haskell.packages.${compiler}.shellFor {
+      packages = p: [vsmt];
+      buildInputs = with pkgs; [ haskellPackages.hlint
+                                 haskellPackages.stylish-haskell
+                                 haskellPackages.hasktags
+                                 haskellPackages.apply-refact
+                                 haskellPackages.hindent
+                               ];
+    };
   }

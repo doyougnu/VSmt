@@ -21,7 +21,7 @@ library
                  , Data.Core.Core
                  , Data.Core.Types
                  , Data.Core.Result
-  build-depends: base >=4.12 && < 5
+  build-depends: base
                , bifunctors
                , containers >= 0.6.0.1
                , unordered-containers >= 0.2
