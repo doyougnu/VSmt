@@ -33,7 +33,14 @@ import           Prelude               hiding (EQ, GT, LT, lookup)
 -- | A feature is a named, boolean configuration option.
 type Var = Text
 type Dim = Text
-type Config  = Dim -> Bool
+data Selection
+type Config  = Dim -> Selection
+
+-- | empty type to represent when an 'a' is total
+newtype Total a = Total a
+
+-- | an type to represent that an 'a' is plain
+newtype Plain a = Plain a
 
 --
 -- * Syntax
@@ -47,7 +54,7 @@ newtype VariantContext = VariantContext { getVarFormula :: Prop Dim }
   deriving (Eq,Generic,Ord,Show)
 
 -- | An SMT Program is a sequence of statements interacting with the base solver
-type Prog a = Seq.Seq a
+type Prog = Seq.Seq
 type SMTProg = Prog (Stmt Var)
 
 instance Semigroup VariantContext where
@@ -61,6 +68,7 @@ data Stmt a = Assert !(Prop a)         -- ^ constraint the prop
             | Call SolverOp            -- ^ side effectual interact with the solver
             | IfThenElse !(Prop a) (Stmt a) (Stmt a)
             | Define Var Type
+            | StoreCore
             deriving (Eq,Generic,Ord,Functor,Traversable,Foldable)
 
 data SolverOp = IsSat      -- ^ call sat
@@ -85,11 +93,11 @@ data Prop a
 
 -- | Numerical Expressions with Choices
 data NExpr a
-  = LitI NPrim                      -- ^ Arithmetic Literals
-  | RefI  !a                        -- ^ Arithmetic References
-  | OpI  N_N  !(NExpr a)            -- ^ Unary Operators
-  | OpII NN_N !(NExpr a) !(NExpr a) -- ^ Binary Operators
-  | ChcI Dim   (NExpr a) (NExpr a)  -- ^ SMT Choices
+  = LitI NPrim                       -- ^ Arithmetic Literals
+  | RefI  !a                         -- ^ Arithmetic References
+  | OpI  N_N  !(NExpr a)             -- ^ Unary Operators
+  | OpII NN_N !(NExpr a) !(NExpr a)  -- ^ Binary Operators
+  | ChcI !Dim  (NExpr a) (NExpr a)   -- ^ SMT Choices
   deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
 -- | Types of references
@@ -136,8 +144,12 @@ infixl 7 ./, .%
 -- | some not so smart constructors, pinning a to string because we will be
 -- using String the most
 iRef :: IsString a => a -> NExpr a
-iRef = Ref RefI
+iRef = RefI
 {-# INLINE iRef #-}
+
+bRef :: IsString a => a -> Prop a
+bRef = RefB
+{-# INLINE bRef #-}
 
 iLit :: Int -> NExpr a
 iLit = LitI . I
@@ -146,14 +158,6 @@ iLit = LitI . I
 dLit :: Double -> NExpr a
 dLit = LitI . D
 {-# INLINE dLit #-}
-
-dRef :: IsString a => a -> NExpr a
-dRef = Ref RefD
-{-# INLINE dRef #-}
-
-bRef :: IsString a => a -> Prop a
-bRef = RefB
-{-# INLINE bRef #-}
 
 bChc :: Dim -> Prop a -> Prop a -> Prop a
 bChc = ChcB
@@ -511,4 +515,3 @@ instance NFData N_N
 instance NFData BB_B
 instance NFData NN_B
 instance NFData NN_N
-instance NFData RefN

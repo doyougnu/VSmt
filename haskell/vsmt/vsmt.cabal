@@ -31,8 +31,7 @@ library
                , sbv >= 8.6
                , text
                , transformers >= 0.5.6.2
-  extra-libraries: z
-                 , z3
+  -- extra-libraries: z, z3
   default-language: Haskell2010
   other-extensions: BangPatterns
                     CPP
@@ -70,7 +69,6 @@ library
                     TypeSynonymInstances
                     UndecidableInstances
                     ViewPatterns
-                    DerivingVia
 
 Test-Suite VSMTTest
   type            : exitcode-stdio-1.0

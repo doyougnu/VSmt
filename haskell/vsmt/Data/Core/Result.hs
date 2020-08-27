@@ -34,13 +34,13 @@ import           Data.Core.Types
 -- not be needed. We will be incrementally building these formulas through
 -- conses and will not be doing any other real operations until the solver is
 -- finished. Thus a list is an appropriate choice
-newtype ResultFormula a = ResultFormula [(VariantFormula, a)]
+newtype ResultFormula a = ResultFormula [(VariantContext, a)]
     deriving (Eq,Show,Ord,Generic,Typeable,Semigroup,Monoid)
 
 type VariableMap d = M.Map d (ResultFormula S.SBool)
 
 data Result d = Result { variables :: VariableMap d
-                       , satResult :: VariantFormula
+                       , satResult :: VariantContext
                        }
 
 instance Ord d => Semigroup (Result d) where
@@ -56,14 +56,14 @@ instance Ord d => Monoid (Result d) where
 onVariables :: (VariableMap d -> VariableMap d) -> Result d -> Result d
 onVariables f Result{..} = Result{variables=f variables, satResult}
 
-onSatResult :: (VariantFormula -> VariantFormula) -> Result d -> Result d
+onSatResult :: (VariantContext -> VariantContext) -> Result d -> Result d
 onSatResult f Result{..} = Result{variables, satResult=f satResult}
 
 insertToVariables :: Ord d => d -> ResultFormula S.SBool -> Result d -> Result d
 insertToVariables k v r = onVariables (M.insertWith mappend k v) r
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
-insertToSat :: (Ord d, IsString d) => VariantFormula -> Result d -> Result d
+insertToSat :: (Ord d, IsString d) => VariantContext -> Result d -> Result d
 insertToSat v = onSatResult (v `mappend`)
 
 -- | check if the current context is sat or not
@@ -130,7 +130,7 @@ getVSMTModel :: C.Query S.SMTResult
 getVSMTModel = C.getSMTResult
 
 getResult :: (Prim S.SBool a, IsString d, Ord d, S.SymVal a) =>
-  VariantFormula -> a -> C.Query (Result d)
+  VariantContext -> a -> C.Query (Result d)
 getResult vf result =
   do model <- getVSMTModel
      return $!

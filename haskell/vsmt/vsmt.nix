@@ -15,6 +15,7 @@ mkDerivation {
   testHaskellDepends = [
     base QuickCheck tasty tasty-golden tasty-hunit tasty-quickcheck
   ];
+  executableSystemDepends = [ z3 zlib ];
   benchmarkHaskellDepends = [ base deepseq gauge silently ];
   homepage = "https://github.com/doyougnu/VSmt";
   description = "SMT Based Verification with first class variational programming capabilities";

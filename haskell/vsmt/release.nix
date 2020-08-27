@@ -35,6 +35,12 @@ in
                                  haskellPackages.hasktags
                                  haskellPackages.apply-refact
                                  haskellPackages.hindent
+                                 zlib
+                                 z3
                                ];
     };
   }
+
+# extraCmds = ''
+# export LD_LIBRARY_PATH+=:${self.zlib}/lib
+# '';
