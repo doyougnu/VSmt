@@ -1,0 +1,6 @@
+((nil . ((dante-methods              . (nix-ghci))
+         (dante-project-root         . "~/Research/VSmt/haskell/vsmt")
+         (dante-repl-command-line    . ("nix-shell" "--attr" "vsmt-shell" "release.nix" "--run" "cabal new-repl"))
+         (haskell-process-type       . cabal-new-repl)
+         (inferior-haskell-root-dir  . "~/Research/VSmt/haskell/vsmt")
+         )))
