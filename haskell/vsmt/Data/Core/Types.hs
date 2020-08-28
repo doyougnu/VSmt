@@ -33,8 +33,8 @@ import           Prelude               hiding (EQ, GT, LT, lookup)
 -- | A feature is a named, boolean configuration option.
 type Var = Text
 type Dim = Text
-data Selection
-type Config  = Dim -> Selection
+type Config  = Dim -> Bool
+type PartialConfig = Dim -> Maybe Bool
 
 -- | empty type to represent when an 'a' is total
 newtype Total a = Total a
