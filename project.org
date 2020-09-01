@@ -1,0 +1,47 @@
+* Project setup
+** DONE Redirect dante to the nix directory
+   CLOSED: [2020-08-31 Mon 11:28]
+    I had setup .dir-locals.el to do this but dante still died for some reason
+
+* Variational Solver
+
+** Optimizations
+
+*** TODO Constant Folding
+
+*** TODO Copy Propagation
+    If we find a statement like:
+    #+begin_example
+    (assert (== x 2))
+    #+end_example
+    then do we perform propagation for x -> 2?
+
+** TODO Result module
+
+** TODO shallow embedded for ease of creating data on the fly
+
+** TODO Server setup
+
+** TODO REPL setup
+
+** TODO Hackage documentation
+
+** TODO Solver
+
+*** Investigate possible uses of StableName
+
+*** Investigate possible uses with IORef patterns
+
+* Testing
+
+** TODO hedgehog properties vs quickcheck properties
+
+** TODO Tasty setup and harness
+
+** TODO Setup continuous integration
+
+* Benchmarking
+
+** TODO Gauge setup
+
+** TODO bench-show

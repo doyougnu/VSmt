@@ -13,7 +13,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric      #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -44,7 +43,7 @@ data Result d = Result { variables :: VariableMap d
                        }
 
 instance Ord d => Semigroup (Result d) where
-  (<>) (Result {..}) (Result{variables=v,satResult=s}) =
+  (<>) Result {..} Result{variables=v,satResult=s} =
     Result { variables=variables <> v
            , satResult=satResult <> s}
 
@@ -60,7 +59,7 @@ onSatResult :: (VariantContext -> VariantContext) -> Result d -> Result d
 onSatResult f Result{..} = Result{variables, satResult=f satResult}
 
 insertToVariables :: Ord d => d -> ResultFormula S.SBool -> Result d -> Result d
-insertToVariables k v r = onVariables (M.insertWith mappend k v) r
+insertToVariables k v = onVariables (M.insertWith mappend k v)
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
 insertToSat :: (Ord d, IsString d) => VariantContext -> Result d -> Result d
@@ -152,4 +151,4 @@ getResult vf result =
      Result {variables = M.foldMapWithKey
               (\k a -> M.singleton (fromString k) (makeElement a)) m'
             ,satResult=vf}
-   makeElement a = ResultFormula $ pure (vf, result .== (S.fromCV a))
+   makeElement a = ResultFormula $ pure (vf, result .== S.fromCV a)

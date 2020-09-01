@@ -10,7 +10,6 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -55,7 +54,7 @@ newtype VariantContext = VariantContext { getVarFormula :: Prop Dim }
 
 -- | An SMT Program is a sequence of statements interacting with the base solver
 type Prog = Seq.Seq
-type SMTProg = Prog (Stmt Var)
+type SMTProg = Prog (Stmt (Prop Var))
 
 instance Semigroup VariantContext where
   (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext (OpBB Or x y)
@@ -64,9 +63,9 @@ instance Monoid VariantContext where mempty = false
                                      mappend = (<>)
 
 -- | Top level Syntax
-data Stmt a = Assert !(Prop a)         -- ^ constraint the prop
+data Stmt a = Assert !a         -- ^ constraint the prop
             | Call SolverOp            -- ^ side effectual interact with the solver
-            | IfThenElse !(Prop a) (Stmt a) (Stmt a)
+            | IfThenElse !a (Stmt a) (Stmt a)
             | Define Var Type
             | StoreCore
             deriving (Eq,Generic,Ord,Functor,Traversable,Foldable)
