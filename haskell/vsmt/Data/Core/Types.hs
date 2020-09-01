@@ -129,7 +129,7 @@ data B_B = Not deriving (Eq,Generic,Ord,Show)
 data NN_N = Add | Sub | Mult | Div | Mod deriving (Eq,Generic,Ord,Show)
 
 -- | Binary Boolean operators
-data BB_B = And | Or | Impl | BiImpl | XOr deriving (Eq,Generic,Ord,Show)
+data BB_B = And | Or | Impl | Eqv | XOr deriving (Eq,Generic,Ord,Show)
 
 -- | Binary Numeric predicate operators
 data NN_B = LT | LTE | GT | GTE | EQ | NEQ deriving (Eq,Generic,Ord,Show)
@@ -258,6 +258,7 @@ instance PrimN SymNum where
   (SyD d) .% (SyI i)  = SyI $ S.fromSDouble S.sRoundNearestTiesToAway d .% i
   (SyI i) .% (SyD d)  = SyI $ i .% S.fromSDouble S.sRoundNearestTiesToAway d
   (SyD d) .% (SyD d') = SyD $ S.fpRem d d'
+
 
 instance PrimN S.SDouble where
   (./)  = S.fpDiv S.sRoundNearestTiesToAway
@@ -468,7 +469,7 @@ instance Boolean (Prop' a) where
   (|||) = OpBB Or
   (<+>) = OpBB XOr
   (==>) = OpBB Impl
-  (<=>) = OpBB BiImpl
+  (<=>) = OpBB Eqv
 
 instance Boolean VariantContext where
   true  = VariantContext $ LitB True
@@ -478,7 +479,7 @@ instance Boolean VariantContext where
   (|||) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Or     x y
   (<+>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB XOr    x y
   (==>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Impl   x y
-  (<=>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB BiImpl x y
+  (<=>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Eqv    x y
 
 -- | Boilerplate to make Num (NExpr' a) work out
 instance Num NPrim where
