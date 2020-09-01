@@ -5,6 +5,13 @@
 
 * Variational Solver
 
+** Performance
+
+*** Store Ref (SRef SVal) in the state maps instead of the SBV a
+    the idea here is to avoid lots of pack and unpacking of these values. The
+    average case has is way more lookups then generations, so when we lookup we
+    don't want any extra actions
+
 ** Optimizations
 
 *** TODO Constant Folding

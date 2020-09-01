@@ -95,7 +95,7 @@ data Prop' a
 -- | Numerical Expressions with Choices
 data NExpr' a
   = LitI NPrim                       -- ^ Arithmetic Literals
-  | RefI  !a                         -- ^ Arithmetic References
+  | RefI ExRefType !a                         -- ^ Arithmetic References
   | OpI  N_N  !(NExpr' a)             -- ^ Unary Operators
   | OpII NN_N !(NExpr' a) !(NExpr' a)  -- ^ Binary Operators
   | ChcI !Dim  (NExpr' a) (NExpr' a)   -- ^ SMT Choices
@@ -108,9 +108,12 @@ data Type = TBool
           deriving (Eq,Generic,Show,Ord)
 
 -- | Mirroring NPrim with Symbolic types for the solver
-data SNum = SI !S.SInt64
-          | SD !S.SDouble
+data SymNum = SyI !S.SInt64
+            | SyD !S.SDouble
           deriving (Eq, Generic,Show)
+
+data ExRefType = ExRefTypeI | ExRefTypeD
+  deriving (Eq,Generic,Show,Ord)
 
 -- | data constructor for Numeric operations
 data NPrim = I {-# UNPACK #-} !Int | D {-# UNPACK #-} !Double
@@ -145,8 +148,12 @@ infixl 7 ./, .%
 -- | some not so smart constructors, pinning a to string because we will be
 -- using String the most
 iRef :: IsString a => a -> NExpr' a
-iRef = RefI
+iRef = RefI ExRefTypeI
 {-# INLINE iRef #-}
+
+dRef :: IsString a => a -> NExpr' a
+dRef = RefI ExRefTypeD
+{-# INLINE dRef #-}
 
 bRef :: IsString a => a -> Prop' a
 bRef = RefB
@@ -212,45 +219,45 @@ instance Prim (Prop' a) Double where
 
 -- * SBV instances
 
--- | we'll need to mirror the NPrim data type in SBV via SNum
-instance Num SNum where
-  fromInteger = SI . S.literal . fromInteger
+-- | we'll need to mirror the NPrim data type in SBV via SymNum
+instance Num SymNum where
+  fromInteger = SyI . S.literal . fromInteger
 
-  abs (SI i) = SI $ abs i
-  abs (SD d) = SD $ S.fpAbs d
+  abs (SyI i) = SyI $ abs i
+  abs (SyD d) = SyD $ S.fpAbs d
 
-  negate (SI i) = SI $ negate i
-  negate (SD d) = SD $ S.fpNeg d
+  negate (SyI i) = SyI $ negate i
+  negate (SyD d) = SyD $ S.fpNeg d
 
-  signum (SI i) = SI $ signum i
-  signum (SD d) = SD $ signum (S.fromSDouble S.sRoundNearestTiesToAway d)
+  signum (SyI i) = SyI $ signum i
+  signum (SyD d) = SyD $ signum (S.fromSDouble S.sRoundNearestTiesToAway d)
 
-  (SI i) + (SI i') = SI $ i + i'
-  (SD d) + (SI i)  = SD $ d + S.sFromIntegral i
-  (SI i) + (SD d)  = SD $ S.sFromIntegral i + d
-  (SD d) + (SD d') = SD $ d + d'
+  (SyI i) + (SyI i') = SyI $ i + i'
+  (SyD d) + (SyI i)  = SyD $ d + S.sFromIntegral i
+  (SyI i) + (SyD d)  = SyD $ S.sFromIntegral i + d
+  (SyD d) + (SyD d') = SyD $ d + d'
 
-  (SI i) - (SI i') = SI $ i - i'
-  (SD d) - (SI i)  = SD $ d - S.sFromIntegral i
-  (SI i) - (SD d)  = SD $ S.sFromIntegral i - d
-  (SD d) - (SD d') = SD $ d - d'
+  (SyI i) - (SyI i') = SyI $ i - i'
+  (SyD d) - (SyI i)  = SyD $ d - S.sFromIntegral i
+  (SyI i) - (SyD d)  = SyD $ S.sFromIntegral i - d
+  (SyD d) - (SyD d') = SyD $ d - d'
 
-  (SI i) * (SI i') = SI $ i * i'
-  (SD d) * (SI i)  = SD $ d * S.sFromIntegral i
-  (SI i) * (SD d)  = SD $ d * S.sFromIntegral i
-  (SD d) * (SD d') = SD $ d * d'
+  (SyI i) * (SyI i') = SyI $ i * i'
+  (SyD d) * (SyI i)  = SyD $ d * S.sFromIntegral i
+  (SyI i) * (SyD d)  = SyD $ d * S.sFromIntegral i
+  (SyD d) * (SyD d') = SyD $ d * d'
 
-instance PrimN SNum where
-  (SI i) ./ (SI i') = SI $ i ./ i'
-  (SD d) ./ (SI i)  = SD $ d ./ S.sFromIntegral i
-  (SI i) ./ (SD d)  = SD $ S.sFromIntegral i ./ d
-  (SD d) ./ (SD d') = SD $ d ./ d'
+instance PrimN SymNum where
+  (SyI i) ./ (SyI i') = SyI $ i ./ i'
+  (SyD d) ./ (SyI i)  = SyD $ d ./ S.sFromIntegral i
+  (SyI i) ./ (SyD d)  = SyD $ S.sFromIntegral i ./ d
+  (SyD d) ./ (SyD d') = SyD $ d ./ d'
 
 
-  (SI i) .% (SI i') = SI $ i .% i'
-  (SD d) .% (SI i)  = SI $ S.fromSDouble S.sRoundNearestTiesToAway d .% i
-  (SI i) .% (SD d)  = SI $ i .% S.fromSDouble S.sRoundNearestTiesToAway d
-  (SD d) .% (SD d') = SD $ S.fpRem d d'
+  (SyI i) .% (SyI i') = SyI $ i .% i'
+  (SyD d) .% (SyI i)  = SyI $ S.fromSDouble S.sRoundNearestTiesToAway d .% i
+  (SyI i) .% (SyD d)  = SyI $ i .% S.fromSDouble S.sRoundNearestTiesToAway d
+  (SyD d) .% (SyD d') = SyD $ S.fpRem d d'
 
 instance PrimN S.SDouble where
   (./)  = S.fpDiv S.sRoundNearestTiesToAway
@@ -276,73 +283,73 @@ instance PrimN S.SInteger where
   (./)  = S.sDiv
   (.%)  = S.sMod
 
-instance S.Mergeable SNum where
+instance S.Mergeable SymNum where
   symbolicMerge _ b thn els
     | Just result <- S.unliteral b = if result then thn else els
     | otherwise = els
 
-instance S.EqSymbolic SNum where
-  (.==) (SI i) (SI i') = (S..==) i i'
-  (.==) (SD d) (SI i') = (S..==) d (S.sFromIntegral i')
-  (.==) (SI i) (SD d)  = (S..==) (S.sFromIntegral i) d
-  (.==) (SD d) (SD d') = (S..==) d d'
+instance S.EqSymbolic SymNum where
+  (.==) (SyI i) (SyI i') = (S..==) i i'
+  (.==) (SyD d) (SyI i') = (S..==) d (S.sFromIntegral i')
+  (.==) (SyI i) (SyD d)  = (S..==) (S.sFromIntegral i) d
+  (.==) (SyD d) (SyD d') = (S..==) d d'
 
-  (./=) (SI i) (SI i') = (S../=) i i'
-  (./=) (SD d) (SI i') = (S../=) d (S.sFromIntegral i')
-  (./=) (SI i) (SD d)  = (S../=) (S.sFromIntegral i) d
-  (./=) (SD d) (SD d') = (S../=) d d'
+  (./=) (SyI i) (SyI i') = (S../=) i i'
+  (./=) (SyD d) (SyI i') = (S../=) d (S.sFromIntegral i')
+  (./=) (SyI i) (SyD d)  = (S../=) (S.sFromIntegral i) d
+  (./=) (SyD d) (SyD d') = (S../=) d d'
 
-instance S.OrdSymbolic SNum where
-  (.<) (SI i) (SI i') = (S..<) i i'
-  (.<) (SD d) (SI i)  = (S..<) d (S.sFromIntegral i)
-  (.<) (SI i) (SD d)  = (S..<) (S.sFromIntegral i) d
-  (.<) (SD d) (SD d') = (S..<) d d'
+instance S.OrdSymbolic SymNum where
+  (.<) (SyI i) (SyI i') = (S..<) i i'
+  (.<) (SyD d) (SyI i)  = (S..<) d (S.sFromIntegral i)
+  (.<) (SyI i) (SyD d)  = (S..<) (S.sFromIntegral i) d
+  (.<) (SyD d) (SyD d') = (S..<) d d'
 
-  (.<=) (SI i) (SI i') = (S..<=) i i'
-  (.<=) (SD d) (SI i)  = (S..<=) d (S.sFromIntegral i)
-  (.<=) (SI i) (SD d)  = (S..<=) (S.sFromIntegral i) d
-  (.<=) (SD d) (SD d') = (S..<=) d d'
+  (.<=) (SyI i) (SyI i') = (S..<=) i i'
+  (.<=) (SyD d) (SyI i)  = (S..<=) d (S.sFromIntegral i)
+  (.<=) (SyI i) (SyD d)  = (S..<=) (S.sFromIntegral i) d
+  (.<=) (SyD d) (SyD d') = (S..<=) d d'
 
-  (.>=) (SI i) (SI i') = (S..>=) i i'
-  (.>=) (SD d) (SI i)  = (S..>=) d (S.sFromIntegral i)
-  (.>=) (SI i) (SD d)  = (S..>=) (S.sFromIntegral i) d
-  (.>=) (SD d) (SD d') = (S..>=) d d'
+  (.>=) (SyI i) (SyI i') = (S..>=) i i'
+  (.>=) (SyD d) (SyI i)  = (S..>=) d (S.sFromIntegral i)
+  (.>=) (SyI i) (SyD d)  = (S..>=) (S.sFromIntegral i) d
+  (.>=) (SyD d) (SyD d') = (S..>=) d d'
 
-  (.>) (SI i) (SI i') = (S..>) i i'
-  (.>) (SD d) (SI i)  = (S..>) d (S.sFromIntegral i)
-  (.>) (SI i) (SD d)  = (S..>) (S.sFromIntegral i) d
-  (.>) (SD d) (SD d') = (S..>) d d'
+  (.>) (SyI i) (SyI i') = (S..>) i i'
+  (.>) (SyD d) (SyI i)  = (S..>) d (S.sFromIntegral i)
+  (.>) (SyI i) (SyD d)  = (S..>) (S.sFromIntegral i) d
+  (.>) (SyD d) (SyD d') = (S..>) d d'
 
-instance Prim S.SBool SNum where
-  (.<) (SI i) (SI i') = (S..<) i i'
-  (.<) (SD d) (SI i)  = (S..<) d (S.sFromIntegral i)
-  (.<) (SI i) (SD d)  = (S..<) (S.sFromIntegral i) d
-  (.<) (SD d) (SD d') = (S..<) d d'
+instance Prim S.SBool SymNum where
+  (.<) (SyI i) (SyI i') = (S..<) i i'
+  (.<) (SyD d) (SyI i)  = (S..<) d (S.sFromIntegral i)
+  (.<) (SyI i) (SyD d)  = (S..<) (S.sFromIntegral i) d
+  (.<) (SyD d) (SyD d') = (S..<) d d'
 
-  (.<=) (SI i) (SI i') = (S..<=) i i'
-  (.<=) (SD d) (SI i)  = (S..<=) d (S.sFromIntegral i)
-  (.<=) (SI i) (SD d)  = (S..<=) (S.sFromIntegral i) d
-  (.<=) (SD d) (SD d') = (S..<=) d d'
+  (.<=) (SyI i) (SyI i') = (S..<=) i i'
+  (.<=) (SyD d) (SyI i)  = (S..<=) d (S.sFromIntegral i)
+  (.<=) (SyI i) (SyD d)  = (S..<=) (S.sFromIntegral i) d
+  (.<=) (SyD d) (SyD d') = (S..<=) d d'
 
-  (.>=) (SI i) (SI i') = (S..>=) i i'
-  (.>=) (SD d) (SI i)  = (S..>=) d (S.sFromIntegral i)
-  (.>=) (SI i) (SD d)  = (S..>=) (S.sFromIntegral i) d
-  (.>=) (SD d) (SD d') = (S..>=) d d'
+  (.>=) (SyI i) (SyI i') = (S..>=) i i'
+  (.>=) (SyD d) (SyI i)  = (S..>=) d (S.sFromIntegral i)
+  (.>=) (SyI i) (SyD d)  = (S..>=) (S.sFromIntegral i) d
+  (.>=) (SyD d) (SyD d') = (S..>=) d d'
 
-  (.>) (SI i) (SI i') = (S..>) i i'
-  (.>) (SD d) (SI i)  = (S..>) d (S.sFromIntegral i)
-  (.>) (SI i) (SD d)  = (S..>) (S.sFromIntegral i) d
-  (.>) (SD d) (SD d') = (S..>) d d'
+  (.>) (SyI i) (SyI i') = (S..>) i i'
+  (.>) (SyD d) (SyI i)  = (S..>) d (S.sFromIntegral i)
+  (.>) (SyI i) (SyD d)  = (S..>) (S.sFromIntegral i) d
+  (.>) (SyD d) (SyD d') = (S..>) d d'
 
-  (.==) (SI i) (SI i') = (S..==) i i'
-  (.==) (SD d) (SI i') = (S..==) d (S.sFromIntegral i')
-  (.==) (SI i) (SD d)  = (S..==) (S.sFromIntegral i) d
-  (.==) (SD d) (SD d') = (S..==) d d'
+  (.==) (SyI i) (SyI i') = (S..==) i i'
+  (.==) (SyD d) (SyI i') = (S..==) d (S.sFromIntegral i')
+  (.==) (SyI i) (SyD d)  = (S..==) (S.sFromIntegral i) d
+  (.==) (SyD d) (SyD d') = (S..==) d d'
 
-  (./=) (SI i) (SI i') = (S../=) i i'
-  (./=) (SD d) (SI i') = (S../=) d (S.sFromIntegral i')
-  (./=) (SI i) (SD d)  = (S../=) (S.sFromIntegral i) d
-  (./=) (SD d) (SD d') = (S../=) d d'
+  (./=) (SyI i) (SyI i') = (S../=) i i'
+  (./=) (SyD d) (SyI i') = (S../=) d (S.sFromIntegral i')
+  (./=) (SyI i) (SyD d)  = (S../=) (S.sFromIntegral i) d
+  (./=) (SyD d) (SyD d') = (S../=) d d'
 
 instance Prim S.SBool S.SInt8 where
   (.<)  = (S..<)
@@ -510,6 +517,7 @@ instance Prim (Prop' d) (NExpr' d) where
 -- | conveniences
 instance (NFData a) => NFData (Prop' a)
 instance (NFData a) => NFData (NExpr' a)
+instance NFData ExRefType
 instance NFData NPrim
 instance NFData B_B
 instance NFData N_N

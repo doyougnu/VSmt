@@ -17,7 +17,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-import qualified Data.SBV         as S
+-- import qualified Data.SBV         as S
 import qualified Data.SBV.Control as C
 import qualified Data.SBV.Trans   as T
 import qualified Data.HashMap.Strict  as Map
@@ -43,26 +43,38 @@ type Ints         = Store Var T.SInt32
 type Doubles      = Store Var T.SDouble
 type Bools        = Store Var T.SBool
 
-class IxStorable elem where
-  -- type Elem store
+class IxStorable ix where
+  type Container ix :: * -> *
+  type Container ix = Map.HashMap ix -- the default to hashmap
 
-  add  :: Text.Text -> elem -> Store Text.Text elem -> Store Text.Text elem
-  -- isIn :: ix -> IxMap elem ix -> Bool
-  -- find :: ix -> IxMap elem ix -> Maybe elem
+  add  :: ix -> elem -> Container ix elem -> Container ix elem
+  isIn :: ix -> Container ix elem -> Bool
+  find :: ix -> Container ix elem -> Maybe elem
+
+instance IxStorable Text.Text where add  = Map.insert
+                                    isIn = Map.member
+                                    find = Map.lookup
 
 -- | this has that
 class Has this that where
   extract :: this -> that
   wrap    :: that -> this
 
-  on      :: (that -> that) -> this -> this
-  on f = wrap . f . extract
+  by      :: this -> (that -> that) -> this
+  by s f = wrap . f . extract $ s
 
-instance IxStorable Bool where
-  add  = Map.insert
-  -- isIn e (IxMapBool m) = Map.member e m
-  -- find k (IxMapBool m) = Map.lookup k m
+-- avoiding lens, generic-deriving dependencies
+instance Has State SolverConfig where extract s = config s
+                                      wrap    c = mempty{config = c}
 
+instance Has State Ints where extract s = ints s
+                              wrap    i = mempty{ints = i}
+
+instance Has State Doubles where extract s = doubles s
+                                 wrap    d = mempty{doubles = d}
+
+instance Has State Bools where extract s = bools s
+                               wrap    b = mempty{bools = b}
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
@@ -89,20 +101,6 @@ instance Monoid State where
                 , bools   = mempty
                 }
 
--- avoid lens, generic-deriving dependencies
-instance Has State SolverConfig where extract s = config s
-                                      wrap    c = mempty{config = c}
-
-instance Has State Ints where extract s = ints s
-                              wrap    i = mempty{ints = i}
-
-instance Has State Doubles where extract s = doubles s
-                                 wrap    d = mempty{doubles = d}
-
-instance Has State Bools where extract s = bools s
-                               wrap    b = mempty{bools = b}
-
-
 newtype SolverT m a = SolverT { runSolverT :: ReaderT State m a }
   deriving ( Functor,Applicative,Monad,MonadIO -- base
            , MonadTrans, MonadError e, St.MonadState s, MonadLogger
@@ -117,28 +115,65 @@ type Solver = SolverT Identity
 data SRef = SI T.SInt32
           | SD T.SDouble
           | SB T.SBool
+          deriving Show
 
 data IL = Unit
         | Ref SRef
         | Lit SRef
         | BOp B_B IL
         | BBOp BB_B IL  IL
-        | IBOP NN_B IL' IL'
+        | IBOp NN_B IL' IL'
         | Chc Dim Proposition Proposition
+        deriving Show
 
 data IL' = Ref' SRef
          | Lit' SRef
          | IOp N_N   IL'
          | IIOp NN_N IL' IL'
          | Chc' Dim NExpression NExpression
+         deriving Show
 
-toIL :: (T.MonadSymbolic m, St.MonadState s m, Has s Bools) => Proposition -> m IL
--- toIL :: Proposition -> Solver IL
-toIL (LitB True)  = return $! Lit $ SB S.sTrue
-toIL (LitB False) = return $! Lit $ SB S.sFalse
+-- TODO: factor out the redundant cases into a type class
+toIL :: (T.MonadSymbolic m, St.MonadState s m
+        , Has s Bools
+        , Has s Ints
+        , Has s Doubles
+        ) => Proposition -> m IL
+toIL (LitB True)  = return $! Lit $ SB T.sTrue
+toIL (LitB False) = return $! Lit $ SB T.sFalse
 toIL (RefB ref)   = do st <- St.get
-                       case Map.lookup ref $ extract st of
-                         Just x  -> x
+                       case find ref $ extract st of
+                         Just x  -> return $! Ref $ SB x
                          Nothing -> do newSym <- T.sBool (show ref)
-                                       St.modify' (on $ Map.insert ref newSym)
+                                       St.modify' (`by` add ref newSym)
                                        return $! Ref $ SB newSym
+toIL (OpB op e)  = BOp op <$> toIL e
+toIL (OpBB op l r) = do l' <- toIL l
+                        r' <- toIL r
+                        return $ BBOp op l' r'
+toIL (OpIB op l r) = do l' <- toIL' l
+                        r' <- toIL' r
+                        return $ IBOp op l' r'
+toIL (ChcB d l r)  = return $ Chc d l r
+
+toIL' :: (T.MonadSymbolic m, St.MonadState s m
+         , Has s Ints, Has s Doubles) => NExpression -> m IL'
+toIL' (LitI (I i)) = Lit' . SI <$> T.sInt32 (show i)
+toIL' (LitI (D d)) = Lit' . SD <$> T.sDouble (show d)
+toIL' (RefI ExRefTypeI a) = do st <- St.get
+                               case find a $ extract st of
+                                 Just x  -> return $! Ref' $ SI x
+                                 Nothing -> do newSym <- T.sInt32 (show a)
+                                               St.modify' (`by` add a newSym)
+                                               return $! Ref' $ SI newSym
+toIL' (RefI ExRefTypeD a) = do st <- St.get
+                               case find a $ extract st of
+                                 Just x  -> return $! Ref' $ SD x
+                                 Nothing -> do newSym <- T.sDouble (show a)
+                                               St.modify' (`by` add a newSym)
+                                               return $! Ref' $ SD newSym
+toIL' (OpI op e)                = IOp op <$> toIL' e
+toIL' (OpII op l r)    = do l' <- toIL' l
+                            r' <- toIL' r
+                            return $! IIOp op l' r'
+toIL' (ChcI d l r) = return $ Chc' d l r
