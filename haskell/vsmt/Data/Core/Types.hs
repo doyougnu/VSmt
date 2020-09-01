@@ -49,12 +49,14 @@ newtype Plain a = Plain a
 -- restricted to dimensions only. We could choose to force that the dimensions
 -- \in prop they describe but this artificially restricts the expressiveness of
 -- the system and is best left to the end-user
-newtype VariantContext = VariantContext { getVarFormula :: Prop Dim }
+newtype VariantContext = VariantContext { getVarFormula :: Prop' Dim }
   deriving (Eq,Generic,Ord,Show)
 
 -- | An SMT Program is a sequence of statements interacting with the base solver
 type Prog = Seq.Seq
-type SMTProg = Prog (Stmt (Prop Var))
+type Proposition = Prop' Var
+type NExpression = NExpr' Var
+type SMTProg = Prog (Stmt Proposition)
 
 instance Semigroup VariantContext where
   (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext (OpBB Or x y)
@@ -79,24 +81,24 @@ data SolverOp = IsSat      -- ^ call sat
 
 -- | Boolean expressions with choices, value and spine strict
 -- TODO combine using GADTS
-data Prop a
+data Prop' a
    = LitB Bool                         -- ^ boolean literals
    | RefB !a                           -- ^ Bool References
-   | OpB  B_B  !(Prop a)               -- ^ Unary Operators
-   | OpBB BB_B !(Prop a)  !(Prop a)    -- ^ Binary Operators
-   | OpIB NN_B !(NExpr a) !(NExpr a)   -- ^ SMT Arithmetic
+   | OpB  B_B  !(Prop' a)               -- ^ Unary Operators
+   | OpBB BB_B !(Prop' a)  !(Prop' a)    -- ^ Binary Operators
+   | OpIB NN_B !(NExpr' a) !(NExpr' a)   -- ^ SMT Arithmetic
    -- we leave choices to be lazy for performance in selection/configuration. It
    -- may be the case that one alternative is never selected for
-   | ChcB !Dim (Prop a) (Prop a)       -- ^ Choices
+   | ChcB !Dim (Prop' a) (Prop' a)       -- ^ Choices
   deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
 -- | Numerical Expressions with Choices
-data NExpr a
+data NExpr' a
   = LitI NPrim                       -- ^ Arithmetic Literals
   | RefI  !a                         -- ^ Arithmetic References
-  | OpI  N_N  !(NExpr a)             -- ^ Unary Operators
-  | OpII NN_N !(NExpr a) !(NExpr a)  -- ^ Binary Operators
-  | ChcI !Dim  (NExpr a) (NExpr a)   -- ^ SMT Choices
+  | OpI  N_N  !(NExpr' a)             -- ^ Unary Operators
+  | OpII NN_N !(NExpr' a) !(NExpr' a)  -- ^ Binary Operators
+  | ChcI !Dim  (NExpr' a) (NExpr' a)   -- ^ SMT Choices
   deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
 -- | Types of references
@@ -142,27 +144,27 @@ infixl 7 ./, .%
 
 -- | some not so smart constructors, pinning a to string because we will be
 -- using String the most
-iRef :: IsString a => a -> NExpr a
+iRef :: IsString a => a -> NExpr' a
 iRef = RefI
 {-# INLINE iRef #-}
 
-bRef :: IsString a => a -> Prop a
+bRef :: IsString a => a -> Prop' a
 bRef = RefB
 {-# INLINE bRef #-}
 
-iLit :: Int -> NExpr a
+iLit :: Int -> NExpr' a
 iLit = LitI . I
 {-# INLINE iLit #-}
 
-dLit :: Double -> NExpr a
+dLit :: Double -> NExpr' a
 dLit = LitI . D
 {-# INLINE dLit #-}
 
-bChc :: Dim -> Prop a -> Prop a -> Prop a
+bChc :: Dim -> Prop' a -> Prop' a -> Prop' a
 bChc = ChcB
 {-# INLINE bChc #-}
 
-iChc :: Dim -> NExpr a -> NExpr a -> NExpr a
+iChc :: Dim -> NExpr' a -> NExpr' a -> NExpr' a
 iChc = ChcI
 {-# INLINE iChc #-}
 
@@ -192,7 +194,7 @@ instance Prim Bool Double where
   (.>=) = (>=)
   (.>)  = (>)
 
-instance Prim (Prop a) Int where
+instance Prim (Prop' a) Int where
   (.<)  i j = OpIB LT  (LitI $ I i) (LitI $ I j)
   (.<=) i j = OpIB LTE (LitI $ I i) (LitI $ I j)
   (.==) i j = OpIB EQ  (LitI $ I i) (LitI $ I j)
@@ -200,7 +202,7 @@ instance Prim (Prop a) Int where
   (.>=) i j = OpIB GTE (LitI $ I i) (LitI $ I j)
   (.>)  i j = OpIB GT  (LitI $ I i) (LitI $ I j)
 
-instance Prim (Prop a) Double where
+instance Prim (Prop' a) Double where
   (.<)  i j = OpIB LT  (LitI $ D i) (LitI $ D j)
   (.<=) i j = OpIB LTE (LitI $ D i) (LitI $ D j)
   (.==) i j = OpIB EQ  (LitI $ D i) (LitI $ D j)
@@ -391,7 +393,7 @@ instance Prim S.SBool S.SInteger where
   (.>)  = (S..>)
 
 -- | make prop mergeable so choices can use symbolic conditionals
-instance S.Mergeable (Prop a) where
+instance S.Mergeable (Prop' a) where
   symbolicMerge _ b thn els
     | Just result <- S.unliteral b = if result then thn else els
   symbolicMerge _ _ _ _ = undefined -- quite -WALL
@@ -451,7 +453,7 @@ instance Boolean b => Boolean (S.Symbolic b) where
   {-# INLINE (&&&) #-}
   {-# INLINE (|||) #-}
 
-instance Boolean (Prop a) where
+instance Boolean (Prop' a) where
   true  = LitB True
   false = LitB False
   bnot  = OpB Not
@@ -471,7 +473,7 @@ instance Boolean VariantContext where
   (==>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Impl   x y
   (<=>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB BiImpl x y
 
--- | Boilerplate to make Num (NExpr a) work out
+-- | Boilerplate to make Num (NExpr' a) work out
 instance Num NPrim where
   fromInteger = I . fromInteger
   abs = abs
@@ -482,7 +484,7 @@ instance Num NPrim where
   (*) = (*)
 
 -- | We can treat Variational integer expressions like nums
-instance Num (NExpr a) where
+instance Num (NExpr' a) where
   fromInteger = LitI . fromInteger
   abs    = OpI Abs
   negate = OpI Neg
@@ -492,11 +494,11 @@ instance Num (NExpr a) where
   (*)    = OpII Mult
 
 -- | the other num instances
-instance PrimN (NExpr a) where
+instance PrimN (NExpr' a) where
   (./) = OpII Div
   (.%) = OpII Mod
 
-instance Prim (Prop d) (NExpr d) where
+instance Prim (Prop' d) (NExpr' d) where
   (.<)  = OpIB LT
   (.<=) = OpIB LTE
   (.==) = OpIB EQ
@@ -506,8 +508,8 @@ instance Prim (Prop d) (NExpr d) where
 
 
 -- | conveniences
-instance (NFData a) => NFData (Prop a)
-instance (NFData a) => NFData (NExpr a)
+instance (NFData a) => NFData (Prop' a)
+instance (NFData a) => NFData (NExpr' a)
 instance NFData NPrim
 instance NFData B_B
 instance NFData N_N
