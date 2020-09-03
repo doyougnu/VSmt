@@ -16,21 +16,24 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE LambdaCase                 #-}
 
 module Data.Solver where
 
 import           Control.Monad.Except       (MonadError)
 import           Control.Monad.Reader       (ReaderT)
 import qualified Control.Monad.State.Strict as St (MonadState, get, modify')
-import           Data.Functor.Identity      (Identity)
+
 import qualified Data.HashMap.Strict        as Map
 import qualified Data.SBV                   as S
+import           Data.SBV.Internals         (SolverContext(..))
 import qualified Data.SBV.Control           as C
 import qualified Data.SBV.Trans             as T
-import           Prelude                    hiding (EQ, GT, LT)
--- import Control.Monad.Trans         (MonadIO(liftIO), MonadTrans(lift))
-import           Control.Monad.Logger       (MonadLogger)
-import           Control.Monad.Trans        (MonadIO, MonadTrans)
+
+import           Prelude                    hiding (EQ, GT, LT, log)
+import           Control.Monad.Logger       (MonadLogger, logDebug)
+import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
 import           Data.Maybe                 (fromJust)
 import qualified Data.Text                  as Text
 
@@ -38,11 +41,15 @@ import qualified Data.Text                  as Text
 import           Data.Core.Result
 import           Data.Core.Types
 
+------------------------------ Template Haskell --------------------------------
+log :: MonadLogger m => Text.Text -> m ()
+log = $(logDebug)
+
+------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we must
 -- use an actual data structure here because we need set-like operations
 type Store = Map.HashMap
 
-type SolverConfig = Store Dim Bool
 type Ints         = Store Var T.SInt32
 type Doubles      = Store Var T.SDouble
 type Bools        = Store Var T.SBool
@@ -76,8 +83,8 @@ class Has this that where
   by s f = wrap . f . extract $ s
 
 -- avoiding lens, generic-deriving dependencies
-instance Has State SolverConfig where extract s = config s
-                                      wrap    c = mempty{config = c}
+instance Has State VariantContext where extract s = config s
+                                        wrap    c = mempty{config = c}
 
 instance Has State Ints where extract s = ints s
                               wrap    i = mempty{ints = i}
@@ -91,7 +98,7 @@ instance Has State Bools where extract s = bools s
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
 data State = State { result  :: Result Var
-                   , config  :: SolverConfig
+                   , config  :: VariantContext
                    , ints    :: Ints
                    , doubles :: Doubles
                    , bools   :: Bools
@@ -121,7 +128,18 @@ newtype SolverT m a = SolverT { runSolverT :: ReaderT State m a }
 
 instance C.Fresh (SolverT m) a where fresh = C.fresh
 
-type Solver = SolverT Identity
+-- | Unfortunately we have to write this one by hand. This type class tightly
+-- couples use to SBV and is the mechanism to constrain things in the solver
+instance (Monad m, SolverContext m) => SolverContext (SolverT m) where
+  constrain       = lift . T.constrain
+  softConstrain   = lift . T.softConstrain
+  setOption       = lift . S.setOption
+  namedConstraint = (lift .) . T.namedConstraint
+  addAxiom        = (lift .) . T.addAxiom
+  contextState    = lift contextState
+  constrainWithAttribute = (lift .) . T.constrainWithAttribute
+
+type Solver = SolverT C.Query
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -307,6 +325,10 @@ toIL' (ChcI d l r) = return $ Chc' d l r
 -------------------------------- Accumulation -----------------------------------
 newtype VarCore = VarCore IL
 
+-- | Helper function to wrap an IL into a variational core
+intoCore :: IL -> VarCore
+intoCore = VarCore
+
 -- | drive negation down to the leaves as much as possible
 driveNotDown :: IL -> IL
 driveNotDown (Ref b)     = Ref (bnot b)
@@ -382,3 +404,77 @@ accumulate' (IOp o e)  = accumulate' $ IOp o (accumulate' e)
 accumulate' (IIOp o l r) = let l' = accumulate' l
                                r' = accumulate' r in
                              accumulate' (IIOp o l' r')
+
+-------------------------------- Evaluation -----------------------------------
+toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
+toSolver a = constrain a >> (return $! intoCore Unit)
+
+-- | Evaluation will remove plain terms when legal to do so, "sending" these
+-- terms to the solver to reduce the size of the variational core
+evaluate :: (Monad m, MonadLogger m, SolverContext m) => IL -> m VarCore
+  -- computation rules
+evaluate Unit     = return $! intoCore Unit
+evaluate (Ref b)  = toSolver b
+evaluate x@Chc {} = return $! intoCore x
+  -- bools
+evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
+evaluate (BBOp And  (Ref l) (Ref r)) = toSolver $! l &&& r
+evaluate (BBOp Or   (Ref l) (Ref r)) = toSolver $! l ||| r
+evaluate (BBOp Impl (Ref l) (Ref r)) = toSolver $! l ==> r
+evaluate (BBOp Eqv  (Ref l) (Ref r)) = toSolver $! l <=> r
+evaluate (BBOp XOr  (Ref l) (Ref r)) = toSolver $! l <+> r
+  -- numerics
+evaluate (IBOp LT  (Ref' l) (Ref' r)) = toSolver $! l .< r
+evaluate (IBOp LTE (Ref' l) (Ref' r)) = toSolver $! l .<= r
+evaluate (IBOp EQ  (Ref' l) (Ref' r)) = toSolver $! l .== r
+evaluate (IBOp NEQ (Ref' l) (Ref' r)) = toSolver $! l ./= r
+evaluate (IBOp GT  (Ref' l) (Ref' r)) = toSolver $! l .>  r
+evaluate (IBOp GTE (Ref' l) (Ref' r)) = toSolver $! l .>= r
+  -- choices
+evaluate x@(BBOp _ Chc {}  Chc {})   = return $! intoCore x
+evaluate x@(BBOp _ (Ref _) Chc {})   = return $! intoCore x
+evaluate x@(BBOp _ Chc {} (Ref _))   = return $! intoCore x
+evaluate x@(IBOp _ Chc' {} Chc' {})  = return $! intoCore x
+evaluate x@(IBOp _ (Ref' _) Chc' {}) = return $! intoCore x
+evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
+  -- congruence cases
+evaluate (BBOp And l Unit)      = evaluate l
+evaluate (BBOp And Unit r)      = evaluate r
+evaluate (BBOp And l x@(Ref _)) = evaluate x >> evaluate l
+evaluate (BBOp And x@(Ref _) r) = evaluate x >> evaluate r
+evaluate (IBOp op l r)        = evaluate $! IBOp op (evaluate' l) (evaluate' r)
+
+  -- accumulation cases
+evaluate x@(BOp Not _)  = evaluate $ accumulate x
+evaluate (BBOp And l r) = do (VarCore l') <- evaluate l
+                             (VarCore r') <- evaluate r
+                             evaluate $! BBOp And l' r'
+evaluate (BBOp op l r)  = evaluate $! BBOp op (accumulate l) (accumulate r)
+
+
+evaluate' :: IL' -> IL'
+evaluate' x@(Ref' _)                    = x
+evaluate' x@Chc' {}                     = x
+evaluate' (IOp Neg   (Ref' n))          = Ref' $! negate n
+evaluate' (IOp Abs   (Ref' n))          = Ref' $! abs n
+evaluate' (IOp Sign  (Ref' n))          = Ref' $! signum n
+evaluate' (IIOp Add  (Ref' l) (Ref' r)) = Ref' $! l + r
+evaluate' (IIOp Sub  (Ref' l) (Ref' r)) = Ref' $! l - r
+evaluate' (IIOp Mult (Ref' l) (Ref' r)) = Ref' $! l * r
+evaluate' (IIOp Div  (Ref' l) (Ref' r)) = Ref' $! l ./ r
+evaluate' (IIOp Mod  (Ref' l) (Ref' r)) = Ref' $! l .% r
+  -- choices
+evaluate' (IOp op (Chc' d l r))         = Chc' d (OpI op l) (OpI op r)
+evaluate' x@(IIOp _ Chc' {} Chc' {})    = x
+evaluate' x@(IIOp _ (Ref' _) Chc' {})   = x
+evaluate' x@(IIOp _ Chc' {} (Ref' _))   = x
+  -- accumulation rules
+evaluate' (IOp o e)  = evaluate' $! IOp o (accumulate' e)
+evaluate' (IIOp o l r) = let l' = accumulate' l
+                             r' = accumulate' r in
+                             evaluate' $! accumulate' (IIOp o l' r')
+
+------------------------- Removing Choices -------------------------------------
+-- choose :: (Has s VariantContext, MonadState m s, Monad m, SolverContext m) =>
+--   VarCore -> m ()
+-- choose (VarCore Unit) =
