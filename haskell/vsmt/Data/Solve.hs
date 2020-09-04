@@ -79,21 +79,25 @@ class Has this that where
   extract :: this -> that
   wrap    :: that -> this
 
-  by      :: this -> (that -> that) -> this
-  by s f = wrap . f . extract $ s
+  -- this `by` that
+  by :: this -> (that -> that) -> this
+  by this f = wrap . f . extract $ this
 
 -- avoiding lens, generic-deriving dependencies
-instance Has State VariantContext where extract s = config s
+instance Has State VariantContext where extract c = config c
                                         wrap    c = mempty{config = c}
 
-instance Has State Ints where extract s = ints s
+instance Has State Ints where extract i = ints i
                               wrap    i = mempty{ints = i}
 
-instance Has State Doubles where extract s = doubles s
+instance Has State Doubles where extract d = doubles d
                                  wrap    d = mempty{doubles = d}
 
-instance Has State Bools where extract s = bools s
+instance Has State Bools where extract b = bools b
                                wrap    b = mempty{bools = b}
+
+instance Has State (Result Var) where extract r = result r
+                                      wrap    r = mempty{result=r}
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
@@ -323,6 +327,15 @@ toIL' (OpII op l r)    = do l' <- toIL' l
 toIL' (ChcI d l r) = return $ Chc' d l r
 
 -------------------------------- Accumulation -----------------------------------
+-- For both evaluation and accumulation we implement the functions in a verbose
+-- way to aid the code generator. This is likely not necessary but one missed
+-- INLINE could mean a large decrease in performance, because evaluation and
+-- accumulation are both extremely hot code we want to make them as fast as
+-- possible
+
+-- | A variational core is a partially evaluated AST in the IL language. The
+-- goal is to reduce as much as possible all plain terms leaving only symbolic
+-- references, choices and logical connectives
 newtype VarCore = VarCore IL
 
 -- | Helper function to wrap an IL into a variational core
@@ -410,7 +423,8 @@ toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
 toSolver a = constrain a >> (return $! intoCore Unit)
 
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
--- terms to the solver to reduce the size of the variational core
+-- terms to the solver, replacing them to Unit to reduce the size of the
+-- variational core
 evaluate :: (Monad m, MonadLogger m, SolverContext m) => IL -> m VarCore
   -- computation rules
 evaluate Unit     = return $! intoCore Unit
@@ -475,6 +489,15 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
                              evaluate' $! accumulate' (IIOp o l' r')
 
 ------------------------- Removing Choices -------------------------------------
--- choose :: (Has s VariantContext, MonadState m s, Monad m, SolverContext m) =>
---   VarCore -> m ()
--- choose (VarCore Unit) =
+store :: (St.MonadState s m, Has s (Result Var)) => Result Var -> m ()
+store r = St.modify' (`by` (<>) r)
+
+choose :: ( Has s (Result Var)
+          , Has s VariantContext
+          , St.MonadState s m
+          , MonadIO m
+          , Monad m
+          , SolverContext m
+          , C.MonadQuery m) => VarCore -> m ()
+choose (VarCore Unit) = St.get >>= getResult . extract >>= store
+choose _ = return ()
