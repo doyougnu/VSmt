@@ -24,13 +24,15 @@ module Data.Core.Result where
 
 import           Control.Monad.IO.Class (MonadIO)
 import           Data.Data              (Typeable)
-import qualified Data.SBV               as S
+import           Data.Hashable          (Hashable)
+import           Data.Map               (toList)
 import qualified Data.SBV.Control       as C
 import qualified Data.SBV.Internals     as I
+import qualified Data.SBV.Trans         as S
 import qualified Data.SBV.Trans.Control as T
 import           Data.Text              (Text)
 
-import qualified Data.Map.Strict        as M
+import qualified Data.HashMap.Strict    as M
 import           Data.String            (IsString, fromString)
 import           GHC.Generics           (Generic)
 
@@ -50,18 +52,18 @@ newtype ResultFormula a = ResultFormula [(VariantContext, a)]
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
 -- cleaner implementation on our end.
-type VariableMap d = M.Map d (ResultFormula I.CV)
+type VariableMap d = M.HashMap d (ResultFormula I.CV)
 
 data Result d = Result { variables :: VariableMap d
                        , satResult :: VariantContext
                        }
 
-instance Ord d => Semigroup (Result d) where
+instance (Eq d, Hashable d) => Semigroup (Result d) where
   (<>) Result {..} Result{variables=v,satResult=s} =
     Result { variables=variables <> v
            , satResult=satResult <> s}
 
-instance Ord d => Monoid (Result d) where
+instance (Eq d, Hashable d) => Monoid (Result d) where
   mempty = Result{variables=mempty
                  ,satResult=mempty}
   mappend = (<>)
@@ -72,7 +74,7 @@ onVariables f Result{..} = Result{variables=f variables, satResult}
 onSatResult :: (VariantContext -> VariantContext) -> Result d -> Result d
 onSatResult f Result{..} = Result{variables, satResult=f satResult}
 
-insertToVariables :: Ord d => d -> ResultFormula I.CV -> Result d -> Result d
+insertToVariables :: Var -> ResultFormula I.CV -> Result Var -> Result Var
 insertToVariables k v = onVariables (M.insertWith mappend k v)
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
@@ -105,8 +107,7 @@ getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m, Ord d, Show d, IsString d) =>
-  VariantContext -> m (Result d)
+getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m (Result Var)
 getResult vf =
   do model <- getVSMTModel
      return $!
@@ -115,7 +116,7 @@ getResult vf =
         -- when satisfiable we get the model dictionary, turn it into a
         -- result map and then insert the config proposition that created the
         -- satisfiable result into the __Sat element of the map
-           toResMap . S.getModelDictionary $! m
+           toResMap . M.fromList . toList . S.getModelDictionary $! m
       -- (S.Unsatisfiable _ unsatCore) ->
         -- we apply f to True here because in the case of an unsat we want to
         -- save the proposition that produced the unsat, if we applied to
