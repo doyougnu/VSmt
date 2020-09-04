@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : Data.Core.Result
@@ -10,30 +9,30 @@
 -- Result module implementing variational smt models for the vsmt library
 -----------------------------------------------------------------------------
 
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE DeriveDataTypeable         #-}
+{-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE ExistentialQuantification  #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE NamedFieldPuns #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RankNTypes                 #-}
+{-# LANGUAGE RecordWildCards            #-}
 
 module Data.Core.Result where
 
-import           Data.Data        (Typeable)
-import           Data.Text        (Text)
-import qualified Data.SBV         as S
-import qualified Data.SBV.Control as C
-import qualified Data.SBV.Internals as I
-import qualified Data.SBV.Trans.Control as T
 import           Control.Monad.IO.Class (MonadIO)
+import           Data.Data              (Typeable)
+import qualified Data.SBV               as S
+import qualified Data.SBV.Control       as C
+import qualified Data.SBV.Internals     as I
+import qualified Data.SBV.Trans.Control as T
+import           Data.Text              (Text)
 
-import           GHC.Generics     (Generic)
-import qualified Data.Map.Strict as M
-import           Data.String (fromString, IsString())
+import qualified Data.Map.Strict        as M
+import           Data.String            (IsString, fromString)
+import           GHC.Generics           (Generic)
 
 import           Data.Core.Types
 
@@ -85,24 +84,10 @@ isSat :: C.Query Bool
 isSat = do cs <- C.checkSat
            return $! case cs of
                        C.Sat -> True
-                       _   -> False
-
--- getResult :: Resultable d => ResultProp d -> Query (Result d)
--- getResult = getResultWith . dispatchProp
--- {-# INLINE getResult #-}
+                       _     -> False
 
 test :: IO ()
 test = S.runSMT $
-  do x <- S.sInteger "x"
-     y <- S.sDouble "y"
-     C.query $
-       do S.constrain $ x .> 4
-          S.constrain $ y .< 4
-          res <- C.getSMTResult
-          C.io $ print $ S.getModelDictionary res
-
-test2 :: IO ()
-test2 = S.runSMT $
   do x <- S.sInteger "x"
      y <- S.sDouble "y"
      C.query $
@@ -113,49 +98,13 @@ test2 = S.runSMT $
           C.io $ print $ res'
 
 -- >>> test
--- fromList [("x",5 :: Integer),("y",5.0e-324 :: Double)]
-
--- >>> test2
 -- fromList [("x",ResultFormula [(VariantContext {getVarFormula = RefB "foo"},5 :: Integer)]),("y",ResultFormula [(VariantContext {getVarFormula = RefB "foo"},5.0e-324 :: Double)])]
 
--- >>> :t S.ite true (S.sInt8 "x") (S.sInt8 "y")
--- <interactive>:1:1-38: error:
---     * No instance for (S.Mergeable (S.Symbolic S.SInt8))
---         arising from a use of `S.ite'
---     * In the expression: S.ite true (S.sInt8 "x") (S.sInt8 "y")
--- prep :: S.Symbolic (S.SBool, S.SBool, S.SInteger)
--- prep = do result <- S.sInteger "result"
---           a <- S.sBool "a"
---           b <- S.sBool "b"
---           return (a, b, result)
-
-
--- t1 :: (S.SBool, S.SBool, S.SInteger) -> S.Symbolic (S.SBool, S.SBool, S.SInteger)
--- t1 x@(a, b, result) = S.ite (a &&& b) (result .== 1) false
-
--- t2 :: (S.SBool, S.SBool, S.SInteger) -> S.Symbolic (S.SBool, S.SBool, S.SInteger)
--- t2 x@(a,b,result) = S.ite (a &&& (bnot b)) (result .== 2)
-
--- question :: (S.SBool, S.SBool, S.SInteger) -> S.Symbolic ()
--- question x@(a,b,result) = return () -- S.constrain $ (result .> 0) &&& (result .< 5)
-
--- >>> S.allSat $ prep >>= t3 >>= question
--- <interactive>:9:2-9: error:
---     Not in scope: `S.allSat'
---     No module named `S' is imported.
-
--- | a mapping keeping the config and the unsatisfiable core of the config; used
--- in the case of an usat result
--- newtype UnSatResult d = UnSatResult (M.Map (ResultProp d) UnSatCore)
---                       deriving (Eq,Show,Generic,Semigroup,Monoid)
-
--- newtype Result d = Result (ResultMap d, UnSatResult d)
---                  deriving (Eq,Show,Generic,Semigroup,Monoid)
-
-
+-- | Generate a VSMT model
 getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
+-- | Get a VSMT model in any supported monad.
 getResult :: (MonadIO m, T.MonadQuery m, Ord d, Show d, IsString d) =>
   VariantContext -> m (Result d)
 getResult vf =
