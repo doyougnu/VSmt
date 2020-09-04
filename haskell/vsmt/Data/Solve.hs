@@ -489,8 +489,8 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
                              evaluate' $! accumulate' (IIOp o l' r')
 
 ------------------------- Removing Choices -------------------------------------
-store :: (St.MonadState s m, Has s (Result Var)) => Result Var -> m ()
-store r = St.modify' (`by` (<>) r)
+store :: (St.MonadState s m, Has s that, Semigroup that) => that -> m ()
+store = St.modify' . flip by . (<>)
 
 choose :: ( Has s (Result Var)
           , Has s VariantContext
