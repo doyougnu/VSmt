@@ -18,21 +18,22 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE OverloadedStrings          #-}
 
-module Data.Solver where
+module Data.Solve where
 
 import           Control.Monad.Except       (MonadError)
-import           Control.Monad.Reader       (ReaderT)
-import qualified Control.Monad.State.Strict as St (MonadState, get, modify')
+-- import           Control.Monad.Reader       (ReaderT,MonadReader(..))
+import qualified Control.Monad.State.Strict as St (MonadState, StateT, get, modify',runStateT)
 
 import qualified Data.HashMap.Strict        as Map
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext(..))
-import qualified Data.SBV.Control           as C
+import qualified Data.SBV.Trans.Control     as C
 import qualified Data.SBV.Trans             as T
 
 import           Prelude                    hiding (EQ, GT, LT, log)
-import           Control.Monad.Logger       (MonadLogger, logDebug)
+import           Control.Monad.Logger       (MonadLogger(..), LoggingT, runStdoutLoggingT, logDebug)
 import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
 import           Data.Maybe                 (fromJust)
 import qualified Data.Text                  as Text
@@ -44,6 +45,29 @@ import           Data.Core.Types
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
+
+
+------------------------------ Api ---------------------------------------------
+findVCore :: (Monad m, MonadLogger m, SolverContext m) => IL -> m VarCore
+findVCore = evaluate
+
+solution :: (St.MonadState State m, Has (Result Var)) => m (Result Var)
+solution = extract <$> St.get
+
+solve :: IL -> Solver (Result Var)
+solve i = findVCore i >>= choose >> solution
+
+foo :: Proposition
+foo = bRef "foo"
+
+-- >>> (toIL foo) >>= solve >>= run mempty
+-- <interactive>:6094:27-36: error:
+--     • Couldn't match type ‘IO’ with ‘SolverT (LoggingT C.Query)’
+--       Expected type: Result Var -> SolverT (LoggingT C.Query) (a, State)
+--         Actual type: Solver a -> IO (a, State)
+--     • In the second argument of ‘(>>=)’, namely ‘run mempty’
+--       In the expression: (toIL foo) >>= solve >>= run mempty
+--       In an equation for ‘it’: it = (toIL foo) >>= solve >>= run mempty
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we must
@@ -75,29 +99,36 @@ instance IxStorable Text.Text where add  = Map.insert
 
 
 -- | this has that
-class Has this that where
-  extract :: this -> that
-  wrap    :: that -> this
+class Has that where
+  type Contains that
+  type Contains that = State
+  extract :: Contains that -> that
+  wrap    :: that -> Contains that
 
   -- this `by` that
-  by :: this -> (that -> that) -> this
+  by :: Contains that -> (that -> that) -> Contains that
   by this f = wrap . f . extract $ this
 
 -- avoiding lens, generic-deriving dependencies
-instance Has State VariantContext where extract c = config c
-                                        wrap    c = mempty{config = c}
+instance Has VariantContext where
+  extract   = config
+  wrap    c = mempty{config = c}
 
-instance Has State Ints where extract i = ints i
-                              wrap    i = mempty{ints = i}
+instance Has Ints where
+  extract   = ints
+  wrap    i = mempty{ints = i}
 
-instance Has State Doubles where extract d = doubles d
-                                 wrap    d = mempty{doubles = d}
+instance Has Doubles where
+  extract   = doubles
+  wrap    d = mempty{doubles = d}
 
-instance Has State Bools where extract b = bools b
-                               wrap    b = mempty{bools = b}
+instance Has Bools where
+  extract   = bools
+  wrap    b = mempty{bools = b}
 
-instance Has State (Result Var) where extract r = result r
-                                      wrap    r = mempty{result=r}
+instance Has (Result Var) where
+  extract   = result
+  wrap    r = mempty{result=r}
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
@@ -124,13 +155,15 @@ instance Monoid State where
                 , bools   = mempty
                 }
 
-newtype SolverT m a = SolverT { runSolverT :: ReaderT State m a }
+-- | A solver is just a reader over a solver enabled monad. The reader
+-- maintains information during the variational execution, such as
+-- configuration, variable stores
+newtype SolverT m a = SolverT { runSolverT :: St.StateT State m a }
   deriving ( Functor,Applicative,Monad,MonadIO -- base
-           , MonadTrans, MonadError e, St.MonadState s, MonadLogger
-           , T.MonadSymbolic, C.MonadQuery
+           , MonadTrans, MonadError e, MonadLogger
+           , St.MonadState State, T.MonadSymbolic, C.MonadQuery
            )
 
-instance C.Fresh (SolverT m) a where fresh = C.fresh
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
@@ -143,7 +176,30 @@ instance (Monad m, SolverContext m) => SolverContext (SolverT m) where
   contextState    = lift contextState
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
-type Solver = SolverT C.Query
+instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
+  constrain       = lift . T.constrain
+  softConstrain   = lift . T.softConstrain
+  setOption       = lift . S.setOption
+  namedConstraint = (lift .) . T.namedConstraint
+  addAxiom        = (lift .) . T.addAxiom
+  contextState    = lift contextState
+  constrainWithAttribute = (lift .) . T.constrainWithAttribute
+
+-- TODO use standalone deriving + deriving via
+instance MonadLogger m => MonadLogger (C.QueryT m) where monadLoggerLog = monadLoggerLog
+instance C.MonadQuery m => C.MonadQuery (LoggingT m) where queryState = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv = lift T.symbolicEnv
+
+-- | A solver type enabled with query operations and logging
+type Solver = SolverT (LoggingT C.Query)
+
+runSolver :: State -> SolverT m a -> m (a, State)
+runSolver s = flip St.runStateT s . runSolverT
+
+-- TODO change to log to a log file
+-- TODO run function which does no logging
+run :: State -> Solver a -> IO (a, State)
+run s = T.runSMT . C.query . runStdoutLoggingT . runSolver s
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -282,10 +338,10 @@ data IL' = Ref' NRef
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
-toIL :: (T.MonadSymbolic m, St.MonadState s m
-        , Has s Bools
-        , Has s Ints
-        , Has s Doubles
+toIL :: (T.MonadSymbolic m, St.MonadState State m
+        , Has Bools
+        , Has Ints
+        , Has Doubles
         ) => Proposition -> m IL
 toIL (LitB True)  = return $! Ref T.sTrue
 toIL (LitB False) = return $! Ref T.sFalse
@@ -304,8 +360,8 @@ toIL (OpIB op l r) = do l' <- toIL' l
                         return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
-toIL' :: (T.MonadSymbolic m, St.MonadState s m
-         , Has s Ints, Has s Doubles) => NExpression -> m IL'
+toIL' :: (T.MonadSymbolic m, St.MonadState State m
+         , Has Ints, Has Doubles) => NExpression -> m IL'
 toIL' (LitI (I i)) = Ref' . SI <$> T.sInt32 (show i)
 toIL' (LitI (D d)) = Ref' . SD <$> T.sDouble (show d)
 toIL' (RefI ExRefTypeI a) = do st <- St.get
@@ -489,12 +545,12 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
                              evaluate' $! accumulate' (IIOp o l' r')
 
 ------------------------- Removing Choices -------------------------------------
-store :: (St.MonadState s m, Has s that, Semigroup that) => that -> m ()
+store :: (St.MonadState (Contains that) m, Has that, Semigroup that) => that -> m ()
 store = St.modify' . flip by . (<>)
 
-choose :: ( Has s (Result Var)
-          , Has s VariantContext
-          , St.MonadState s m
+choose :: ( Has (Result Var)
+          , Has VariantContext
+          , St.MonadState State m
           , MonadIO m
           , Monad m
           , SolverContext m

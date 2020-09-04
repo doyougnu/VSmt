@@ -17,12 +17,10 @@ Build-Type:    Simple
 Extra-Source-Files: INSTALL, README.md, COPYRIGHT, CHANGES.md
 
 library
-  exposed-modules: Data.VSMT
-                 , Data.Core.Core
+  exposed-modules: Data.Core.Core
                  , Data.Core.Types
                  , Data.Core.Result
                  , Data.Solve
-                 , Data.VCore
   build-depends: base
                , bifunctors
                , containers >= 0.6.0.1
@@ -90,7 +88,7 @@ Test-Suite VSMTTest
                     TemplateHaskell
                     TupleSections
                     TypeApplications
-  Build-depends : base >= 4.11, vsmt, tasty, tasty-golden, tasty-hunit, tasty-quickcheck, QuickCheck
+  Build-depends : base >= 4.11, vsmt, tasty, tasty-golden, tasty-quickcheck, QuickCheck, tasty-hspec
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   -- Other-modules   : Utils.VSMTTestFramework

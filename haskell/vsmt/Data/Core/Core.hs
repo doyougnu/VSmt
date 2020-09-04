@@ -11,8 +11,6 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -33,7 +31,7 @@ import Data.Core.Types
 class Configurable conf p where
   configure :: conf -> p -> p
 
-instance Configurable Config (Prop a) where
+instance Configurable Config (Prop' a) where
   configure conf (ChcB dim l r) | conf dim  = configure conf l
                                 | otherwise = configure conf r
 
@@ -42,7 +40,7 @@ instance Configurable Config (Prop a) where
   configure conf (OpIB op l r) = OpIB op (configure conf l) (configure conf r)
   configure _ x = x
 
-instance Configurable Config (NExpr a) where
+instance Configurable Config (NExpr' a) where
   configure conf (ChcI dim l r) | conf dim  = configure conf l
                                 | otherwise = configure conf r
 
@@ -50,7 +48,7 @@ instance Configurable Config (NExpr a) where
   configure conf (OpII op l r) = OpII op (configure conf l) (configure conf r)
   configure _ x = x
 
-instance Configurable PartialConfig (Prop a) where
+instance Configurable PartialConfig (Prop' a) where
   configure c@conf (ChcB dim l r) =
     case conf dim of
       Just b -> if b
@@ -63,7 +61,7 @@ instance Configurable PartialConfig (Prop a) where
   configure conf (OpIB op l r) = OpIB op (configure conf l) (configure conf r)
   configure _ x = x
 
-instance Configurable PartialConfig (NExpr a) where
+instance Configurable PartialConfig (NExpr' a) where
   configure c@conf (ChcI dim l r) =
     case conf dim of
       Just b -> if b
