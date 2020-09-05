@@ -23,20 +23,17 @@
 module Data.Solve where
 
 import           Control.Monad.Except       (MonadError)
--- import           Control.Monad.Reader       (ReaderT,MonadReader(..))
-import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
-                                                   modify', runStateT)
-
+import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
+                                             logDebug, runStdoutLoggingT)
+import qualified Control.Monad.State.Strict as St (MonadState, StateT, get, gets
+                                                   , modify', runStateT)
+import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
 import qualified Data.HashMap.Strict        as Map
+import           Data.Maybe                 (fromJust)
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext (..))
 import qualified Data.SBV.Trans             as T
 import qualified Data.SBV.Trans.Control     as C
-
-import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
-                                             logDebug, runStdoutLoggingT)
-import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
-import           Data.Maybe                 (fromJust)
 import qualified Data.Text                  as Text
 import           Prelude                    hiding (EQ, GT, LT, log)
 
@@ -57,7 +54,7 @@ logWith msg value = log $ msg <> sep <> Text.pack (show value)
 findVCore :: IL -> Solver VarCore
 findVCore = evaluate
 
-solution :: (St.MonadState State m, Has (Result)) => m (Result)
+solution :: (St.MonadState State m, Has Result) => m Result
 solution = extract <$> St.get
 
 -- | TODO abstract over the logging function
@@ -102,37 +99,34 @@ instance IxStorable Text.Text where add  = Map.insert
                                     adjust = Map.adjust
 
 
--- | Something which contains that has that
+-- | That which contains that has that
 class Has that where
   type Contains that
   type Contains that = State
   extract :: Contains that -> that
-  wrap    :: that -> Contains that
+  wrap    :: that -> Contains that -> Contains that
 
   -- this `by` that
   by :: Contains that -> (that -> that) -> Contains that
-  by this f = wrap . f . extract $ this
+  by this f = flip wrap this . f . extract $ this
 
 -- avoiding lens and generic-deriving dependencies
 instance Has VariantContext where
+  type Contains VariantContext = State
   extract   = config
-  wrap    c = mempty{config = c}
+  wrap    c w = w{config = c}
 
-instance Has Ints where
-  extract   = ints
-  wrap    i = mempty{ints = i}
+instance Has Ints    where extract   = ints
+                           wrap    i w = w{ints = i}
 
-instance Has Doubles where
-  extract   = doubles
-  wrap    d = mempty{doubles = d}
+instance Has Doubles where extract   = doubles
+                           wrap    d w = w{doubles = d}
 
-instance Has Bools where
-  extract   = bools
-  wrap    b = mempty{bools = b}
+instance Has Bools   where extract   = bools
+                           wrap    b w = w{bools = b}
 
-instance Has (Result) where
-  extract   = result
-  wrap    r = mempty{result=r}
+instance Has Result  where extract   = result
+                           wrap    r w = w{result=r}
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
@@ -192,9 +186,9 @@ instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
 -- TODO use standalone deriving + deriving via
-instance MonadLogger m => MonadLogger (C.QueryT m)         where monadLoggerLog = monadLoggerLog
-instance MonadLogger m => MonadLogger (T.SymbolicT m)      where monadLoggerLog = monadLoggerLog
-instance C.MonadQuery m => C.MonadQuery (LoggingT m)       where queryState     = lift C.queryState
+instance MonadLogger m     => MonadLogger (C.QueryT m)     where monadLoggerLog = monadLoggerLog
+instance MonadLogger m     => MonadLogger (T.SymbolicT m)  where monadLoggerLog = monadLoggerLog
+instance C.MonadQuery m    => C.MonadQuery (LoggingT m)    where queryState     = lift C.queryState
 instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv    = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
@@ -207,8 +201,6 @@ runSolver s = flip St.runStateT s . runSolverT
 -- TODO run function which does no logging
 run :: State -> Solver a -> IO (a, State)
 run s = S.runSMTWith S.z3{S.verbose=True} . C.query . runStdoutLoggingT . runSolver s
-
-  -- runSolverT.runSMT . C.query . runStdoutLoggingT . runSolver s
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -347,9 +339,8 @@ data IL' = Ref' NRef
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
-toIL :: (T.MonadSymbolic m, St.MonadState State m
-        , MonadLogger m
-        ) => Proposition -> m IL
+toIL :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
+     => Proposition -> m IL
 toIL (LitB True)  = return $! Ref T.sTrue
 toIL (LitB False) = return $! Ref T.sFalse
 toIL (RefB ref)   = do st <- St.get
@@ -483,8 +474,8 @@ toSolver a = do constrain a; return $! intoCore Unit
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
-evaluate :: (St.MonadState State m, Monad m, MonadLogger m, SolverContext m) =>
-  IL -> m VarCore
+evaluate :: (St.MonadState State m, Monad m, MonadLogger m, SolverContext m)
+  => IL -> m VarCore
   -- computation rules
 evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = do logWith "got reference" b
@@ -550,20 +541,36 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
                              evaluate' $! accumulate' (IIOp o l' r')
 
 ------------------------- Removing Choices -------------------------------------
-store :: (St.MonadState (Contains that) m, Has that, Semigroup that) => that -> m ()
+store :: ( St.MonadState (Contains that) m
+         , Has that
+         , Semigroup that) => that -> m ()
 store = St.modify' . flip by . (<>)
 
-choose :: ( Has (Result)
-          , Has VariantContext
-          , St.MonadState State m
-          , MonadIO m
-          , Monad m
-          , MonadLogger m
-          , SolverContext m
-          , C.MonadQuery m) => VarCore -> m ()
-choose (VarCore Unit) = log "Unit" >>
-                        do st <- St.get
-                           res <- getResult $ extract st
-                           store res
-  -- St.get >>= getResult . extract >>= store
-choose _ = log "non-unit" >> return ()
+-- choose :: ( Has Result
+--           , Has VariantContext
+--           , St.MonadState State m
+--           , MonadIO m
+--           , T.MonadSymbolic m
+--           , Monad m
+--           , MonadLogger m
+--           , SolverContext m
+--           , C.MonadQuery m) => VarCore -> m ()
+choose :: VarCore -> Solver ()
+choose (VarCore Unit) = St.get >>= getResult . extract >>= store
+
+choose (VarCore (Chc d l r)) = do conf <- St.gets extract
+                                  let l' = toIL l -- keep these lazy they may
+                                      r' = toIL r -- not be chosen
+                                  case T.sat conf >>= T.getModelValue (Text.unpack d) of
+                                    Just True -> toIL l >>= choose . VarCore
+                                    Just False -> toIL r >>= choose . VarCore
+                                    Nothing -> do let lConf = conf &&& (VariantContext $! bRef d)
+                                                      rConf = conf &&& (VariantContext $! bnot $ bRef d)
+                                                  -- left side
+                                                  C.inNewAssertionStack $
+                                                    do St.modify' (`by` const lConf)
+                                                       l' >>= evaluate >>= choose
+                                                  -- right side
+                                                  C.inNewAssertionStack $
+                                                    do St.modify' (flip by (const rConf))
+                                                       r' >>= evaluate >>= choose
