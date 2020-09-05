@@ -13,31 +13,32 @@
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE LambdaCase                 #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE TypeFamilies               #-}
 
 module Data.Solve where
 
 import           Control.Monad.Except       (MonadError)
 -- import           Control.Monad.Reader       (ReaderT,MonadReader(..))
-import qualified Control.Monad.State.Strict as St (MonadState, StateT, get, modify',runStateT)
+import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
+                                                   modify', runStateT)
 
 import qualified Data.HashMap.Strict        as Map
 import qualified Data.SBV                   as S
-import           Data.SBV.Internals         (SolverContext(..))
-import qualified Data.SBV.Trans.Control     as C
+import           Data.SBV.Internals         (SolverContext (..))
 import qualified Data.SBV.Trans             as T
+import qualified Data.SBV.Trans.Control     as C
 
-import           Prelude                    hiding (EQ, GT, LT, log)
-import           Control.Monad.Logger       (MonadLogger(..), LoggingT, runStdoutLoggingT, logDebug)
+import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
+                                             logDebug, runStdoutLoggingT)
 import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
 import           Data.Maybe                 (fromJust)
 import qualified Data.Text                  as Text
-
+import           Prelude                    hiding (EQ, GT, LT, log)
 
 import           Data.Core.Result
 import           Data.Core.Types
@@ -46,28 +47,30 @@ import           Data.Core.Types
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
 
+-- TODO custom loggers for each function, i.e., [DEBUG:EVAL]: ...
+logWith :: (MonadLogger m, Show a) => Text.Text -> a -> m ()
+logWith msg value = log $ msg <> sep <> Text.pack (show value)
+  where sep :: Text.Text
+        sep = " : "
 
 ------------------------------ Api ---------------------------------------------
-findVCore :: (Monad m, MonadLogger m, SolverContext m) => IL -> m VarCore
+findVCore :: IL -> Solver VarCore
 findVCore = evaluate
 
 solution :: (St.MonadState State m, Has (Result Var)) => m (Result Var)
 solution = extract <$> St.get
 
-solve :: IL -> Solver (Result Var)
-solve i = findVCore i >>= choose >> solution
+solve :: Proposition -> IO (Result Var, State)
+solve i = T.runSMTWith T.z3{T.verbose=True} $
+  do (il, st) <- runStdoutLoggingT $ St.runStateT (toIL i) mempty
+     C.query $ runStdoutLoggingT $ runSolver st $
+       do core <- findVCore il
+          logWith "Core" core
+          _ <- choose core
+          solution
 
 foo :: Proposition
-foo = bRef "foo"
-
--- >>> (toIL foo) >>= solve >>= run mempty
--- <interactive>:6094:27-36: error:
---     • Couldn't match type ‘IO’ with ‘SolverT (LoggingT C.Query)’
---       Expected type: Result Var -> SolverT (LoggingT C.Query) (a, State)
---         Actual type: Solver a -> IO (a, State)
---     • In the second argument of ‘(>>=)’, namely ‘run mempty’
---       In the expression: (toIL foo) >>= solve >>= run mempty
---       In an equation for ‘it’: it = (toIL foo) >>= solve >>= run mempty
+foo = (bRef "foo") &&& (bRef "var")
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we must
@@ -132,12 +135,13 @@ instance Has (Result Var) where
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
-data State = State { result  :: Result Var
-                   , config  :: VariantContext
-                   , ints    :: Ints
-                   , doubles :: Doubles
-                   , bools   :: Bools
-                   }
+data State = State
+    { result  :: Result Var
+    , config  :: VariantContext
+    , ints    :: Ints
+    , doubles :: Doubles
+    , bools   :: Bools
+    }
 
 instance Semigroup State where
   a <> b = State { result  = result  a <> result  b
@@ -189,6 +193,7 @@ instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
 instance MonadLogger m => MonadLogger (C.QueryT m) where monadLoggerLog = monadLoggerLog
 instance C.MonadQuery m => C.MonadQuery (LoggingT m) where queryState = lift C.queryState
 instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv = lift T.symbolicEnv
+instance MonadLogger m => MonadLogger (T.SymbolicT m) where monadLoggerLog = monadLoggerLog
 
 -- | A solver type enabled with query operations and logging
 type Solver = SolverT (LoggingT C.Query)
@@ -199,14 +204,16 @@ runSolver s = flip St.runStateT s . runSolverT
 -- TODO change to log to a log file
 -- TODO run function which does no logging
 run :: State -> Solver a -> IO (a, State)
-run s = T.runSMT . C.query . runStdoutLoggingT . runSolver s
+run s = S.runSMTWith S.z3{S.verbose=True} . C.query . runStdoutLoggingT . runSolver s
+
+  -- runSolverT.runSMT . C.query . runStdoutLoggingT . runSolver s
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
 
 data NRef = SI T.SInt32
-          | SD T.SDouble
-          deriving Show
+    | SD T.SDouble
+    deriving Show
 
 instance Num NRef where
   fromInteger = SI . T.literal . fromInteger
@@ -322,30 +329,29 @@ instance Prim T.SBool NRef where
 -- that will survive in the variational core are binary connectives, symbolic
 -- references and choices
 data IL = Unit
-        | Ref BRef
-        | BOp B_B IL
-        | BBOp BB_B IL  IL
-        | IBOp NN_B IL' IL'
-        | Chc Dim Proposition Proposition
-        deriving Show
+    | Ref BRef
+    | BOp B_B IL
+    | BBOp BB_B IL IL
+    | IBOp NN_B IL' IL'
+    | Chc Dim Proposition Proposition
+    deriving Show
 
 data IL' = Ref' NRef
-         | IOp N_N   IL'
-         | IIOp NN_N IL' IL'
-         | Chc' Dim NExpression NExpression
-         deriving Show
+    | IOp N_N IL'
+    | IIOp NN_N IL' IL'
+    | Chc' Dim NExpression NExpression
+    deriving Show
 
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
 toIL :: (T.MonadSymbolic m, St.MonadState State m
-        , Has Bools
-        , Has Ints
-        , Has Doubles
+        , MonadLogger m
         ) => Proposition -> m IL
 toIL (LitB True)  = return $! Ref T.sTrue
 toIL (LitB False) = return $! Ref T.sFalse
-toIL (RefB ref)   = do st <- St.get
+toIL (RefB ref)   = logWith "found ref" ref >>
+                    do st <- St.get
                        case find ref $ extract st of
                          Just x  -> return $! Ref x
                          Nothing -> do newSym <- T.sBool (show ref)
@@ -393,6 +399,7 @@ toIL' (ChcI d l r) = return $ Chc' d l r
 -- goal is to reduce as much as possible all plain terms leaving only symbolic
 -- references, choices and logical connectives
 newtype VarCore = VarCore IL
+  deriving Show
 
 -- | Helper function to wrap an IL into a variational core
 intoCore :: IL -> VarCore
@@ -476,15 +483,18 @@ accumulate' (IIOp o l r) = let l' = accumulate' l
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
-toSolver a = constrain a >> (return $! intoCore Unit)
+toSolver a = do constrain a; return $! intoCore Unit
 
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
-evaluate :: (Monad m, MonadLogger m, SolverContext m) => IL -> m VarCore
+evaluate :: (St.MonadState State m, Monad m, MonadLogger m, SolverContext m) =>
+  IL -> m VarCore
   -- computation rules
 evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = toSolver b
+evaluate (Ref b)  = do logWith "got reference" b
+                       bs <- bools <$> St.get
+                       logWith "bools" bs >> toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -553,7 +563,12 @@ choose :: ( Has (Result Var)
           , St.MonadState State m
           , MonadIO m
           , Monad m
+          , MonadLogger m
           , SolverContext m
           , C.MonadQuery m) => VarCore -> m ()
-choose (VarCore Unit) = St.get >>= getResult . extract >>= store
-choose _ = return ()
+choose (VarCore Unit) = log "Unit" >>
+                        do st <- St.get
+                           res <- getResult $ extract st
+                           store res
+  -- St.get >>= getResult . extract >>= store
+choose _ = log "non-unit" >> return ()

@@ -61,7 +61,7 @@ type SMTProg = Prog (Stmt Proposition)
 instance Semigroup VariantContext where
   (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext (OpBB Or x y)
 
-instance Monoid VariantContext where mempty = false
+instance Monoid VariantContext where mempty = VariantContext (LitB True)
                                      mappend = (<>)
 
 -- | Top level Syntax
