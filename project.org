@@ -3,6 +3,16 @@
    CLOSED: [2020-08-31 Mon 11:28]
     I had setup .dir-locals.el to do this but dante still died for some reason
 
+* Hygiene
+
+** TODO Explicit module exports
+
+** TODO continuous integration
+
+** TODO Hackage package
+
+** TODO heroku server
+
 * Variational Solver
 
 ** Performance
@@ -47,8 +57,6 @@
 ** TODO hedgehog properties vs quickcheck properties
 
 ** TODO Tasty setup and harness
-
-** TODO Setup continuous integration
 
 * Benchmarking
 

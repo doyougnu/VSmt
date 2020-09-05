@@ -1,12 +1,12 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Core.Result
+-- Module    : Data.Core.Result'
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
 -- Stability : experimental
 --
--- Result module implementing variational smt models for the vsmt library
+-- Result' module implementing variational smt models for the vsmt library
 -----------------------------------------------------------------------------
 
 {-# LANGUAGE DeriveDataTypeable         #-}
@@ -54,31 +54,33 @@ newtype ResultFormula a = ResultFormula [(VariantContext, a)]
 -- cleaner implementation on our end.
 type VariableMap d = M.HashMap d (ResultFormula I.CV)
 
-data Result d = Result { variables :: VariableMap d
-                       , satResult :: VariantContext
-                       }
+type Result = Result' Var
 
-instance (Eq d, Hashable d) => Semigroup (Result d) where
-  (<>) Result {..} Result{variables=v,satResult=s} =
-    Result { variables=variables <> v
+data Result' d = Result' { variables :: VariableMap d
+                         , satResult :: VariantContext
+                         } deriving Show
+
+instance (Eq d, Hashable d) => Semigroup (Result' d) where
+  (<>) Result' {..} Result'{variables=v,satResult=s} =
+    Result' { variables=variables <> v
            , satResult=satResult <> s}
 
-instance (Eq d, Hashable d) => Monoid (Result d) where
-  mempty = Result{variables=mempty
+instance (Eq d, Hashable d) => Monoid (Result' d) where
+  mempty = Result'{variables=mempty
                  ,satResult=mempty}
   mappend = (<>)
 
-onVariables :: (VariableMap d -> VariableMap d) -> Result d -> Result d
-onVariables f Result{..} = Result{variables=f variables, satResult}
+onVariables :: (VariableMap d -> VariableMap d) -> Result' d -> Result' d
+onVariables f Result'{..} = Result'{variables=f variables, satResult}
 
-onSatResult :: (VariantContext -> VariantContext) -> Result d -> Result d
-onSatResult f Result{..} = Result{variables, satResult=f satResult}
+onSatResult :: (VariantContext -> VariantContext) -> Result' d -> Result' d
+onSatResult f Result'{..} = Result'{variables, satResult=f satResult}
 
-insertToVariables :: Var -> ResultFormula I.CV -> Result Var -> Result Var
+insertToVariables :: Var -> ResultFormula I.CV -> Result' Var -> Result' Var
 insertToVariables k v = onVariables (M.insertWith mappend k v)
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
-insertToSat :: (Ord d, IsString d) => VariantContext -> Result d -> Result d
+insertToSat :: (Ord d, IsString d) => VariantContext -> Result' d -> Result' d
 insertToSat v = onSatResult (v `mappend`)
 
 -- | check if the current context is sat or not
@@ -107,7 +109,7 @@ getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m (Result Var)
+getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m (Result' Var)
 getResult vf =
   do model <- getVSMTModel
      return $!
@@ -126,6 +128,6 @@ getResult vf =
          _                           -> mempty
  where
    toResMap m' =
-     Result {variables = M.foldMapWithKey
+     Result' {variables = M.foldMapWithKey
               (\k a -> M.singleton (fromString k) (ResultFormula $ pure (vf, a))) m'
             ,satResult=vf}

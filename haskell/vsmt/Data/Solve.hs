@@ -53,15 +53,16 @@ logWith msg value = log $ msg <> sep <> Text.pack (show value)
   where sep :: Text.Text
         sep = " : "
 
------------------------------- Api ---------------------------------------------
+------------------------------ Internal Api -------------------------------------
 findVCore :: IL -> Solver VarCore
 findVCore = evaluate
 
-solution :: (St.MonadState State m, Has (Result Var)) => m (Result Var)
+solution :: (St.MonadState State m, Has (Result)) => m (Result)
 solution = extract <$> St.get
 
-solve :: Proposition -> IO (Result Var, State)
-solve i = T.runSMTWith T.z3{T.verbose=True} $
+-- | TODO abstract over the logging function
+solve :: Proposition -> IO (Result, State)
+solve i = T.runSMT $
   do (il, st) <- runStdoutLoggingT $ St.runStateT (toIL i) mempty
      C.query $ runStdoutLoggingT $ runSolver st $
        do core <- findVCore il
@@ -69,8 +70,8 @@ solve i = T.runSMTWith T.z3{T.verbose=True} $
           _ <- choose core
           solution
 
-foo :: Proposition
-foo = (bRef "foo") &&& (bRef "var")
+sat :: Proposition -> IO Result
+sat = fmap fst <$> solve
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we must
@@ -101,7 +102,7 @@ instance IxStorable Text.Text where add  = Map.insert
                                     adjust = Map.adjust
 
 
--- | this has that
+-- | Something which contains that has that
 class Has that where
   type Contains that
   type Contains that = State
@@ -112,7 +113,7 @@ class Has that where
   by :: Contains that -> (that -> that) -> Contains that
   by this f = wrap . f . extract $ this
 
--- avoiding lens, generic-deriving dependencies
+-- avoiding lens and generic-deriving dependencies
 instance Has VariantContext where
   extract   = config
   wrap    c = mempty{config = c}
@@ -129,14 +130,14 @@ instance Has Bools where
   extract   = bools
   wrap    b = mempty{bools = b}
 
-instance Has (Result Var) where
+instance Has (Result) where
   extract   = result
   wrap    r = mempty{result=r}
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
 data State = State
-    { result  :: Result Var
+    { result  :: Result
     , config  :: VariantContext
     , ints    :: Ints
     , doubles :: Doubles
@@ -159,6 +160,7 @@ instance Monoid State where
                 , bools   = mempty
                 }
 
+-- TODO remove the StateT dependency for ReaderT
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
@@ -190,10 +192,10 @@ instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
 -- TODO use standalone deriving + deriving via
-instance MonadLogger m => MonadLogger (C.QueryT m) where monadLoggerLog = monadLoggerLog
-instance C.MonadQuery m => C.MonadQuery (LoggingT m) where queryState = lift C.queryState
-instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv = lift T.symbolicEnv
-instance MonadLogger m => MonadLogger (T.SymbolicT m) where monadLoggerLog = monadLoggerLog
+instance MonadLogger m => MonadLogger (C.QueryT m)         where monadLoggerLog = monadLoggerLog
+instance MonadLogger m => MonadLogger (T.SymbolicT m)      where monadLoggerLog = monadLoggerLog
+instance C.MonadQuery m => C.MonadQuery (LoggingT m)       where queryState     = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv    = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
 type Solver = SolverT (LoggingT C.Query)
@@ -350,20 +352,15 @@ toIL :: (T.MonadSymbolic m, St.MonadState State m
         ) => Proposition -> m IL
 toIL (LitB True)  = return $! Ref T.sTrue
 toIL (LitB False) = return $! Ref T.sFalse
-toIL (RefB ref)   = logWith "found ref" ref >>
-                    do st <- St.get
+toIL (RefB ref)   = do st <- St.get
                        case find ref $ extract st of
                          Just x  -> return $! Ref x
                          Nothing -> do newSym <- T.sBool (show ref)
                                        St.modify' (`by` add ref newSym)
                                        return $! Ref newSym
 toIL (OpB op e)  = BOp op <$> toIL e
-toIL (OpBB op l r) = do l' <- toIL l
-                        r' <- toIL r
-                        return $ BBOp op l' r'
-toIL (OpIB op l r) = do l' <- toIL' l
-                        r' <- toIL' r
-                        return $ IBOp op l' r'
+toIL (OpBB op l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp op l' r'
+toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
 toIL' :: (T.MonadSymbolic m, St.MonadState State m
@@ -383,9 +380,7 @@ toIL' (RefI ExRefTypeD a) = do st <- St.get
                                                St.modify' (`by` add a newSym)
                                                return $! Ref' $ SD newSym
 toIL' (OpI op e)                = IOp op <$> toIL' e
-toIL' (OpII op l r)    = do l' <- toIL' l
-                            r' <- toIL' r
-                            return $! IIOp op l' r'
+toIL' (OpII op l r)    = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r) = return $ Chc' d l r
 
 -------------------------------- Accumulation -----------------------------------
@@ -558,7 +553,7 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
 store :: (St.MonadState (Contains that) m, Has that, Semigroup that) => that -> m ()
 store = St.modify' . flip by . (<>)
 
-choose :: ( Has (Result Var)
+choose :: ( Has (Result)
           , Has VariantContext
           , St.MonadState State m
           , MonadIO m

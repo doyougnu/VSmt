@@ -88,10 +88,19 @@ Test-Suite VSMTTest
                     TemplateHaskell
                     TupleSections
                     TypeApplications
-  Build-depends : base >= 4.11, vsmt, tasty, tasty-golden, tasty-quickcheck, QuickCheck, tasty-hspec
+  Build-depends : base >= 4.11
+                  , vsmt
+                  , tasty
+                  , tasty-golden
+                  , tasty-quickcheck
+                  , QuickCheck
+                  , tasty-hspec
+                  , filepath
+                  , bytestring
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
-  -- Other-modules   : Utils.VSMTTestFramework
+  Other-modules   : Utils.VSMTTestFramework
+                  , TestSuite.Solve.Plain
 
 Benchmark VSMTBench
   type            : exitcode-stdio-1.0
