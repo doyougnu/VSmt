@@ -1,4 +1,4 @@
-{ compiler ? "ghc865" }:
+{ compiler ? "ghc884" }:
 
 let
   config = {
@@ -30,13 +30,16 @@ in
 
     vsmt-shell = pkgs.haskell.packages.${compiler}.shellFor {
       packages = p: [vsmt];
+      withIDe = true;
       buildInputs = with pkgs; [ haskellPackages.hlint
                                  haskellPackages.stylish-haskell
                                  haskellPackages.hasktags
                                  haskellPackages.apply-refact
                                  haskellPackages.hindent
+                                 haskellPackages.ghcide
                                  zlib
                                  z3
+                                 cabal-install
                                ];
     };
   }

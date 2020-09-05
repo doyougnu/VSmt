@@ -10,29 +10,31 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 module Data.Core.Types where
 
-import           Control.Monad         (liftM2)
-import           Control.DeepSeq       (NFData)
-import           Data.Text             (Text)
-import           Data.Fixed            (mod')
-import qualified Data.Sequence         as Seq
-import qualified Data.SBV              as S
-import           Data.String           (IsString)
-import           GHC.Generics          (Generic)
-import           Prelude               hiding (EQ, GT, LT, lookup)
+import           Control.DeepSeq (NFData)
+import           Control.Monad   (liftM2)
+import           Data.Fixed      (mod')
+import           Data.Hashable   (Hashable)
+import qualified Data.SBV.Trans  as S
+import qualified Data.Sequence   as Seq
+import           Data.String     (IsString)
+import           Data.Text       (Text)
+import           GHC.Generics    (Generic)
+import           Prelude         hiding (EQ, GT, LT, lookup)
 
 
 -- | A feature is a named, boolean configuration option.
 type Var = Text
-type Dim = Text
+newtype Dim = Dim Text
+  deriving (Eq,Show,Ord,NFData,Hashable)
 type Config  = Dim -> Bool
 type PartialConfig = Dim -> Maybe Bool
 
@@ -83,9 +85,9 @@ data SolverOp = IsSat      -- ^ call sat
 -- | Boolean expressions with choices, value and spine strict
 -- TODO combine using GADTS
 data Prop' a
-   = LitB Bool                         -- ^ boolean literals
-   | RefB !a                           -- ^ Bool References
-   | OpB  B_B  !(Prop' a)               -- ^ Unary Operators
+   = LitB Bool                           -- ^ boolean literals
+   | RefB !a                             -- ^ Bool References
+   | OpB  B_B  !(Prop' a)                -- ^ Unary Operators
    | OpBB BB_B !(Prop' a)  !(Prop' a)    -- ^ Binary Operators
    | OpIB NN_B !(NExpr' a) !(NExpr' a)   -- ^ SMT Arithmetic
    -- we leave choices to be lazy for performance in selection/configuration. It

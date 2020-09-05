@@ -1,12 +1,12 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Core.Result'
+-- Module    : Data.Core.Result
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
 -- Stability : experimental
 --
--- Result' module implementing variational smt models for the vsmt library
+-- Result module implementing variational smt models for the vsmt library
 -----------------------------------------------------------------------------
 
 {-# LANGUAGE DeriveDataTypeable         #-}
@@ -14,6 +14,7 @@
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts           #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE OverloadedStrings          #-}
@@ -46,8 +47,10 @@ import           Data.Core.Types
 -- You should view this as an internal datatype, in the average case this will
 -- be transformed into a Map of "variable" -> SMTLIB2 program where the SMTLIB2
 -- program will dispatch the right value based on the values of dimensions
-newtype ResultFormula a = ResultFormula [(VariantContext, a)]
-    deriving (Eq,Ord,Show,Generic,Typeable,Semigroup,Monoid,Functor)
+type SVariantContext = S.SBool
+
+newtype ResultFormula a = ResultFormula [(SVariantContext, a)]
+    deriving (Eq,Show,Generic,Typeable,Semigroup,Monoid,Functor)
 
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
@@ -57,13 +60,16 @@ type VariableMap d = M.HashMap d (ResultFormula I.CV)
 type Result = Result' Var
 
 data Result' d = Result' { variables :: VariableMap d
-                         , satResult :: VariantContext
+                         , satResult :: SVariantContext
                          } deriving Show
+
+instance Semigroup SVariantContext where (<>) = (|||)
+instance Monoid SVariantContext where mempty = false
 
 instance (Eq d, Hashable d) => Semigroup (Result' d) where
   (<>) Result' {..} Result'{variables=v,satResult=s} =
     Result' { variables=variables <> v
-           , satResult=satResult <> s}
+            , satResult=satResult <> s}
 
 instance (Eq d, Hashable d) => Monoid (Result' d) where
   mempty = Result'{variables=mempty
@@ -73,14 +79,14 @@ instance (Eq d, Hashable d) => Monoid (Result' d) where
 onVariables :: (VariableMap d -> VariableMap d) -> Result' d -> Result' d
 onVariables f Result'{..} = Result'{variables=f variables, satResult}
 
-onSatResult :: (VariantContext -> VariantContext) -> Result' d -> Result' d
+onSatResult :: (SVariantContext -> SVariantContext) -> Result' d -> Result' d
 onSatResult f Result'{..} = Result'{variables, satResult=f satResult}
 
 insertToVariables :: Var -> ResultFormula I.CV -> Result' Var -> Result' Var
 insertToVariables k v = onVariables (M.insertWith mappend k v)
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
-insertToSat :: (Ord d, IsString d) => VariantContext -> Result' d -> Result' d
+insertToSat :: (Ord d, IsString d) => SVariantContext -> Result' d -> Result' d
 insertToSat v = onSatResult (v `mappend`)
 
 -- | check if the current context is sat or not
@@ -90,26 +96,12 @@ isSat = do cs <- C.checkSat
                        C.Sat -> True
                        _     -> False
 
-test :: IO ()
-test = S.runSMT $
-  do x <- S.sInteger "x"
-     y <- S.sDouble "y"
-     C.query $
-       do S.constrain $ x .> 4
-          S.constrain $ y .< 4
-          res <- getResult $ VariantContext $ RefB "foo"
-          let res' = variables res
-          C.io $ print $ res'
-
--- >>> test
--- fromList [("x",ResultFormula [(VariantContext {getVarFormula = RefB "foo"},5 :: Integer)]),("y",ResultFormula [(VariantContext {getVarFormula = RefB "foo"},5.0e-324 :: Double)])]
-
 -- | Generate a VSMT model
 getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m (Result' Var)
+getResult :: (MonadIO m, T.MonadQuery m) => SVariantContext -> m (Result' Var)
 getResult vf =
   do model <- getVSMTModel
      return $!

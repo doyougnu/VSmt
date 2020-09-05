@@ -19,17 +19,19 @@
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 module Data.Solve where
 
 import           Control.Monad.Except       (MonadError)
 import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
                                              logDebug, runStdoutLoggingT)
-import qualified Control.Monad.State.Strict as St (MonadState, StateT, get, gets
-                                                   , modify', runStateT)
-import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
+import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
+                                                   gets, modify', runStateT)
+import           Control.Monad.Trans        (MonadIO, MonadTrans, lift, liftIO)
 import qualified Data.HashMap.Strict        as Map
 import           Data.Maybe                 (fromJust)
+
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext (..))
 import qualified Data.SBV.Trans             as T
@@ -58,8 +60,10 @@ solution :: (St.MonadState State m, Has Result) => m Result
 solution = extract <$> St.get
 
 -- | TODO abstract over the logging function
-solve :: Proposition -> IO (Result, State)
-solve i = T.runSMT $
+-- | TODO pending on server create, create a load function to handle injection
+-- to the IL type
+solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
+solve i vConfig = T.runSMT $
   do (il, st) <- runStdoutLoggingT $ St.runStateT (toIL i) mempty
      C.query $ runStdoutLoggingT $ runSolver st $
        do core <- findVCore il
@@ -67,17 +71,21 @@ solve i = T.runSMT $
           _ <- choose core
           solution
 
-sat :: Proposition -> IO Result
-sat = fmap fst <$> solve
+sat :: Proposition -> Maybe VariantContext -> IO Result
+sat = (fmap fst .) <$> solve
 
 ------------------------------ Data Types --------------------------------------
--- | Solver configuration is a mapping of dimensions to boolean values, we must
--- use an actual data structure here because we need set-like operations
+-- | Solver configuration is a mapping of dimensions to boolean values, we
+-- express this in two ways, first we hold a store of dimensions to symbolic
+-- booleans to track what we have seen, secondly we hold a variant context _as_
+-- a symbolic formula rather than a data structure so that we can spin up a
+-- separate thread to check variant context sat calls when removing choices
 type Store = Map.HashMap
 
 type Ints         = Store Var T.SInt32
 type Doubles      = Store Var T.SDouble
 type Bools        = Store Var T.SBool
+type Dimensions   = Store Dim T.SBool
 
 class IxStorable ix where
   type Container ix :: * -> *
@@ -98,6 +106,11 @@ instance IxStorable Text.Text where add  = Map.insert
                                     find = Map.lookup
                                     adjust = Map.adjust
 
+instance IxStorable Dim where add    = Map.insert
+                              isIn   = Map.member
+                              find   = Map.lookup
+                              adjust = Map.adjust
+
 
 -- | That which contains that has that
 class Has that where
@@ -111,9 +124,9 @@ class Has that where
   by this f = flip wrap this . f . extract $ this
 
 -- avoiding lens and generic-deriving dependencies
-instance Has VariantContext where
-  type Contains VariantContext = State
-  extract   = config
+instance Has SVariantContext where
+  type Contains SVariantContext = State
+  extract     = config
   wrap    c w = w{config = c}
 
 instance Has Ints    where extract   = ints
@@ -128,30 +141,36 @@ instance Has Bools   where extract   = bools
 instance Has Result  where extract   = result
                            wrap    r w = w{result=r}
 
+instance Has Dimensions where extract   = dimensions
+                              wrap    d w = w{dimensions=d}
+
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
 data State = State
-    { result  :: Result
-    , config  :: VariantContext
-    , ints    :: Ints
-    , doubles :: Doubles
-    , bools   :: Bools
+    { result     :: Result
+    , config     :: SVariantContext
+    , ints       :: Ints
+    , doubles    :: Doubles
+    , bools      :: Bools
+    , dimensions :: Dimensions
     }
 
 instance Semigroup State where
-  a <> b = State { result  = result  a <> result  b
-                 , config  = config  a <> config  b
-                 , ints    = ints    a <> ints    b
-                 , doubles = doubles a <> doubles b
-                 , bools   = bools   a <> bools   b
+  a <> b = State { result     = result  a <> result  b
+                 , config     = config  a <> config  b
+                 , ints       = ints    a <> ints    b
+                 , doubles    = doubles a <> doubles b
+                 , bools      = bools   a <> bools   b
+                 , dimensions = dimensions a <> dimensions b
                  }
 
 instance Monoid State where
-  mempty = State{ result  = mempty
-                , config  = mempty
-                , ints    = mempty
-                , doubles = mempty
-                , bools   = mempty
+  mempty = State{ result     = mempty
+                , config     = mempty
+                , ints       = mempty
+                , doubles    = mempty
+                , bools      = mempty
+                , dimensions = mempty
                 }
 
 -- TODO remove the StateT dependency for ReaderT
@@ -558,19 +577,34 @@ store = St.modify' . flip by . (<>)
 choose :: VarCore -> Solver ()
 choose (VarCore Unit) = St.get >>= getResult . extract >>= store
 
-choose (VarCore (Chc d l r)) = do conf <- St.gets extract
-                                  let l' = toIL l -- keep these lazy they may
-                                      r' = toIL r -- not be chosen
-                                  case T.sat conf >>= T.getModelValue (Text.unpack d) of
-                                    Just True -> toIL l >>= choose . VarCore
-                                    Just False -> toIL r >>= choose . VarCore
-                                    Nothing -> do let lConf = conf &&& (VariantContext $! bRef d)
-                                                      rConf = conf &&& (VariantContext $! bnot $ bRef d)
-                                                  -- left side
-                                                  C.inNewAssertionStack $
-                                                    do St.modify' (`by` const lConf)
-                                                       l' >>= evaluate >>= choose
-                                                  -- right side
-                                                  C.inNewAssertionStack $
-                                                    do St.modify' (flip by (const rConf))
-                                                       r' >>= evaluate >>= choose
+choose (VarCore (Chc (Dim d) l r)) =
+  do sConf <- St.gets config
+     let sD = T.sBool (show d)
+     T.getModelValue (show d) <$> liftIO (S.sat sConf) >>= \case
+       Just True  -> toIL l >>= choose . VarCore
+       Just False -> toIL r >>= choose . VarCore
+       Nothing    ->
+         do let lConf = (sConf &&&)        <$> sD
+                rConf = (sConf &&&) . bnot <$> sD
+            -- left side
+            C.inNewAssertionStack $
+              do lConf >>= St.modify' . wrap
+                 l' >>= evaluate >>= choose
+            -- right side
+            C.inNewAssertionStack $
+              do rConf >>= St.modify' . wrap
+                 r' >>= evaluate >>= choose
+
+--------------------------- Variant Context Helpers ----------------------------
+contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m) =>
+  VariantContext -> m SVariantContext
+contextToSBool (getVarFormula -> x) = go x
+  where -- go :: Show a => Prop' a -> m T.SBool
+        go (LitB True)  = return S.sTrue
+        go (LitB False) = return S.sFalse
+        go (RefB b)     = do st <- St.get
+                             case find b $ extract st of
+                               Just b' -> return b' -- then we've seen it before
+                               Nothing -> do newSym <- T.sBool (show b)
+                                             St.modify' (`by` add b newSym)
+                                             return $! newSym
