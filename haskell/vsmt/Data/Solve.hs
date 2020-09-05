@@ -32,6 +32,7 @@ import           Control.Monad.Trans        (MonadIO, MonadTrans, lift, liftIO)
 import qualified Data.HashMap.Strict        as Map
 import           Data.Maybe                 (fromJust)
 
+import           Data.Maybe                 (fromMaybe)
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext (..))
 import qualified Data.SBV.Trans             as T
@@ -64,7 +65,8 @@ solution = extract <$> St.get
 -- to the IL type
 solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
 solve i vConfig = T.runSMT $
-  do (il, st) <- runStdoutLoggingT $ St.runStateT (toIL i) mempty
+  do (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool (fromMaybe true vConfig)) mempty
+     (il, st)       <- runStdoutLoggingT $ St.runStateT (toIL i) dims{config=context}
      C.query $ runStdoutLoggingT $ runSolver st $
        do core <- findVCore il
           logWith "Core" core
@@ -579,7 +581,9 @@ choose (VarCore Unit) = St.get >>= getResult . extract >>= store
 
 choose (VarCore (Chc (Dim d) l r)) =
   do sConf <- St.gets config
-     let sD = T.sBool (show d)
+     let l' = toIL l -- keep these lazy they may
+         r' = toIL r -- not be chosen
+         sD = T.sBool (show d)
      T.getModelValue (show d) <$> liftIO (S.sat sConf) >>= \case
        Just True  -> toIL l >>= choose . VarCore
        Just False -> toIL r >>= choose . VarCore
@@ -608,3 +612,15 @@ contextToSBool (getVarFormula -> x) = go x
                                Nothing -> do newSym <- T.sBool (show b)
                                              St.modify' (`by` add b newSym)
                                              return $! newSym
+        go (OpB Not e) = bnot <$> go e
+        go (OpBB op l r) = do l' <- go l
+                              r' <- go r
+                              let op' = dispatch op
+                              return $ l' `op'` r'
+        go OpIB {}= error "numeric expressions are invalid in variant context"
+        go ChcB {} = error "variational expressions are invalid in variant context"
+
+        dispatch And  = (&&&)
+        dispatch Or   = (|||)
+        dispatch Impl = (==>)
+        dispatch Eqv  = (<=>)

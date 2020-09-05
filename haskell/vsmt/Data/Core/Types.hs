@@ -97,11 +97,11 @@ data Prop' a
 
 -- | Numerical Expressions with Choices
 data NExpr' a
-  = LitI NPrim                       -- ^ Arithmetic Literals
-  | RefI ExRefType !a                         -- ^ Arithmetic References
+  = LitI NPrim                        -- ^ Arithmetic Literals
+  | RefI ExRefType !a                 -- ^ Arithmetic References
   | OpI  N_N  !(NExpr' a)             -- ^ Unary Operators
-  | OpII NN_N !(NExpr' a) !(NExpr' a)  -- ^ Binary Operators
-  | ChcI !Dim  (NExpr' a) (NExpr' a)   -- ^ SMT Choices
+  | OpII NN_N !(NExpr' a) !(NExpr' a) -- ^ Binary Operators
+  | ChcI !Dim  (NExpr' a) (NExpr' a)  -- ^ SMT Choices
   deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
 
 -- | Types of references
