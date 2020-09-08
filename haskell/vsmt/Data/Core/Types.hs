@@ -98,7 +98,7 @@ data Prop' a
 -- | Numerical Expressions with Choices
 data NExpr' a
   = LitI NPrim                        -- ^ Arithmetic Literals
-  | RefI ExRefType !a                 -- ^ Arithmetic References
+  | RefI !(ExRefType a)               -- ^ Arithmetic References
   | OpI  N_N  !(NExpr' a)             -- ^ Unary Operators
   | OpII NN_N !(NExpr' a) !(NExpr' a) -- ^ Binary Operators
   | ChcI !Dim  (NExpr' a) (NExpr' a)  -- ^ SMT Choices
@@ -115,8 +115,8 @@ data SymNum = SyI !S.SInt64
             | SyD !S.SDouble
           deriving (Eq, Generic,Show)
 
-data ExRefType = ExRefTypeI | ExRefTypeD
-  deriving (Eq,Generic,Show,Ord)
+data ExRefType a = ExRefTypeI a | ExRefTypeD a
+  deriving (Eq,Generic,Show,Ord,Functor,Traversable,Foldable)
 
 -- | data constructor for Numeric operations
 data NPrim = I {-# UNPACK #-} !Int | D {-# UNPACK #-} !Double
@@ -151,11 +151,11 @@ infixl 7 ./, .%
 -- | some not so smart constructors, pinning a to string because we will be
 -- using String the most
 iRef :: IsString a => a -> NExpr' a
-iRef = RefI ExRefTypeI
+iRef = RefI . ExRefTypeI
 {-# INLINE iRef #-}
 
 dRef :: IsString a => a -> NExpr' a
-dRef = RefI ExRefTypeD
+dRef = RefI . ExRefTypeD
 {-# INLINE dRef #-}
 
 bRef :: IsString a => a -> Prop' a
@@ -530,7 +530,7 @@ instance Prim (Prop' d) (NExpr' d) where
 -- | conveniences
 instance (NFData a) => NFData (Prop' a)
 instance (NFData a) => NFData (NExpr' a)
-instance NFData ExRefType
+instance NFData a => NFData (ExRefType a)
 instance NFData NPrim
 instance NFData B_B
 instance NFData N_N

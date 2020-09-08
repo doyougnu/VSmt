@@ -49,7 +49,7 @@ import           Data.Core.Types
 -- program will dispatch the right value based on the values of dimensions
 type SVariantContext = S.SBool
 
-newtype ResultFormula a = ResultFormula [(SVariantContext, a)]
+newtype ResultFormula a = ResultFormula [(VariantContext, a)]
     deriving (Eq,Show,Generic,Typeable,Semigroup,Monoid,Functor)
 
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
@@ -60,7 +60,7 @@ type VariableMap d = M.HashMap d (ResultFormula I.CV)
 type Result = Result' Var
 
 data Result' d = Result' { variables :: VariableMap d
-                         , satResult :: SVariantContext
+                         , satResult :: VariantContext
                          } deriving Show
 
 instance Semigroup SVariantContext where (<>) = (|||)
@@ -79,14 +79,14 @@ instance (Eq d, Hashable d) => Monoid (Result' d) where
 onVariables :: (VariableMap d -> VariableMap d) -> Result' d -> Result' d
 onVariables f Result'{..} = Result'{variables=f variables, satResult}
 
-onSatResult :: (SVariantContext -> SVariantContext) -> Result' d -> Result' d
+onSatResult :: (VariantContext -> VariantContext) -> Result' d -> Result' d
 onSatResult f Result'{..} = Result'{variables, satResult=f satResult}
 
 insertToVariables :: Var -> ResultFormula I.CV -> Result' Var -> Result' Var
 insertToVariables k v = onVariables (M.insertWith mappend k v)
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
-insertToSat :: (Ord d, IsString d) => SVariantContext -> Result' d -> Result' d
+insertToSat :: (Ord d, IsString d) => VariantContext -> Result' d -> Result' d
 insertToSat v = onSatResult (v `mappend`)
 
 -- | check if the current context is sat or not
@@ -101,7 +101,7 @@ getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m) => SVariantContext -> m (Result' Var)
+getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m (Result' Var)
 getResult vf =
   do model <- getVSMTModel
      return $!
@@ -123,6 +123,3 @@ getResult vf =
      Result' {variables = M.foldMapWithKey
               (\k a -> M.singleton (fromString k) (ResultFormula $ pure (vf, a))) m'
              ,satResult=vf}
-
-handleResult :: Result' a -> Result' a
-handleResult

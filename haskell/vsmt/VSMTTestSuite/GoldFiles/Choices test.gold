@@ -1,5 +1,6 @@
-Result' {variables = fromList [("foo",ResultFormula [(<symbolic> :: SBool,True
-:: Bool)]),("AA_0",ResultFormula [(<symbolic> :: SBool,False ::
-Bool)]),("AA",ResultFormula [(<symbolic> :: SBool,False ::
-Bool)]),("aaa",ResultFormula [(<symbolic> :: SBool,False :: Bool)])], satResult
-= <symbolic> :: SBool}
+Result' {variables = fromList [("foo",ResultFormula [(VariantContext
+{getVarFormula = LitB True},True :: Bool)]),("AA",ResultFormula [(VariantContext
+{getVarFormula = LitB True},False :: Bool)]),("aaa",ResultFormula
+[(VariantContext {getVarFormula = LitB True},False :: Bool)])], satResult =
+VariantContext {getVarFormula = OpBB Or (LitB True) (OpBB Or (LitB True) (LitB
+True))}}

@@ -66,14 +66,15 @@ solution = extract <$> St.get
 -- | TODO pending on server create, create a load function to handle injection
 -- to the IL type
 solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
-solve i vConfig = T.runSMTWith T.z3{T.verbose=True} $
-  do let conf = fromMaybe true vConfig
-     (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
-     (il, st)       <- runStdoutLoggingT $ St.runStateT (toILSymb i) dims{sConfig=context}
-     C.query $ runStdoutLoggingT $ runSolver st $
-       do core <- findVCore il
-          _ <- choose core
-          solution
+solve i vConfig =
+    -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
+    T.runSMTWith T.z3{T.verbose=True} $
+      do let _ = fromMaybe true vConfig
+         (il, st)       <- runStdoutLoggingT $ runSolver mempty (toILSymb i)
+         C.query $ runStdoutLoggingT $ runSolver st $
+           do core <- findVCore il
+              _ <- choose core
+              solution
 
 sat :: Proposition -> Maybe VariantContext -> IO Result
 sat = (fmap fst .) <$> solve
@@ -218,9 +219,48 @@ instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv = l
 
 -- | A solver type enabled with query operations and logging
 type Solver = SolverT (LoggingT C.Query)
+type PreSolver = SolverT (LoggingT T.Symbolic)
 
 runSolver :: State -> SolverT m a -> m (a, State)
 runSolver s = flip St.runStateT s . runSolverT
+
+class Show a => Constrainable m a b where cachedConstrain :: a -> m b
+
+instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
+  Constrainable m Var T.SBool where
+  cachedConstrain ref   = do st <- St.get
+                             case find ref $ extract st of
+                               Just x  -> return x
+                               Nothing -> do newSym <- T.sBool (show ref)
+                                             St.modify' (`by` add ref newSym)
+                                             return newSym
+
+instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
+  Constrainable m Var IL where
+  cachedConstrain ref = do st <- St.get
+                           case find ref $ extract st of
+                             Just x  -> return $ Ref x
+                             Nothing -> do newSym <- T.sBool (Text.unpack ref)
+                                           St.modify' (`by` add ref newSym)
+                                           return (Ref newSym)
+
+instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
+  Constrainable m (ExRefType Var) IL' where
+  cachedConstrain (ExRefTypeI i) =
+    do st <- St.get
+       case find i $ extract st of
+         Just x  -> return . Ref' . SI $ x
+         Nothing -> do newSym <- T.sInt32 (Text.unpack i)
+                       St.modify' (`by` add i newSym)
+                       return (Ref' . SI $ newSym)
+
+  cachedConstrain (ExRefTypeD d) =
+    do st <- St.get
+       case find d $ extract st of
+         Just x  -> return . Ref' $ SD x
+         Nothing -> do newSym <- T.sDouble (Text.unpack d)
+                       St.modify' (`by` add d newSym)
+                       return $! Ref' $ SD newSym
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -362,74 +402,35 @@ data IL' = Ref' NRef
 -- toIL :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
 --      => Proposition -> m IL
 toIL :: Proposition -> Solver IL
-toIL (LitB True)  = return $! Ref T.sTrue
-toIL (LitB False) = return $! Ref T.sFalse
-toIL (RefB ref)   = do st <- St.get
-                       case find ref $ extract st of
-                         Just x  -> do logWith "found" ref; return $! Ref x
-                         Nothing -> do logWith "New Variable" ref
-                                       newSym <- C.freshVar (Text.unpack ref)
-                                       St.modify' (`by` add ref newSym)
-                                       return $! Ref newSym
-toIL (OpB op e)  = BOp op <$> toIL e
+toIL (LitB True)   = return $! Ref T.sTrue
+toIL (LitB False)  = return $! Ref T.sFalse
+toIL (RefB ref)    = cachedConstrain ref
+toIL (OpB op e)    = BOp op <$> toIL e
 toIL (OpBB op l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp op l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
--- toIL' :: (T.MonadSymbolic m, St.MonadState State m
-         -- , Has Ints, Has Doubles) => NExpression -> m IL'
 toIL' :: NExpression -> Solver IL'
-toIL' (LitI (I i)) = Ref' . SI <$> T.sInt32 (show i)
-toIL' (LitI (D d)) = Ref' . SD <$> T.sDouble (show d)
-toIL' (RefI ExRefTypeI a) = do st <- St.get
-                               case find a $ extract st of
-                                 Just x  -> return $! Ref' $ SI x
-                                 Nothing -> do newSym <- C.freshVar (show a)
-                                               St.modify' (`by` add a newSym)
-                                               return $! Ref' $ SI newSym
-toIL' (RefI ExRefTypeD a) = do st <- St.get
-                               case find a $ extract st of
-                                 Just x  -> return $! Ref' $ SD x
-                                 Nothing -> do newSym <- C.freshVar (show a)
-                                               St.modify' (`by` add a newSym)
-                                               return $! Ref' $ SD newSym
-toIL' (OpI op e)                = IOp op <$> toIL' e
-toIL' (OpII op l r)    = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
-toIL' (ChcI d l r) = return $ Chc' d l r
+toIL' (LitI (I i))  = Ref' . SI <$> T.sInt32 (show i)
+toIL' (LitI (D d))  = Ref' . SD <$> T.sDouble (show d)
+toIL' (RefI a)      = cachedConstrain a
+toIL' (OpI op e)    = IOp op <$> toIL' e
+toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
+toIL' (ChcI d l r)  = return $ Chc' d l r
 
-toILSymb :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
-     => Proposition -> m IL
--- toILSymb :: Proposition -> Solver IL
+toILSymb :: Proposition -> PreSolver IL
 toILSymb (LitB True)  = return $! Ref T.sTrue
 toILSymb (LitB False) = return $! Ref T.sFalse
-toILSymb (RefB ref)   = do st <- St.get
-                           case find ref $ extract st of
-                             Just x  -> do logWith "found" ref; return $! Ref x
-                             Nothing -> do logWith "New Variable" ref
-                                           newSym <- T.sBool (Text.unpack ref)
-                                           St.modify' (`by` add ref newSym)
-                                           return $! Ref newSym
+toILSymb (RefB ref)   = cachedConstrain ref
 toILSymb (OpB op e)  = BOp op <$> toILSymb e
 toILSymb (OpBB op l r) = do l' <- toILSymb  l; r' <- toILSymb r;  return $ BBOp op l' r'
 toILSymb (OpIB op l r) = do l' <- toILSymb' l; r' <- toILSymb' r; return $ IBOp op l' r'
 toILSymb (ChcB d l r)  = return $ Chc d l r
 
-toILSymb' :: (T.MonadSymbolic m, St.MonadState State m
-         , Has Ints, Has Doubles) => NExpression -> m IL'
+toILSymb' :: NExpression -> PreSolver IL'
 toILSymb' (LitI (I i)) = Ref' . SI <$> T.sInt32 (show i)
 toILSymb' (LitI (D d)) = Ref' . SD <$> T.sDouble (show d)
-toILSymb' (RefI ExRefTypeI a) = do st <- St.get
-                                   case find a $ extract st of
-                                     Just x  -> return $! Ref' $ SI x
-                                     Nothing -> do newSym <- T.sInt32 (show a)
-                                                   St.modify' (`by` add a newSym)
-                                                   return $! Ref' $ SI newSym
-toILSymb' (RefI ExRefTypeD a) = do st <- St.get
-                                   case find a $ extract st of
-                                     Just x  -> return $! Ref' $ SD x
-                                     Nothing -> do newSym <- T.sDouble (show a)
-                                                   St.modify' (`by` add a newSym)
-                                                   return $! Ref' $ SD newSym
+toILSymb' (RefI a) = cachedConstrain a
 toILSymb' (OpI op e)                = IOp op <$> toILSymb' e
 toILSymb' (OpII op l r)    = do l' <- toILSymb' l; r' <- toILSymb' r; return $! IIOp op l' r'
 toILSymb' (ChcI d l r) = return $ Chc' d l r
@@ -605,7 +606,7 @@ store :: ( St.MonadState (Contains that) m
 store = St.modify' . flip by . (<>)
 
 choose :: VarCore -> Solver ()
-choose (VarCore Unit) = St.get >>= getResult . extract >>= store
+choose (VarCore Unit) = St.get >>= getResult . config >>= store
 
 choose (VarCore (Chc d l r)) =
   do let l' = toIL l -- keep these lazy they may
