@@ -15,7 +15,7 @@ mkDerivation {
   executableSystemDepends = [ z3 zlib ];
   testHaskellDepends = [
     base QuickCheck tasty tasty-golden tasty-quickcheck tasty-hspec filepath
-    bytestring
+    bytestring sbv text
   ];
   benchmarkHaskellDepends = [ base deepseq gauge silently ];
   homepage = "https://github.com/doyougnu/VSmt";

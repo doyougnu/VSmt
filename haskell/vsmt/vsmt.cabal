@@ -97,6 +97,8 @@ Test-Suite VSMTTest
                   , tasty-hspec
                   , filepath
                   , bytestring
+                  , sbv
+                  , text
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework

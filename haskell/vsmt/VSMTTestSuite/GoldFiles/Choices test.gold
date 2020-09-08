@@ -1,0 +1,5 @@
+Result' {variables = fromList [("foo",ResultFormula [(<symbolic> :: SBool,True
+:: Bool)]),("AA_0",ResultFormula [(<symbolic> :: SBool,False ::
+Bool)]),("AA",ResultFormula [(<symbolic> :: SBool,False ::
+Bool)]),("aaa",ResultFormula [(<symbolic> :: SBool,False :: Bool)])], satResult
+= <symbolic> :: SBool}

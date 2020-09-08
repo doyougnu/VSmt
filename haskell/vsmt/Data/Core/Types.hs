@@ -22,7 +22,6 @@ module Data.Core.Types where
 import           Control.DeepSeq (NFData)
 import           Control.Monad   (liftM2)
 import           Data.Fixed      (mod')
-import           Data.Hashable   (Hashable)
 import qualified Data.SBV.Trans  as S
 import qualified Data.Sequence   as Seq
 import           Data.String     (IsString)
@@ -33,8 +32,9 @@ import           Prelude         hiding (EQ, GT, LT, lookup)
 
 -- | A feature is a named, boolean configuration option.
 type Var = Text
-newtype Dim = Dim Text
-  deriving (Eq,Show,Ord,NFData,Hashable)
+-- newtype Dim = Dim Text deriving (Eq,Ord,NFData,Hashable)
+type Dim = String
+
 type Config  = Dim -> Bool
 type PartialConfig = Dim -> Maybe Bool
 
@@ -170,13 +170,22 @@ dLit :: Double -> NExpr' a
 dLit = LitI . D
 {-# INLINE dLit #-}
 
-bChc :: Dim -> Prop' a -> Prop' a -> Prop' a
+bChc :: String -> Prop' a -> Prop' a -> Prop' a
 bChc = ChcB
 {-# INLINE bChc #-}
 
-iChc :: Dim -> NExpr' a -> NExpr' a -> NExpr' a
+iChc :: String -> NExpr' a -> NExpr' a -> NExpr' a
 iChc = ChcI
 {-# INLINE iChc #-}
+
+-- dim :: String -> Dim
+-- dim = Dim . pack
+
+-- dimReference :: String -> Prop' Dim
+-- dimReference = RefB . dim
+
+-- dimToString :: Dim -> String
+-- dimToString (Dim s) = unpack s
 
 -- | Begin primitive instances
 

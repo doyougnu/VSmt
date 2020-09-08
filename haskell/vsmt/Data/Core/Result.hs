@@ -122,4 +122,7 @@ getResult vf =
    toResMap m' =
      Result' {variables = M.foldMapWithKey
               (\k a -> M.singleton (fromString k) (ResultFormula $ pure (vf, a))) m'
-            ,satResult=vf}
+             ,satResult=vf}
+
+handleResult :: Result' a -> Result' a
+handleResult

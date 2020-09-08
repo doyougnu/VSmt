@@ -20,7 +20,14 @@ import Utils.VSMTTestFramework
 tests :: TestTree
 tests = testGroup "Plain formulas"
   [ goldenVsStringShow "conjunctions_force_True" allTrue
+  , goldenVsStringShow "Choices test" leftChoice
   ]
 
 allTrue :: IO Result
-allTrue = sat $ bRef "foo" &&& bRef "bar" &&& bRef "baz"
+allTrue = flip sat Nothing $ bRef "foo" &&& bRef "bar" &&& bRef "baz"
+
+leftChoice' :: IO Result
+-- leftChoice = flip sat (Just $ VariantContext $ bRef "AA") $ bChc "AA" (bRef "aaa") (bRef "foo")
+leftChoice' = flip sat Nothing $ bChc "AA" (bRef "aaa") (bRef "foo") -- &&& bRef "bar" &&& bRef "baz"
+
+leftChoice = show <$> leftChoice'

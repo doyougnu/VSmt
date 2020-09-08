@@ -20,6 +20,7 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE ViewPatterns               #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 
 module Data.Solve where
 
@@ -30,15 +31,16 @@ import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
                                                    gets, modify', runStateT)
 import           Control.Monad.Trans        (MonadIO, MonadTrans, lift, liftIO)
 import qualified Data.HashMap.Strict        as Map
-import           Data.Maybe                 (fromJust)
+import qualified Data.Map.Strict            as M
+import           Data.Maybe                 (fromJust, fromMaybe)
+import qualified Data.Text                  as Text
+import           Prelude                    hiding (EQ, GT, LT, log)
+import Data.Function ((&))
 
-import           Data.Maybe                 (fromMaybe)
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext (..))
 import qualified Data.SBV.Trans             as T
 import qualified Data.SBV.Trans.Control     as C
-import qualified Data.Text                  as Text
-import           Prelude                    hiding (EQ, GT, LT, log)
 
 import           Data.Core.Result
 import           Data.Core.Types
@@ -64,12 +66,12 @@ solution = extract <$> St.get
 -- | TODO pending on server create, create a load function to handle injection
 -- to the IL type
 solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
-solve i vConfig = T.runSMT $
-  do (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool (fromMaybe true vConfig)) mempty
-     (il, st)       <- runStdoutLoggingT $ St.runStateT (toIL i) dims{config=context}
+solve i vConfig = T.runSMTWith T.z3{T.verbose=True} $
+  do let conf = fromMaybe true vConfig
+     (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
+     (il, st)       <- runStdoutLoggingT $ St.runStateT (toILSymb i) dims{sConfig=context}
      C.query $ runStdoutLoggingT $ runSolver st $
        do core <- findVCore il
-          logWith "Core" core
           _ <- choose core
           solution
 
@@ -103,9 +105,9 @@ class IxStorable ix where
   find'  :: ix -> Container ix elem -> elem
   find' = (fromJust .) . find
 
-instance IxStorable Text.Text where add  = Map.insert
-                                    isIn = Map.member
-                                    find = Map.lookup
+instance IxStorable Text.Text where add    = Map.insert
+                                    isIn   = Map.member
+                                    find   = Map.lookup
                                     adjust = Map.adjust
 
 instance IxStorable Dim where add    = Map.insert
@@ -128,8 +130,8 @@ class Has that where
 -- avoiding lens and generic-deriving dependencies
 instance Has SVariantContext where
   type Contains SVariantContext = State
-  extract     = config
-  wrap    c w = w{config = c}
+  extract     = sConfig
+  wrap    c w = w{sConfig = c}
 
 instance Has Ints    where extract   = ints
                            wrap    i w = w{ints = i}
@@ -146,20 +148,25 @@ instance Has Result  where extract   = result
 instance Has Dimensions where extract   = dimensions
                               wrap    d w = w{dimensions=d}
 
+instance Has VariantContext where extract   = config
+                                  wrap    d w = w{config=d}
+
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions
 data State = State
     { result     :: Result
-    , config     :: SVariantContext
+    , config     :: VariantContext
+    , sConfig    :: SVariantContext
     , ints       :: Ints
     , doubles    :: Doubles
     , bools      :: Bools
     , dimensions :: Dimensions
-    }
+    } deriving Show
 
 instance Semigroup State where
   a <> b = State { result     = result  a <> result  b
                  , config     = config  a <> config  b
+                 , sConfig    = sConfig a <> sConfig b
                  , ints       = ints    a <> ints    b
                  , doubles    = doubles a <> doubles b
                  , bools      = bools   a <> bools   b
@@ -169,6 +176,7 @@ instance Semigroup State where
 instance Monoid State where
   mempty = State{ result     = mempty
                 , config     = mempty
+                , sConfig     = mempty
                 , ints       = mempty
                 , doubles    = mempty
                 , bools      = mempty
@@ -184,7 +192,6 @@ newtype SolverT m a = SolverT { runSolverT :: St.StateT State m a }
            , MonadTrans, MonadError e, MonadLogger
            , St.MonadState State, T.MonadSymbolic, C.MonadQuery
            )
-
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
@@ -206,22 +213,14 @@ instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
   contextState    = lift contextState
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
--- TODO use standalone deriving + deriving via
-instance MonadLogger m     => MonadLogger (C.QueryT m)     where monadLoggerLog = monadLoggerLog
-instance MonadLogger m     => MonadLogger (T.SymbolicT m)  where monadLoggerLog = monadLoggerLog
-instance C.MonadQuery m    => C.MonadQuery (LoggingT m)    where queryState     = lift C.queryState
-instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv    = lift T.symbolicEnv
+instance C.MonadQuery m    => C.MonadQuery (LoggingT m)    where queryState  = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
 type Solver = SolverT (LoggingT C.Query)
 
 runSolver :: State -> SolverT m a -> m (a, State)
 runSolver s = flip St.runStateT s . runSolverT
-
--- TODO change to log to a log file
--- TODO run function which does no logging
-run :: State -> Solver a -> IO (a, State)
-run s = S.runSMTWith S.z3{S.verbose=True} . C.query . runStdoutLoggingT . runSolver s
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -360,41 +359,80 @@ data IL' = Ref' NRef
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
-toIL :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
-     => Proposition -> m IL
+-- toIL :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
+--      => Proposition -> m IL
+toIL :: Proposition -> Solver IL
 toIL (LitB True)  = return $! Ref T.sTrue
 toIL (LitB False) = return $! Ref T.sFalse
 toIL (RefB ref)   = do st <- St.get
                        case find ref $ extract st of
-                         Just x  -> return $! Ref x
-                         Nothing -> do newSym <- T.sBool (show ref)
+                         Just x  -> do logWith "found" ref; return $! Ref x
+                         Nothing -> do logWith "New Variable" ref
+                                       newSym <- C.freshVar (Text.unpack ref)
                                        St.modify' (`by` add ref newSym)
                                        return $! Ref newSym
 toIL (OpB op e)  = BOp op <$> toIL e
-toIL (OpBB op l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp op l' r'
+toIL (OpBB op l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp op l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
-toIL' :: (T.MonadSymbolic m, St.MonadState State m
-         , Has Ints, Has Doubles) => NExpression -> m IL'
+-- toIL' :: (T.MonadSymbolic m, St.MonadState State m
+         -- , Has Ints, Has Doubles) => NExpression -> m IL'
+toIL' :: NExpression -> Solver IL'
 toIL' (LitI (I i)) = Ref' . SI <$> T.sInt32 (show i)
 toIL' (LitI (D d)) = Ref' . SD <$> T.sDouble (show d)
 toIL' (RefI ExRefTypeI a) = do st <- St.get
                                case find a $ extract st of
                                  Just x  -> return $! Ref' $ SI x
-                                 Nothing -> do newSym <- T.sInt32 (show a)
+                                 Nothing -> do newSym <- C.freshVar (show a)
                                                St.modify' (`by` add a newSym)
                                                return $! Ref' $ SI newSym
 toIL' (RefI ExRefTypeD a) = do st <- St.get
                                case find a $ extract st of
                                  Just x  -> return $! Ref' $ SD x
-                                 Nothing -> do newSym <- T.sDouble (show a)
+                                 Nothing -> do newSym <- C.freshVar (show a)
                                                St.modify' (`by` add a newSym)
                                                return $! Ref' $ SD newSym
 toIL' (OpI op e)                = IOp op <$> toIL' e
 toIL' (OpII op l r)    = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r) = return $ Chc' d l r
 
+toILSymb :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
+     => Proposition -> m IL
+-- toILSymb :: Proposition -> Solver IL
+toILSymb (LitB True)  = return $! Ref T.sTrue
+toILSymb (LitB False) = return $! Ref T.sFalse
+toILSymb (RefB ref)   = do st <- St.get
+                           case find ref $ extract st of
+                             Just x  -> do logWith "found" ref; return $! Ref x
+                             Nothing -> do logWith "New Variable" ref
+                                           newSym <- T.sBool (Text.unpack ref)
+                                           St.modify' (`by` add ref newSym)
+                                           return $! Ref newSym
+toILSymb (OpB op e)  = BOp op <$> toILSymb e
+toILSymb (OpBB op l r) = do l' <- toILSymb  l; r' <- toILSymb r;  return $ BBOp op l' r'
+toILSymb (OpIB op l r) = do l' <- toILSymb' l; r' <- toILSymb' r; return $ IBOp op l' r'
+toILSymb (ChcB d l r)  = return $ Chc d l r
+
+toILSymb' :: (T.MonadSymbolic m, St.MonadState State m
+         , Has Ints, Has Doubles) => NExpression -> m IL'
+toILSymb' (LitI (I i)) = Ref' . SI <$> T.sInt32 (show i)
+toILSymb' (LitI (D d)) = Ref' . SD <$> T.sDouble (show d)
+toILSymb' (RefI ExRefTypeI a) = do st <- St.get
+                                   case find a $ extract st of
+                                     Just x  -> return $! Ref' $ SI x
+                                     Nothing -> do newSym <- T.sInt32 (show a)
+                                                   St.modify' (`by` add a newSym)
+                                                   return $! Ref' $ SI newSym
+toILSymb' (RefI ExRefTypeD a) = do st <- St.get
+                                   case find a $ extract st of
+                                     Just x  -> return $! Ref' $ SD x
+                                     Nothing -> do newSym <- T.sDouble (show a)
+                                                   St.modify' (`by` add a newSym)
+                                                   return $! Ref' $ SD newSym
+toILSymb' (OpI op e)                = IOp op <$> toILSymb' e
+toILSymb' (OpII op l r)    = do l' <- toILSymb' l; r' <- toILSymb' r; return $! IIOp op l' r'
+toILSymb' (ChcI d l r) = return $ Chc' d l r
 -------------------------------- Accumulation -----------------------------------
 -- For both evaluation and accumulation we implement the functions in a verbose
 -- way to aid the code generator. This is likely not necessary but one missed
@@ -495,13 +533,12 @@ toSolver a = do constrain a; return $! intoCore Unit
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
-evaluate :: (St.MonadState State m, Monad m, MonadLogger m, SolverContext m)
-  => IL -> m VarCore
+-- evaluate :: (St.MonadState State m, Monad m , MonadLogger m , SolverContext m)
+--   => IL -> m VarCore
+evaluate :: IL -> Solver VarCore
   -- computation rules
 evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = do logWith "got reference" b
-                       bs <- bools <$> St.get
-                       logWith "bools" bs >> toSolver b
+evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -527,8 +564,8 @@ evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
 evaluate (BBOp And l Unit)      = evaluate l
 evaluate (BBOp And Unit r)      = evaluate r
-evaluate (BBOp And l x@(Ref _)) = evaluate x >> evaluate l
-evaluate (BBOp And x@(Ref _) r) = evaluate x >> evaluate r
+evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; evaluate l
+evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; evaluate r
 evaluate (IBOp op l r)        = evaluate $! IBOp op (evaluate' l) (evaluate' r)
 
   -- accumulation cases
@@ -567,60 +604,113 @@ store :: ( St.MonadState (Contains that) m
          , Semigroup that) => that -> m ()
 store = St.modify' . flip by . (<>)
 
--- choose :: ( Has Result
---           , Has VariantContext
---           , St.MonadState State m
---           , MonadIO m
---           , T.MonadSymbolic m
---           , Monad m
---           , MonadLogger m
---           , SolverContext m
---           , C.MonadQuery m) => VarCore -> m ()
 choose :: VarCore -> Solver ()
 choose (VarCore Unit) = St.get >>= getResult . extract >>= store
 
-choose (VarCore (Chc (Dim d) l r)) =
-  do sConf <- St.gets config
-     let l' = toIL l -- keep these lazy they may
+choose (VarCore (Chc d l r)) =
+  do let l' = toIL l -- keep these lazy they may
          r' = toIL r -- not be chosen
-         sD = T.sBool (show d)
-     T.getModelValue (show d) <$> liftIO (S.sat sConf) >>= \case
-       Just True  -> toIL l >>= choose . VarCore
-       Just False -> toIL r >>= choose . VarCore
-       Nothing    ->
-         do let lConf = (sConf &&&)        <$> sD
-                rConf = (sConf &&&) . bnot <$> sD
-            -- left side
-            C.inNewAssertionStack $
-              do lConf >>= St.modify' . wrap
-                 l' >>= evaluate >>= choose
-            -- right side
-            C.inNewAssertionStack $
-              do rConf >>= St.modify' . wrap
-                 r' >>= evaluate >>= choose
+     sConf <- St.gets sConfig
+     dimensions_ <- St.gets dimensions
+     if d `isIn` dimensions_
+       then
+       do
+       -- TODO: proof of known dims
+       log "The dimensions were found"
+       logWith "getting model value with" d
+       dMap <- liftIO $ S.getModelDictionary <$> S.sat sConf
+       logWith "Result" dMap
+       (T.fromCV <$> d `M.lookup` dMap) & \case
+         Just True  -> log "left"  >> l' >>= choose . VarCore
+         Just False -> log "right" >> r' >>= choose . VarCore
+         Nothing -> error $ "I thought dimension " ++ d ++ " was known but it is not!"
+       else
+       do
+         log "dimension not found"
+         sD <- T.label "Dimension!" <$> C.freshVar d
+         let lConf = sConf &&& sD
+             rConf = sConf &&& bnot sD
+         -- left side
+         C.inNewAssertionStack $
+           log "New Stack Left" >>
+           do St.modify' $ wrap lConf
+              l'' <- toIL l
+              evaluate l'' >>= choose
+         -- right side
+         C.inNewAssertionStack $
+           log "New Stack Right" >>
+           do St.modify' $ wrap rConf
+              r' >>= evaluate >>= choose
+
+-- choose (VarCore (BBOp op (Chc d cl cr) r)) =
+--   do sConf <- St.gets config
+--      let l' = toIL cl
+--          r' = toIL cr
+--          sD = T.sBool d
+--          -- check if d is in the configuration, and if so what is its value
+--      T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
+--        Just True  -> l' >>= choose . VarCore
+--        Just False -> r' >>= choose . VarCore
+--        Nothing    -> -- then we have not observed this choice before
+--          do let lConf = (sConf &&&)        <$> sD -- set Dim to true in conf
+--                 rConf = (sConf &&&) . bnot <$> sD -- Dim is false in conf
+--             -- left side
+--             C.inNewAssertionStack $
+--               do
+--                 lConf >>= St.modify' . wrap -- set conf to new conf with new choice
+--                 (\x -> BBOp op x r) <$> l' >>= evaluate >>= choose -- plug the hole
+--             -- right side
+--             C.inNewAssertionStack $
+--               do rConf >>= St.modify' . wrap
+--                  (\x -> BBOp op x r) <$> r' >>= evaluate >>= choose
+-- choose (VarCore (BBOp op l (Chc d cl cr))) =
+--   do sConf <- St.gets config
+--      let l' = toIL cl
+--          r' = toIL cr
+--          sD = T.sBool d
+--      T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
+--        Just True  -> l' >>= choose . VarCore
+--        Just False -> r' >>= choose . VarCore
+--        Nothing    ->
+--          do let lConf = (sConf &&&)        <$> sD
+--                 rConf = (sConf &&&) . bnot <$> sD
+--             -- left side
+--             C.inNewAssertionStack $
+--               do lConf >>= St.modify' . wrap
+--                  BBOp op l <$> l' >>= evaluate >>= choose
+--             -- right side
+--             C.inNewAssertionStack $
+--               do rConf >>= St.modify' . wrap
+--                  BBOp op l <$> r' >>= evaluate >>= choose
+-- choose (VarCore (BBOp And l r)) = -- recursive case
+--   choose (VarCore l) >> choose (VarCore r)
+choose _ = return ()
 
 --------------------------- Variant Context Helpers ----------------------------
-contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m) =>
-  VariantContext -> m SVariantContext
+contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>
+  VariantContext -> m T.SBool
 contextToSBool (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
         go (LitB True)  = return S.sTrue
         go (LitB False) = return S.sFalse
-        go (RefB b)     = do st <- St.get
-                             case find b $ extract st of
-                               Just b' -> return b' -- then we've seen it before
-                               Nothing -> do newSym <- T.sBool (show b)
-                                             St.modify' (`by` add b newSym)
-                                             return $! newSym
+        go (RefB d)     = do ds <- St.gets dimensions
+                             case find d ds of
+                               Just d' -> return d' -- then we've seen it before
+                               Nothing -> do
+                                 newSym <- T.label d <$> T.sBool d
+                                 logWith "making symb" d
+                                 St.modify' (`by` add d newSym)
+                                 return $! newSym
         go (OpB Not e) = bnot <$> go e
         go (OpBB op l r) = do l' <- go l
                               r' <- go r
                               let op' = dispatch op
                               return $ l' `op'` r'
-        go OpIB {}= error "numeric expressions are invalid in variant context"
+        go OpIB {} = error "numeric expressions are invalid in variant context"
         go ChcB {} = error "variational expressions are invalid in variant context"
 
         dispatch And  = (&&&)
         dispatch Or   = (|||)
         dispatch Impl = (==>)
         dispatch Eqv  = (<=>)
+        dispatch XOr  = (<=>)
