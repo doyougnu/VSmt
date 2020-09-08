@@ -70,7 +70,7 @@ solve i vConfig =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConfig
-         (il, st)       <- runStdoutLoggingT $ runSolver mempty (toILSymb i)
+         (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
          C.query $ runStdoutLoggingT $ runSolver st $
            do core <- findVCore il
               _ <- choose core
@@ -224,29 +224,44 @@ type PreSolver = SolverT (LoggingT T.Symbolic)
 runSolver :: State -> SolverT m a -> m (a, State)
 runSolver s = flip St.runStateT s . runSolverT
 
-class Show a => Constrainable m a b where cachedConstrain :: a -> m b
+class Show a => Constrainable m a b where cached :: a -> m b
 
-instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
-  Constrainable m Var T.SBool where
-  cachedConstrain ref   = do st <- St.get
-                             case find ref $ extract st of
-                               Just x  -> return x
-                               Nothing -> do newSym <- T.sBool (show ref)
-                                             St.modify' (`by` add ref newSym)
-                                             return newSym
+-- TODO fix this duplication
+instance Constrainable Solver Var IL where
+  cached ref   = do st <- St.get
+                    case find ref $ extract st of
+                      Just x  -> return (Ref x)
+                      Nothing -> do newSym <- C.freshVar (Text.unpack ref)
+                                    St.modify' (`by` add ref newSym)
+                                    return (Ref newSym)
 
-instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
-  Constrainable m Var IL where
-  cachedConstrain ref = do st <- St.get
-                           case find ref $ extract st of
-                             Just x  -> return $ Ref x
-                             Nothing -> do newSym <- T.sBool (Text.unpack ref)
-                                           St.modify' (`by` add ref newSym)
-                                           return (Ref newSym)
+instance Constrainable Solver (ExRefType Var) IL' where
+  cached (ExRefTypeI i) =
+    do st <- St.get
+       case find i $ extract st of
+         Just x  -> return . Ref' . SI $ x
+         Nothing -> do newSym <- C.freshVar (Text.unpack i)
+                       St.modify' (`by` add i newSym)
+                       return (Ref' . SI $ newSym)
 
-instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
-  Constrainable m (ExRefType Var) IL' where
-  cachedConstrain (ExRefTypeI i) =
+  cached (ExRefTypeD d) =
+    do st <- St.get
+       case find d $ extract st of
+         Just x  -> return . Ref' $ SD x
+         Nothing -> do newSym <- C.freshVar (Text.unpack d)
+                       St.modify' (`by` add d newSym)
+                       return $! Ref' $ SD newSym
+
+instance Constrainable PreSolver Var IL where
+  cached ref   = do st <- St.get
+                    case find ref $ extract st of
+                      Just x  -> return (Ref x)
+                      Nothing -> do newSym <- T.sBool (Text.unpack ref)
+                                    St.modify' (`by` add ref newSym)
+                                    return (Ref newSym)
+
+instance Constrainable PreSolver (ExRefType Var) IL' where
+  cached (ExRefTypeI i) =
     do st <- St.get
        case find i $ extract st of
          Just x  -> return . Ref' . SI $ x
@@ -254,13 +269,16 @@ instance (Monad m, St.MonadState State m, T.MonadSymbolic m) =>
                        St.modify' (`by` add i newSym)
                        return (Ref' . SI $ newSym)
 
-  cachedConstrain (ExRefTypeD d) =
+  cached (ExRefTypeD d) =
     do st <- St.get
        case find d $ extract st of
          Just x  -> return . Ref' $ SD x
          Nothing -> do newSym <- T.sDouble (Text.unpack d)
                        St.modify' (`by` add d newSym)
                        return $! Ref' $ SD newSym
+
+
+
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -399,41 +417,52 @@ data IL' = Ref' NRef
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
--- toIL :: (T.MonadSymbolic m, St.MonadState State m , MonadLogger m)
---      => Proposition -> m IL
-toIL :: Proposition -> Solver IL
+toIL :: ( St.MonadState State m
+        , T.MonadSymbolic m
+        , C.MonadQuery m
+        , MonadLogger m
+        , Constrainable m Var IL
+        , Constrainable m (ExRefType Var) IL'
+        ) => Proposition -> m IL
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
-toIL (RefB ref)    = cachedConstrain ref
+toIL (RefB ref)    = do logWith "Found" ref; cached ref
 toIL (OpB op e)    = BOp op <$> toIL e
 toIL (OpBB op l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp op l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
-toIL' :: NExpression -> Solver IL'
+toIL' :: ( T.MonadSymbolic m
+         , St.MonadState State m
+         , C.MonadQuery m
+         , Constrainable m (ExRefType Var) IL'
+         ) => NExpression -> m IL'
 toIL' (LitI (I i))  = Ref' . SI <$> T.sInt32 (show i)
 toIL' (LitI (D d))  = Ref' . SD <$> T.sDouble (show d)
-toIL' (RefI a)      = cachedConstrain a
+toIL' (RefI a)      = cached a
 toIL' (OpI op e)    = IOp op <$> toIL' e
 toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r)  = return $ Chc' d l r
 
-toILSymb :: Proposition -> PreSolver IL
-toILSymb (LitB True)  = return $! Ref T.sTrue
-toILSymb (LitB False) = return $! Ref T.sFalse
-toILSymb (RefB ref)   = cachedConstrain ref
-toILSymb (OpB op e)  = BOp op <$> toILSymb e
-toILSymb (OpBB op l r) = do l' <- toILSymb  l; r' <- toILSymb r;  return $ BBOp op l' r'
-toILSymb (OpIB op l r) = do l' <- toILSymb' l; r' <- toILSymb' r; return $ IBOp op l' r'
-toILSymb (ChcB d l r)  = return $ Chc d l r
 
-toILSymb' :: NExpression -> PreSolver IL'
-toILSymb' (LitI (I i)) = Ref' . SI <$> T.sInt32 (show i)
-toILSymb' (LitI (D d)) = Ref' . SD <$> T.sDouble (show d)
-toILSymb' (RefI a) = cachedConstrain a
-toILSymb' (OpI op e)                = IOp op <$> toILSymb' e
-toILSymb' (OpII op l r)    = do l' <- toILSymb' l; r' <- toILSymb' r; return $! IIOp op l' r'
-toILSymb' (ChcI d l r) = return $ Chc' d l r
+-- TODO fix this redundancy
+toILSymbolic :: Proposition -> PreSolver IL
+toILSymbolic (LitB True)   = return $! Ref T.sTrue
+toILSymbolic (LitB False)  = return $! Ref T.sFalse
+toILSymbolic (RefB ref)    = do logWith "Found" ref; cached ref
+toILSymbolic (OpB op e)    = BOp op <$> toILSymbolic e
+toILSymbolic (OpBB op l r) = do l' <- toILSymbolic  l; r' <- toILSymbolic r;  return $ BBOp op l' r'
+toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $ IBOp op l' r'
+toILSymbolic (ChcB d l r)  = return $ Chc d l r
+
+toILSymbolic' :: NExpression -> PreSolver IL'
+toILSymbolic' (LitI (I i))  = Ref' . SI <$> T.sInt32 (show i)
+toILSymbolic' (LitI (D d))  = Ref' . SD <$> T.sDouble (show d)
+toILSymbolic' (RefI a)      = cached a
+toILSymbolic' (OpI op e)    = IOp op <$> toILSymbolic' e
+toILSymbolic' (OpII op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $! IIOp op l' r'
+toILSymbolic' (ChcI d l r)  = return $ Chc' d l r
+
 -------------------------------- Accumulation -----------------------------------
 -- For both evaluation and accumulation we implement the functions in a verbose
 -- way to aid the code generator. This is likely not necessary but one missed
@@ -534,12 +563,10 @@ toSolver a = do constrain a; return $! intoCore Unit
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
--- evaluate :: (St.MonadState State m, Monad m , MonadLogger m , SolverContext m)
---   => IL -> m VarCore
 evaluate :: IL -> Solver VarCore
   -- computation rules
 evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = toSolver b
+evaluate (Ref b)  = log "Reference!" >> toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -629,18 +656,21 @@ choose (VarCore (Chc d l r)) =
        do
          log "dimension not found"
          sD <- T.label "Dimension!" <$> C.freshVar d
+         constrain sD
          let lConf = sConf &&& sD
              rConf = sConf &&& bnot sD
          -- left side
          C.inNewAssertionStack $
-           log "New Stack Left" >>
-           do St.modify' $ wrap lConf
-              l'' <- toIL l
-              evaluate l'' >>= choose
+           do log "New Stack Left"
+              b <- C.freshVar "Hello"
+              log "Hello constrained"
+              constrain b
+              St.modify' $ wrap lConf
+              toIL l >>= evaluate >>= choose
          -- right side
          C.inNewAssertionStack $
-           log "New Stack Right" >>
-           do St.modify' $ wrap rConf
+           do log "New Stack Right"
+              St.modify' $ wrap rConf
               r' >>= evaluate >>= choose
 
 -- choose (VarCore (BBOp op (Chc d cl cr) r)) =

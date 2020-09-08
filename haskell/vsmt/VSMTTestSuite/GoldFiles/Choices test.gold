@@ -1,6 +1,7 @@
-Result' {variables = fromList [("foo",ResultFormula [(VariantContext
-{getVarFormula = LitB True},True :: Bool)]),("AA",ResultFormula [(VariantContext
-{getVarFormula = LitB True},False :: Bool)]),("aaa",ResultFormula
-[(VariantContext {getVarFormula = LitB True},False :: Bool)])], satResult =
-VariantContext {getVarFormula = OpBB Or (LitB True) (OpBB Or (LitB True) (LitB
-True))}}
+Result' {variables = fromList [("Hello",ResultFormula [(VariantContext
+{getVarFormula = LitB True},False :: Bool)]),("foo",ResultFormula
+[(VariantContext {getVarFormula = LitB True},True :: Bool)]),("AA",ResultFormula
+[(VariantContext {getVarFormula = LitB True},True ::
+Bool)]),("aaa",ResultFormula [(VariantContext {getVarFormula = LitB True},False
+:: Bool)])], satResult = VariantContext {getVarFormula = OpBB Or (LitB True)
+(OpBB Or (LitB True) (LitB True))}}
