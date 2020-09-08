@@ -580,8 +580,11 @@ toSolver a = do constrain a; return $! intoCore Unit
 -- variational core
 evaluate :: IL -> Solver VarCore
   -- computation rules
-evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = log "Reference!" >> toSolver b
+evaluate Unit     = do log "Unit"
+                       s <- St.get
+                       logWith "State: " s
+                       return $! intoCore Unit
+evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -647,8 +650,17 @@ store :: ( St.MonadState (Contains that) m
          , Semigroup that) => that -> m ()
 store = St.modify' . flip by . (<>)
 
+updateConfigs :: (Has that, St.MonadState State m, Contains that ~ State)
+              => that -> Prop' Dim -> m ()
+updateConfigs conf context = do
+  St.modify' (`by` const conf)
+  St.modify' (`by` flip (&&&) (VariantContext context))
+
 choose :: VarCore -> Solver ()
-choose (VarCore Unit) = St.get >>= getResult . vConfig >>= store
+choose (VarCore Unit) = do
+  s <- St.get
+  logWith "Choose Unit with State" s
+  St.get >>= getResult . vConfig >>= store
 choose (VarCore (Chc d l r)) =
   do let l' = toIL l -- keep these lazy they may
          r' = toIL r -- not be chosen
@@ -659,23 +671,24 @@ choose (VarCore (Chc d l r)) =
        Nothing ->
          do
            sD <- T.label "Dimension!" <$> C.freshVar d
-           let lConf = sConf &&& sD
-               rConf = sConf &&& bnot sD
          -- left side
            C.inNewAssertionStack $
              do log "New Stack Left"
-                St.modify' $ wrap lConf
-                St.modify' (`by` (&&&) (VariantContext $ bRef d))
-                vConf <- St.gets vConfig
-                logWith "VariantContext" vConf
+                c <- St.gets sConfig
+                logWith "Conf Before" c
+                logWith "LConf" (sConf &&& sD)
+                updateConfigs (sConf &&& sD) (bRef d)
+                c' <- St.gets sConfig
+                logWith "Conf After" c'
                 l' >>= evaluate >>= choose
          -- right side
            C.inNewAssertionStack $
              do log "New Stack Right"
-                St.modify' $ wrap rConf
-                St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
-                vConf <- St.gets vConfig
-                logWith "VariantContext" vConf
+                logWith "Conf Before" sConf
+                logWith "RConf" (sConf &&& sD)
+                updateConfigs (sConf &&& bnot sD) (bnot $ bRef d)
+                c' <- St.gets sConfig
+                logWith "Conf After" c'
                 r' >>= evaluate >>= choose
 choose (VarCore (BBOp op (Chc d cl cr) r)) =
   do let l' = toIL cl
@@ -702,8 +715,6 @@ choose (VarCore (BBOp op (Chc d cl cr) r)) =
                 St.modify' (`by` add d False)
                 rConf >>= St.modify' . wrap
                 St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
-                vConf <- St.gets vConfig
-                logWith "VariantContext" vConf
                 (\x -> BBOp op x r) <$> r' >>= evaluate >>= choose
 choose (VarCore (BBOp op l (Chc d cl cr))) =
   do let l' = toIL cl
@@ -730,8 +741,6 @@ choose (VarCore (BBOp op l (Chc d cl cr))) =
                 St.modify' (`by` add d False)
                 rConf >>= St.modify' . wrap
                 St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
-                vConf <- St.gets vConfig
-                logWith "VariantContext" vConf
                 BBOp op l <$> r' >>= evaluate >>= choose
 -- choose (VarCore (BBOp And l r)) = -- recursive case
 --   choose (VarCore l) >> choose (VarCore r)

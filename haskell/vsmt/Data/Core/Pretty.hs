@@ -32,6 +32,9 @@ parens a = between "(" a ")"
 newline :: Text.Text
 newline = "\n"
 
+space :: Text.Text
+space = " "
+
 instance Pretty a => Pretty (NExpr' a) where
   pretty (LitI (I i)) = Text.pack $ show i
   pretty (LitI (D d)) = Text.pack $ show d

@@ -1,7 +1,7 @@
 model := 
-foo   -->   (#t, True :: Bool)
-baz   -->   (#t, True :: Bool)
-bar   -->   (#t, True :: Bool)
+foo   -->   (ite (#t) (True :: Bool) False :: Bool)
+baz   -->   (ite (#t) (True :: Bool) False :: Bool)
+bar   -->   (ite (#t) (True :: Bool) False :: Bool)
 
 Sat_Model := 
 (#t or #t)

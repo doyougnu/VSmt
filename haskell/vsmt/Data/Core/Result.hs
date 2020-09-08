@@ -51,13 +51,13 @@ import           Data.Core.Pretty
 -- program will dispatch the right value based on the values of dimensions
 type SVariantContext = S.SBool
 
-newtype ResultFormula a = ResultFormula [(VariantContext, a)]
-    deriving (Eq,Show,Generic,Typeable,Semigroup,Monoid,Functor)
+newtype ResultFormula = ResultFormula [(VariantContext, I.CV)]
+    deriving (Eq,Show,Generic,Semigroup,Monoid)
 
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
 -- cleaner implementation on our end.
-type VariableMap d = M.HashMap d (ResultFormula I.CV)
+type VariableMap d = M.HashMap d ResultFormula
 
 instance Pretty (Result' Var) where
   pretty r = "model := " <> newline <>
@@ -69,10 +69,21 @@ instance Pretty (Result' Var) where
              newline
 
 -- TODO: use Text.PrintF from base for better formatted output
-instance Pretty d => Pretty (M.HashMap d (ResultFormula I.CV)) where
+instance Pretty d => Pretty (M.HashMap d ResultFormula) where
   pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
 
+prettyResultFormula :: [(VariantContext, I.CV)] -> Text
+prettyResultFormula [] = "False :: Bool"
+prettyResultFormula ((ctx,val):xs) = parens $
+                                     "ite " <>
+                                     parens (pretty ctx) <> space <>
+                                     parens (pretty val) <> space <>
+                                     pretty xs
+
 instance Pretty I.CV where pretty = pack . show
+instance Pretty S.SBool where pretty = pack . show
+instance Pretty [(VariantContext, I.CV)] where pretty = prettyResultFormula
+instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
 
 -- | newtype wrapper for better printing
 newtype Result = Result (Result' Var) deriving (Eq,Generic,Semigroup,Monoid)
@@ -81,9 +92,6 @@ instance Show Result where show = unpack . pretty
 
 instance Pretty Result where pretty (Result r) = pretty r
 
-instance Pretty a => Pretty (ResultFormula a) where
-  pretty (ResultFormula r) = mconcat $ fmap pretty r
-
 instance (Pretty a, Pretty b) => Pretty (a,b) where
   pretty (a, b) = parens $ pretty a <> ", " <> pretty b
 
@@ -91,8 +99,8 @@ data Result' d = Result' { variables :: VariableMap d
                          , satResult :: VariantContext
                          } deriving (Eq,Show)
 
-instance Semigroup SVariantContext where (<>) = (|||)
-instance Monoid    SVariantContext where mempty = false
+instance Semigroup SVariantContext where (<>) = (&&&)
+instance Monoid    SVariantContext where mempty = true
 
 instance (Eq d, Hashable d) => Semigroup (Result' d) where
   (<>) Result' {..} Result'{variables=v,satResult=s} =
@@ -110,7 +118,7 @@ onVariables f Result'{..} = Result'{variables=f variables, satResult}
 onSatResult :: (VariantContext -> VariantContext) -> Result' d -> Result' d
 onSatResult f Result'{..} = Result'{variables, satResult=f satResult}
 
-insertToVariables :: Var -> ResultFormula I.CV -> Result' Var -> Result' Var
+insertToVariables :: Var -> ResultFormula -> Result' Var -> Result' Var
 insertToVariables k v = onVariables (M.insertWith mappend k v)
 
 -- | O(1) insert a result prop into the result entry for special Sat variable
