@@ -1,7 +1,10 @@
-Result' {variables = fromList [("Hello",ResultFormula [(VariantContext
-{getVarFormula = LitB True},False :: Bool)]),("foo",ResultFormula
-[(VariantContext {getVarFormula = LitB True},True :: Bool)]),("AA",ResultFormula
-[(VariantContext {getVarFormula = LitB True},True ::
-Bool)]),("aaa",ResultFormula [(VariantContext {getVarFormula = LitB True},False
-:: Bool)])], satResult = VariantContext {getVarFormula = OpBB Or (LitB True)
-(OpBB Or (LitB True) (LitB True))}}
+model := 
+foo   -->   ((-(AA) and (AA and #t)), True :: Bool)
+baz   -->   ((-(AA) and (AA and #t)), True :: Bool)
+AA_0   -->   ((-(AA) and (AA and #t)), False :: Bool)
+AA   -->   ((-(AA) and (AA and #t)), False :: Bool)
+aaa   -->   ((-(AA) and (AA and #t)), False :: Bool)
+bar   -->   ((-(AA) and (AA and #t)), False :: Bool)
+
+Sat_Model := 
+((-(AA) and (AA and #t)) or ((AA and #t) or #t))

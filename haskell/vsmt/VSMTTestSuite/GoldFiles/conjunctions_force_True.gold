@@ -1,6 +1,7 @@
-Result' {variables = fromList [("foo",ResultFormula [(VariantContext
-{getVarFormula = LitB True},True :: Bool)]),("baz",ResultFormula
-[(VariantContext {getVarFormula = LitB True},True ::
-Bool)]),("bar",ResultFormula [(VariantContext {getVarFormula = LitB True},True
-:: Bool)])], satResult = VariantContext {getVarFormula = OpBB Or (LitB True)
-(LitB True)}}
+model := 
+foo   -->   (#t, True :: Bool)
+baz   -->   (#t, True :: Bool)
+bar   -->   (#t, True :: Bool)
+
+Sat_Model := 
+(#t or #t)

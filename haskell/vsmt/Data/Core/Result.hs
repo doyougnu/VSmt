@@ -31,13 +31,15 @@ import qualified Data.SBV.Control       as C
 import qualified Data.SBV.Internals     as I
 import qualified Data.SBV.Trans         as S
 import qualified Data.SBV.Trans.Control as T
-import           Data.Text              (Text)
+import           Data.Text              (Text,pack,unpack)
 
 import qualified Data.HashMap.Strict    as M
 import           Data.String            (IsString, fromString)
 import           GHC.Generics           (Generic)
 
 import           Data.Core.Types
+import           Data.Core.Core
+import           Data.Core.Pretty
 
 -- | An SMT Result formula, spine strict, we leave values lazy because they may
 -- not be needed. We will be incrementally building these formulas through
@@ -57,14 +59,40 @@ newtype ResultFormula a = ResultFormula [(VariantContext, a)]
 -- cleaner implementation on our end.
 type VariableMap d = M.HashMap d (ResultFormula I.CV)
 
-type Result = Result' Var
+instance Pretty (Result' Var) where
+  pretty r = "model := " <> newline <>
+             pretty (variables r) <>
+             newline <>
+             "Sat_Model := " <>
+             newline <>
+             pretty (satResult r) <>
+             newline
+
+-- TODO: use Text.PrintF from base for better formatted output
+instance Pretty d => Pretty (M.HashMap d (ResultFormula I.CV)) where
+  pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
+
+instance Pretty I.CV where pretty = pack . show
+
+-- | newtype wrapper for better printing
+newtype Result = Result (Result' Var) deriving (Eq,Generic,Semigroup,Monoid)
+
+instance Show Result where show = unpack . pretty
+
+instance Pretty Result where pretty (Result r) = pretty r
+
+instance Pretty a => Pretty (ResultFormula a) where
+  pretty (ResultFormula r) = mconcat $ fmap pretty r
+
+instance (Pretty a, Pretty b) => Pretty (a,b) where
+  pretty (a, b) = parens $ pretty a <> ", " <> pretty b
 
 data Result' d = Result' { variables :: VariableMap d
                          , satResult :: VariantContext
-                         } deriving Show
+                         } deriving (Eq,Show)
 
 instance Semigroup SVariantContext where (<>) = (|||)
-instance Monoid SVariantContext where mempty = false
+instance Monoid    SVariantContext where mempty = false
 
 instance (Eq d, Hashable d) => Semigroup (Result' d) where
   (<>) Result' {..} Result'{variables=v,satResult=s} =
@@ -101,10 +129,11 @@ getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m (Result' Var)
+getResult :: (MonadIO m, T.MonadQuery m) => VariantContext -> m Result
 getResult vf =
   do model <- getVSMTModel
      return $!
+       Result $
        case model of
          m@(S.Satisfiable _ _)         ->
         -- when satisfiable we get the model dictionary, turn it into a

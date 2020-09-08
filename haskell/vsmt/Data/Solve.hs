@@ -31,11 +31,11 @@ import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
                                                    gets, modify', runStateT)
 import           Control.Monad.Trans        (MonadIO, MonadTrans, lift, liftIO)
 import qualified Data.HashMap.Strict        as Map
-import qualified Data.Map.Strict            as M
+-- import qualified Data.Map.Strict            as M
 import           Data.Maybe                 (fromJust, fromMaybe)
 import qualified Data.Text                  as Text
 import           Prelude                    hiding (EQ, GT, LT, log)
-import Data.Function ((&))
+-- import Data.Function ((&))
 
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext (..))
@@ -66,10 +66,10 @@ solution = extract <$> St.get
 -- | TODO pending on server create, create a load function to handle injection
 -- to the IL type
 solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
-solve i vConfig =
+solve i vConf =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
-      do let _ = fromMaybe true vConfig
+      do let _ = fromMaybe true vConf
          (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
          C.query $ runStdoutLoggingT $ runSolver st $
            do core <- findVCore il
@@ -91,6 +91,7 @@ type Ints         = Store Var T.SInt32
 type Doubles      = Store Var T.SDouble
 type Bools        = Store Var T.SBool
 type Dimensions   = Store Dim T.SBool
+type Context      = Store Dim Bool
 
 class IxStorable ix where
   type Container ix :: * -> *
@@ -149,15 +150,27 @@ instance Has Result  where extract   = result
 instance Has Dimensions where extract   = dimensions
                               wrap    d w = w{dimensions=d}
 
-instance Has VariantContext where extract   = config
-                                  wrap    d w = w{config=d}
+instance Has Context where extract     = config
+                           wrap    d w = w{config=d}
+
+instance Has VariantContext where extract     = vConfig
+                                  wrap    d w = w{vConfig=d}
+
 
 -- | The internal state of the solver is just a record that accumulates results
--- and a configuration to track choice decisions
+-- and a configuration to track choice decisions. We make a trade off of memory
+-- for speed and represent the configuration in several ways. We keep a setline
+-- representation of the config to support setlike operations most notably
+-- `member`, we keep a formula representation to send to the result module and
+-- we keep the symbolic representation to send to the solver. If we were missing
+-- any of these then we would need to translate one to the other which will cost
+-- constant time _for every_ choice, hence we want to make that constant factor
+-- as small as possible
 data State = State
     { result     :: Result
-    , config     :: VariantContext
-    , sConfig    :: SVariantContext
+    , vConfig    :: VariantContext  -- the formula representation of the config
+    , config     :: Context         -- a map or set representation of the config
+    , sConfig    :: SVariantContext -- the symbolic representation of the config
     , ints       :: Ints
     , doubles    :: Doubles
     , bools      :: Bools
@@ -167,6 +180,7 @@ data State = State
 instance Semigroup State where
   a <> b = State { result     = result  a <> result  b
                  , config     = config  a <> config  b
+                 , vConfig    = vConfig a <> vConfig b
                  , sConfig    = sConfig a <> sConfig b
                  , ints       = ints    a <> ints    b
                  , doubles    = doubles a <> doubles b
@@ -177,7 +191,8 @@ instance Semigroup State where
 instance Monoid State where
   mempty = State{ result     = mempty
                 , config     = mempty
-                , sConfig     = mempty
+                , sConfig    = mempty
+                , vConfig    = mempty
                 , ints       = mempty
                 , doubles    = mempty
                 , bools      = mempty
@@ -633,89 +648,94 @@ store :: ( St.MonadState (Contains that) m
 store = St.modify' . flip by . (<>)
 
 choose :: VarCore -> Solver ()
-choose (VarCore Unit) = St.get >>= getResult . config >>= store
-
+choose (VarCore Unit) = St.get >>= getResult . vConfig >>= store
 choose (VarCore (Chc d l r)) =
   do let l' = toIL l -- keep these lazy they may
          r' = toIL r -- not be chosen
      sConf <- St.gets sConfig
-     dimensions_ <- St.gets dimensions
-     if d `isIn` dimensions_
-       then
-       do
-       -- TODO: proof of known dims
-       log "The dimensions were found"
-       logWith "getting model value with" d
-       dMap <- liftIO $ S.getModelDictionary <$> S.sat sConf
-       logWith "Result" dMap
-       (T.fromCV <$> d `M.lookup` dMap) & \case
-         Just True  -> log "left"  >> l' >>= choose . VarCore
-         Just False -> log "right" >> r' >>= choose . VarCore
-         Nothing -> error $ "I thought dimension " ++ d ++ " was known but it is not!"
-       else
-       do
-         log "dimension not found"
-         sD <- T.label "Dimension!" <$> C.freshVar d
-         constrain sD
-         let lConf = sConf &&& sD
-             rConf = sConf &&& bnot sD
+     S.getModelValue d <$> liftIO (S.sat sConf) >>= \case
+       Just True  -> log "left"  >> l' >>= choose . VarCore
+       Just False -> log "right" >> r' >>= choose . VarCore
+       Nothing ->
+         do
+           sD <- T.label "Dimension!" <$> C.freshVar d
+           let lConf = sConf &&& sD
+               rConf = sConf &&& bnot sD
          -- left side
-         C.inNewAssertionStack $
-           do log "New Stack Left"
-              b <- C.freshVar "Hello"
-              log "Hello constrained"
-              constrain b
-              St.modify' $ wrap lConf
-              toIL l >>= evaluate >>= choose
+           C.inNewAssertionStack $
+             do log "New Stack Left"
+                St.modify' $ wrap lConf
+                St.modify' (`by` (&&&) (VariantContext $ bRef d))
+                vConf <- St.gets vConfig
+                logWith "VariantContext" vConf
+                l' >>= evaluate >>= choose
          -- right side
-         C.inNewAssertionStack $
-           do log "New Stack Right"
-              St.modify' $ wrap rConf
-              r' >>= evaluate >>= choose
-
--- choose (VarCore (BBOp op (Chc d cl cr) r)) =
---   do sConf <- St.gets config
---      let l' = toIL cl
---          r' = toIL cr
---          sD = T.sBool d
---          -- check if d is in the configuration, and if so what is its value
---      T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
---        Just True  -> l' >>= choose . VarCore
---        Just False -> r' >>= choose . VarCore
---        Nothing    -> -- then we have not observed this choice before
---          do let lConf = (sConf &&&)        <$> sD -- set Dim to true in conf
---                 rConf = (sConf &&&) . bnot <$> sD -- Dim is false in conf
---             -- left side
---             C.inNewAssertionStack $
---               do
---                 lConf >>= St.modify' . wrap -- set conf to new conf with new choice
---                 (\x -> BBOp op x r) <$> l' >>= evaluate >>= choose -- plug the hole
---             -- right side
---             C.inNewAssertionStack $
---               do rConf >>= St.modify' . wrap
---                  (\x -> BBOp op x r) <$> r' >>= evaluate >>= choose
--- choose (VarCore (BBOp op l (Chc d cl cr))) =
---   do sConf <- St.gets config
---      let l' = toIL cl
---          r' = toIL cr
---          sD = T.sBool d
---      T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
---        Just True  -> l' >>= choose . VarCore
---        Just False -> r' >>= choose . VarCore
---        Nothing    ->
---          do let lConf = (sConf &&&)        <$> sD
---                 rConf = (sConf &&&) . bnot <$> sD
---             -- left side
---             C.inNewAssertionStack $
---               do lConf >>= St.modify' . wrap
---                  BBOp op l <$> l' >>= evaluate >>= choose
---             -- right side
---             C.inNewAssertionStack $
---               do rConf >>= St.modify' . wrap
---                  BBOp op l <$> r' >>= evaluate >>= choose
+           C.inNewAssertionStack $
+             do log "New Stack Right"
+                St.modify' $ wrap rConf
+                St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
+                vConf <- St.gets vConfig
+                logWith "VariantContext" vConf
+                r' >>= evaluate >>= choose
+choose (VarCore (BBOp op (Chc d cl cr) r)) =
+  do let l' = toIL cl
+         r' = toIL cr
+     sConf <- St.gets sConfig
+     -- check if d is in the configuration, and if so what is its value
+     T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
+       Just True  -> l' >>= choose . VarCore
+       Just False -> r' >>= choose . VarCore
+       Nothing    -> -- then we have not observed this choice before
+         do let sD = C.freshVar d
+                lConf = (sConf &&&)        <$> sD -- set Dim to true in conf
+                rConf = (sConf &&&) . bnot <$> sD -- Dim is false in conf
+            -- left side
+            C.inNewAssertionStack $
+              do
+                St.modify' (`by` add d True)
+                lConf >>= St.modify' . wrap -- set conf to new conf with new choice
+                St.modify' (`by` (&&&) (VariantContext $ bRef d))
+                (\x -> BBOp op x r) <$> l' >>= evaluate >>= choose -- plug the hole
+            -- right side
+            C.inNewAssertionStack $
+              do
+                St.modify' (`by` add d False)
+                rConf >>= St.modify' . wrap
+                St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
+                vConf <- St.gets vConfig
+                logWith "VariantContext" vConf
+                (\x -> BBOp op x r) <$> r' >>= evaluate >>= choose
+choose (VarCore (BBOp op l (Chc d cl cr))) =
+  do let l' = toIL cl
+         r' = toIL cr
+     sConf <- St.gets sConfig
+     -- check if d is in the configuration, and if so what is its value
+     T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
+       Just True  -> l' >>= choose . VarCore
+       Just False -> r' >>= choose . VarCore
+       Nothing    -> -- then we have not observed this choice before
+         do let sD = C.freshVar d
+                lConf = (sConf &&&)        <$> sD -- set Dim to true in conf
+                rConf = (sConf &&&) . bnot <$> sD -- Dim is false in conf
+            -- left side
+            C.inNewAssertionStack $
+              do
+                St.modify' (`by` add d True)
+                lConf >>= St.modify' . wrap -- set conf to new conf with new choice
+                St.modify' (`by` (&&&) (VariantContext $ bRef d))
+                BBOp op l <$> l' >>= evaluate >>= choose -- plug the hole
+            -- right side
+            C.inNewAssertionStack $
+              do
+                St.modify' (`by` add d False)
+                rConf >>= St.modify' . wrap
+                St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
+                vConf <- St.gets vConfig
+                logWith "VariantContext" vConf
+                BBOp op l <$> r' >>= evaluate >>= choose
 -- choose (VarCore (BBOp And l r)) = -- recursive case
 --   choose (VarCore l) >> choose (VarCore r)
-choose _ = return ()
+choose _ = error "it did not cover all the cases"
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>

@@ -20,6 +20,7 @@ library
   exposed-modules: Data.Core.Core
                  , Data.Core.Types
                  , Data.Core.Result
+                 , Data.Core.Pretty
                  , Data.Solve
   build-depends: base
                , bifunctors

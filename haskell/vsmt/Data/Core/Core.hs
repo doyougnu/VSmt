@@ -21,7 +21,8 @@
 
 module Data.Core.Core where
 
--- import Data.Functor.Identity (Identity)
+
+import           Prelude                    hiding (EQ, GT, LT, log)
 
 import Data.Core.Types
 
