@@ -36,10 +36,7 @@ twoChoices = flip sat Nothing $
 -- forces the solver to rotate the variational core
 treeOfChoices :: IO Result
 treeOfChoices = flip sat Nothing $
-             bChc "AA" (bRef "Aleft") (bRef "Aright") &&&
-             bChc "BB" (bRef "Bleft") (bRef "Bright") &&&
-             bChc "CC" (bRef "Cleft") (bRef "Cright") &&&
-             bChc "DD" (bRef "Dleft") (bRef "Dright") &&&
-             bChc "AAA" (bRef "AAleft") (bRef "AAright") &&&
-             bChc "BBB" (bRef "BBleft") (bRef "BBright") &&&
-             bChc "CCC" (bRef "CCleft") (bRef "CCright")
+             (bChc "AA" (bRef "Aleft") (bRef "Aright") &&&
+             bChc "BB" (bRef "Bleft") (bRef "Bright")) &&&
+             (bChc "CC" (bRef "Cleft") (bRef "Cright") &&&
+             bChc "DD" (bRef "Dleft") (bRef "Dright"))

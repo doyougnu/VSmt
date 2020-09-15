@@ -28,9 +28,9 @@ import           Control.Monad.Except       (MonadError)
 import Control.Monad.Logger
   ( LoggingT
   , MonadLogger(..)
-  , NoLoggingT(runNoLoggingT)
+  -- , NoLoggingT(runNoLoggingT)
   , logDebug
-  -- , runStdoutLoggingT
+  , runStdoutLoggingT
   )
 import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
                                                    gets, modify', runStateT,put)
@@ -76,8 +76,8 @@ solve i vConf =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConf
-         (il, st) <- runNoLoggingT $ runSolver mempty $ toILSymbolic i
-         C.query $ runNoLoggingT $ runSolver st $
+         (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
+         C.query $ runStdoutLoggingT $ runSolver st $
            do core <- findVCore il
               _ <- choose core
               solution
@@ -753,10 +753,9 @@ alternative dim goLeft goRight =
                 goRight
 
 choose :: VarCore -> Solver ()
-choose (VarCore Unit) = do
-  s <- St.get
-  logWith "Choose Unit with State" s
-  St.get >>= getResult . vConfig >>= store
+choose (VarCore Unit) = log "Core reduced to Unit" >>
+                        St.get >>= getResult . vConfig >>= store
+choose (VarCore x@Ref{}) = do _ <- evaluate x; return ()
 choose (VarCore (Chc d l r)) =
   do
     log "singleton choice"
@@ -793,8 +792,15 @@ choose (VarCore (BBOp op l (Chc d cl cr))) =
        Just True  -> goLeft
        Just False -> goRight
        Nothing    -> alternative d goLeft goRight
-choose (VarCore x@BBOp {}) = do log "rotating"; choose . VarCore $ rotate x
-choose _ = error "it did not cover all the cases"
+
+choose (VarCore x@BBOp {}) =
+  -- when choices do not appear in the child of the root node we must rotate the
+  -- AST such that the the binary relation at the root is preserved
+  do log "rotating"; choose . VarCore $ rotate x
+
+choose (VarCore IBOp {}) = undefined -- TODO implement choose for arith
+
+choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>
