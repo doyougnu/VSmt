@@ -18,6 +18,7 @@ import Test.Tasty
 import qualified TestSuite.Solve.Boolean.Plain
 import qualified TestSuite.Solve.Boolean.Choices
 import qualified TestSuite.Solve.Arithmetic.Plain
+import qualified TestSuite.Solve.Arithmetic.Choices
 
 main :: IO ()
 main = defaultMain $
@@ -36,4 +37,5 @@ booleans = testGroup "Boolean Tests"
 arithmetics :: TestTree
 arithmetics = testGroup "Arithmetic Tests"
   [ TestSuite.Solve.Arithmetic.Plain.tests
+  , TestSuite.Solve.Arithmetic.Choices.tests
   ]

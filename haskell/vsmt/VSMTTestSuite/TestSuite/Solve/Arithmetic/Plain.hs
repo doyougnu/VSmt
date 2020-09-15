@@ -20,8 +20,12 @@ import Utils.VSMTTestFramework
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree
 tests = testGroup "Plain formulas"
-  [ goldenVsStringShow "simple_arithmetic_to_core" allTrue
+  [ goldenVsStringShow "simple_arithmetic_to_variable" singletonVar
+  , goldenVsStringShow "two_variables_in_addition" twoVars
   ]
 
-allTrue :: IO Result
-allTrue = flip sat Nothing $ (iLit 5 + iLit 2) .== iRef ("y" :: Text)
+singletonVar :: IO Result
+singletonVar = flip sat Nothing $ 5 + 2 .== iRef ("y" :: Text)
+
+twoVars :: IO Result
+twoVars = flip sat Nothing $ iRef "x" + 2 .== iRef ("y" :: Text)

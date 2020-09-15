@@ -159,6 +159,7 @@ bRef :: IsString a => a -> Prop' a
 bRef = RefB
 {-# INLINE bRef #-}
 
+-- TODO #2
 iLit :: Integer -> NExpr' a
 iLit = LitI . I
 {-# INLINE iLit #-}

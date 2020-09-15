@@ -18,10 +18,12 @@ module Utils.VSMTTestFramework
   , solve
   , goldenVsStringShow
   , goldFile
+  , Text
   ) where
 
 import Test.Tasty (TestTree, TestName, testGroup)
 import Test.Tasty.Golden (goldenVsString)
+import Data.Text (Text)
 import Data.Solve (solve)
 import System.FilePath ((</>), (<.>))
 import qualified Data.ByteString.Lazy.Char8 as LBC
