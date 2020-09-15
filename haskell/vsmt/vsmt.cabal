@@ -103,8 +103,9 @@ Test-Suite VSMTTest
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework
-                  , TestSuite.Solve.Plain
-                  , TestSuite.Solve.Choices
+                  , TestSuite.Solve.Boolean.Plain
+                  , TestSuite.Solve.Boolean.Choices
+                  , TestSuite.Solve.Arithmetic.Plain
 
 Benchmark VSMTBench
   type            : exitcode-stdio-1.0

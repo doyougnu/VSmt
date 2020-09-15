@@ -148,7 +148,7 @@ getVSMTModel = T.getSMTResult
 
 -- | Get a VSMT model in any supported monad.
 getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
-getResult Nothing = return mempty
+-- getResult Nothing =
 getResult vf =
   do model <- getVSMTModel
      return $!

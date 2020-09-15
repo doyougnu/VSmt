@@ -48,17 +48,24 @@
 
 ** IN PROG Solver
 
-   - Note taken on [2020-09-15 Tue 02:36] \\
-     Fixed the result accumulation. I employed a Maybe to wrap around the Variant
-     Context. There needs to be hygiene work next, the code doesn't read well and
-     neither do the types. Which means that now I have a working implementation some
-     refactoring is in order
+    - Note taken on [2020-09-15 Tue 02:36] \\
+      Fixed the result accumulation. I employed a Maybe to wrap around the Variant
+      Context. There needs to be hygiene work next, the code doesn't read well and
+      neither do the types. Which means that now I have a working implementation some
+      refactoring is in order
 
-   - Note taken on [2020-09-14 Mon 18:36] \\
-     Solver core is working for up to two choices now. However, the result module is not accumulating results properly. There are several problems:
-       1. mappend is erasing previous results
-       2. We fundamentally need a way to demarcate between variables which are local to the assertion stack and those which are not
-       3. the ~ite~ building is not occurring the linked list of return values
+    - Note taken on [2020-09-14 Mon 18:36] \\
+      Solver core is working for up to two choices now. However, the result module is not accumulating results properly. There are several problems:
+      1. mappend is erasing previous results
+      2. We fundamentally need a way to demarcate between variables which are local to the assertion stack and those which are not
+      3. the ~ite~ building is not occurring the linked list of return values
+
+*** DONE Boolean solving
+    CLOSED: [2020-09-15 Tue 15:08]
+
+*** Arithmetic smt solving
+
+*** Variant Contexts can be used to limit the solver
 
 *** Investigate possible uses of StableName
 

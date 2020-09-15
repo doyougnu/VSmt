@@ -15,18 +15,25 @@ module Main where
 
 import Test.Tasty
 
-import qualified TestSuite.Solve.Plain
-import qualified TestSuite.Solve.Choices
+import qualified TestSuite.Solve.Boolean.Plain
+import qualified TestSuite.Solve.Boolean.Choices
+import qualified TestSuite.Solve.Arithmetic.Plain
 
 main :: IO ()
 main = defaultMain $
   testGroup "Local"
-  [ localOnlyTest
-
+  [ -- booleans
+  arithmetics
   ]
 
-localOnlyTest :: TestTree
-localOnlyTest = testGroup "VSMTLocalOnlyTests"
-  [ TestSuite.Solve.Plain.tests
-  , TestSuite.Solve.Choices.tests
+booleans :: TestTree
+booleans = testGroup "Boolean Tests"
+  [ TestSuite.Solve.Boolean.Plain.tests
+  , TestSuite.Solve.Boolean.Choices.tests
+  , TestSuite.Solve.Arithmetic.Plain.tests
+  ]
+
+arithmetics :: TestTree
+arithmetics = testGroup "Arithmetic Tests"
+  [ TestSuite.Solve.Arithmetic.Plain.tests
   ]

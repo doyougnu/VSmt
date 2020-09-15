@@ -116,7 +116,7 @@ data ExRefType a = ExRefTypeI a | ExRefTypeD a
   deriving (Eq,Generic,Show,Ord,Functor,Traversable,Foldable)
 
 -- | data constructor for Numeric operations
-data NPrim = I {-# UNPACK #-} !Int | D {-# UNPACK #-} !Double
+data NPrim = I !Integer | D {-# UNPACK #-} !Double
   deriving (Eq,Generic,Ord,Show)
 
 -- | Unary Numeric Operator
@@ -159,7 +159,7 @@ bRef :: IsString a => a -> Prop' a
 bRef = RefB
 {-# INLINE bRef #-}
 
-iLit :: Int -> NExpr' a
+iLit :: Integer -> NExpr' a
 iLit = LitI . I
 {-# INLINE iLit #-}
 
@@ -186,7 +186,7 @@ iChc = ChcI
 
 -- | Begin primitive instances
 
-instance PrimN Int where
+instance PrimN Integer where
   (./) = div
   (.%) = mod
 
@@ -194,7 +194,7 @@ instance PrimN Double where
   (./) = (/)
   (.%) = mod'
 
-instance Prim Bool Int where
+instance Prim Bool Integer where
   (.<)  = (<)
   (.<=) = (<=)
   (.==) = (==)
@@ -210,7 +210,7 @@ instance Prim Bool Double where
   (.>=) = (>=)
   (.>)  = (>)
 
-instance Prim (Prop' a) Int where
+instance Prim (Prop' a) Integer where
   (.<)  i j = OpIB LT  (LitI $ I i) (LitI $ I j)
   (.<=) i j = OpIB LTE (LitI $ I i) (LitI $ I j)
   (.==) i j = OpIB EQ  (LitI $ I i) (LitI $ I j)

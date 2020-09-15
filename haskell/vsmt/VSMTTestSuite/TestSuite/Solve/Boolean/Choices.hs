@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : TestSuite.Solver.Choices
+-- Module    : TestSuite.Solver.Boolean.Choices
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -11,7 +11,7 @@
 
 {-# LANGUAGE OverloadedStrings          #-}
 
-module TestSuite.Solve.Choices where
+module TestSuite.Solve.Boolean.Choices where
 
 import Data.Solve
 import Utils.VSMTTestFramework

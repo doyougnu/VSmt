@@ -93,7 +93,7 @@ sat = (fmap fst .) <$> solve
 -- separate thread to check variant context sat calls when removing choices
 type Store = Map.HashMap
 
-type Ints         = Store Var T.SInt32
+type Ints         = Store Var T.SInteger
 type Doubles      = Store Var T.SDouble
 type Bools        = Store Var T.SBool
 type Dimensions   = Store Dim T.SBool
@@ -303,7 +303,7 @@ instance Constrainable PreSolver (ExRefType Var) IL' where
     do st <- St.get
        case find i $ extract st of
          Just x  -> return . Ref' . SI $ x
-         Nothing -> do newSym <- T.sInt32 (Text.unpack i)
+         Nothing -> do newSym <- T.sInteger (Text.unpack i)
                        St.modify' (`by` add i newSym)
                        return (Ref' . SI $ newSym)
 
@@ -321,7 +321,7 @@ instance Constrainable PreSolver (ExRefType Var) IL' where
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
 
-data NRef = SI T.SInt32
+data NRef = SI T.SInteger
     | SD T.SDouble
     deriving Show
 
@@ -483,8 +483,8 @@ toIL' :: ( T.MonadSymbolic m
          , C.MonadQuery m
          , Constrainable m (ExRefType Var) IL'
          ) => NExpression -> m IL'
-toIL' (LitI (I i))  = Ref' . SI <$> T.sInt32 (show i)
-toIL' (LitI (D d))  = Ref' . SD <$> T.sDouble (show d)
+toIL' (LitI (I i))  = return . Ref' . SI $ T.literal i
+toIL' (LitI (D d))  = return . Ref' . SD $ T.literal d
 toIL' (RefI a)      = cached a
 toIL' (OpI op e)    = IOp op <$> toIL' e
 toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
@@ -504,8 +504,8 @@ toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; re
 toILSymbolic (ChcB d l r)  = return $ Chc d l r
 
 toILSymbolic' :: NExpression -> PreSolver IL'
-toILSymbolic' (LitI (I i))  = Ref' . SI <$> T.sInt32 (show i)
-toILSymbolic' (LitI (D d))  = Ref' . SD <$> T.sDouble (show d)
+toILSymbolic' (LitI (I i))  = return . Ref' . SI $ T.literal i
+toILSymbolic' (LitI (D d))  = return . Ref' . SD $ T.literal d
 toILSymbolic' (RefI a)      = cached a
 toILSymbolic' (OpI op e)    = IOp op <$> toILSymbolic' e
 toILSymbolic' (OpII op l r) = do l' <- toILSymbolic' l
@@ -611,10 +611,10 @@ accumulate' (IIOp o l r) = let l' = accumulate' l
 toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
 toSolver a = do constrain a; return $! intoCore Unit
 
-isPlainValue :: IL -> Bool
-isPlainValue Unit    = True
-isPlainValue (Ref _) = True
-isPlainValue _       = False
+isValue :: IL -> Bool
+isValue Unit    = True
+isValue (Ref _) = True
+isValue _       = False
 
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
@@ -664,7 +664,7 @@ evaluate (BBOp And l r) = do (VarCore l') <- evaluate l
                              -- will pay off in the solver. Thus we perform a
                              -- check here to determine if we can reduce the
                              -- variational core even after a single pass
-                             if isPlainValue l' || isPlainValue r'
+                             if isValue l' || isValue r'
                                then evaluate res
                                else return $! intoCore res
 evaluate (BBOp op l r)  = return $ intoCore $ BBOp op (accumulate l) (accumulate r)

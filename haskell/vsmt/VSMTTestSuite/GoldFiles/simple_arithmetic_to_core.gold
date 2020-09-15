@@ -1,0 +1,5 @@
+model := 
+y   -->   (ite  (7 :: Integer) False :: Bool)
+
+Sat_Model := 
+
