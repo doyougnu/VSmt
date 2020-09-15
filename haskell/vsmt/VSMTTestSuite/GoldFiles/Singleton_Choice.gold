@@ -1,7 +1,7 @@
 model := 
-Aleft   -->   (ite ((#t and -(AA))) (False :: Bool) False :: Bool)
-Aright   -->   (ite ((#t and -(AA))) (True :: Bool) False :: Bool)
-AA   -->   (ite ((#t and -(AA))) (False :: Bool) False :: Bool)
+Aleft   -->   (ite ~(AA) (False :: Bool) (ite AA (True :: Bool) False :: Bool))
+Aright   -->   (ite ~(AA) (True :: Bool) False :: Bool)
+AA   -->   (ite ~(AA) (False :: Bool) (ite AA (False :: Bool) False :: Bool))
 
 Sat_Model := 
-((#t and -(AA)) or ((#t and AA) or #t))
+(~(AA) or AA)

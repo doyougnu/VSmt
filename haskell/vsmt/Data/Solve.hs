@@ -156,8 +156,8 @@ instance Has Dimensions where extract   = dimensions
 instance Has Context where extract     = config
                            wrap    d w = w{config=d}
 
-instance Has VariantContext where extract     = vConfig
-                                  wrap    d w = w{vConfig=d}
+instance Has (Maybe VariantContext) where extract     = vConfig
+                                          wrap    d w = w{vConfig=d}
 
 
 type SVariantContext = S.SBool
@@ -176,7 +176,7 @@ instance Monoid    SVariantContext where mempty = true
 -- as small as possible
 data State = State
     { result     :: Result
-    , vConfig    :: VariantContext  -- the formula representation of the config
+    , vConfig    :: Maybe VariantContext  -- the formula representation of the config
     , config     :: Context         -- a map or set representation of the config
     , sConfig    :: SVariantContext -- the symbolic representation of the config
     , ints       :: Ints
@@ -658,10 +658,17 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
 store :: Result -> Solver ()
 store = St.modify' . flip by . (<>)
 
+-- | TODO newtype this maybe stuff, this is an alternative instance
+onVContext :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
+onVContext Nothing Nothing = Nothing
+onVContext a@(Just _) Nothing = a
+onVContext Nothing b@(Just _) = b
+onVContext (Just l) (Just r)  = Just $ l &&& r
+
 updateConfigs :: (St.MonadState State m) => SVariantContext -> Prop' Dim -> (Dim, Bool) -> m ()
 updateConfigs conf context (d,val) = do
   St.modify' (`by` flip (&&&) conf)
-  St.modify' (`by` flip (&&&) (VariantContext context))
+  St.modify' (`by` (`onVContext` (Just $ VariantContext context)))
   St.modify' (`by` add d val)
 
 resetTo :: (St.MonadState State m) => State -> m ()
