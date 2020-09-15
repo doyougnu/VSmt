@@ -160,6 +160,11 @@ instance Has VariantContext where extract     = vConfig
                                   wrap    d w = w{vConfig=d}
 
 
+type SVariantContext = S.SBool
+instance Semigroup SVariantContext where (<>) = (&&&)
+instance Monoid    SVariantContext where mempty = true
+
+
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions. We make a trade off of memory
 -- for speed and represent the configuration in several ways. We keep a setline
@@ -249,7 +254,7 @@ instance Constrainable Solver Var IL where
   cached ref = do
     st <- St.get
     case find ref $ extract st of
-      Just x -> return (Ref x)
+      Just x -> logWith "cache hit" ref >> return (Ref x)
       Nothing -> do
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
         St.modify' (`by` add ref newSym)
@@ -651,10 +656,7 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
 
 ------------------------- Removing Choices -------------------------------------
 store :: Result -> Solver ()
-store s = do
-  logWith "Model: " s
-  St.modify' (`by` (<> s))
-  -- St.modify' . flip by . (<>)
+store = St.modify' . flip by . (<>)
 
 updateConfigs :: (St.MonadState State m) => SVariantContext -> Prop' Dim -> (Dim, Bool) -> m ()
 updateConfigs conf context (d,val) = do
@@ -664,8 +666,8 @@ updateConfigs conf context (d,val) = do
 
 resetTo :: (St.MonadState State m) => State -> m ()
 resetTo s = do
-  r <- St.gets result
-  St.put s{result=r}
+  st <- St.get
+  St.put s{result=result st, bools=bools st, ints=ints st, doubles=doubles st}
 
 choose :: VarCore -> Solver ()
 choose (VarCore Unit) = do

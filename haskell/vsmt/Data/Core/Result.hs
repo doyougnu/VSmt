@@ -49,8 +49,6 @@ import           Data.Core.Pretty
 -- You should view this as an internal datatype, in the average case this will
 -- be transformed into a Map of "variable" -> SMTLIB2 program where the SMTLIB2
 -- program will dispatch the right value based on the values of dimensions
-type SVariantContext = S.SBool
-
 newtype ResultFormula = ResultFormula [(VariantContext, I.CV)]
     deriving (Eq,Show,Generic,Semigroup,Monoid)
 
@@ -98,9 +96,6 @@ instance (Pretty a, Pretty b) => Pretty (a,b) where
 data Result' d = Result' { variables :: VariableMap d
                          , satResult :: VariantContext
                          } deriving (Eq,Show)
-
-instance Semigroup SVariantContext where (<>) = (&&&)
-instance Monoid    SVariantContext where mempty = true
 
 instance (Eq d, Hashable d) => Semigroup (Result' d) where
   (<>) Result' {..} Result'{variables=v,satResult=s} =

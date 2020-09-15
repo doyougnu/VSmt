@@ -1,13 +1,11 @@
 model := 
-BB_0   -->   (ite (((#t and -(AA)) and BB)) (False :: Bool) False :: Bool)
-Aleft   -->   (ite (((#t and AA) and BB)) (True :: Bool) False :: Bool)
-BRight   -->   (ite (((#t and AA) and -(BB))) (True :: Bool) False :: Bool)
-BRight_0   -->   (ite (((#t and -(AA)) and -(BB))) (True :: Bool) False :: Bool)
-BB   -->   (ite (((#t and AA) and BB)) (False :: Bool) False :: Bool)
-Bleft_0   -->   (ite (((#t and -(AA)) and BB)) (True :: Bool) False :: Bool)
-Aright   -->   (ite (((#t and -(AA)) and BB)) (True :: Bool) False :: Bool)
-AA   -->   (ite (((#t and AA) and BB)) (False :: Bool) False :: Bool)
-Bleft   -->   (ite (((#t and AA) and BB)) (True :: Bool) False :: Bool)
+BB_0   -->   (ite (((#t and -(AA)) and -(BB))) (False :: Bool) False :: Bool)
+Aleft   -->   (ite (((#t and -(AA)) and -(BB))) (False :: Bool) False :: Bool)
+BRight   -->   (ite (((#t and -(AA)) and -(BB))) (True :: Bool) False :: Bool)
+BB   -->   (ite (((#t and -(AA)) and -(BB))) (False :: Bool) False :: Bool)
+Aright   -->   (ite (((#t and -(AA)) and -(BB))) (True :: Bool) False :: Bool)
+AA   -->   (ite (((#t and -(AA)) and -(BB))) (False :: Bool) False :: Bool)
+Bleft   -->   (ite (((#t and -(AA)) and -(BB))) (False :: Bool) False :: Bool)
 
 Sat_Model := 
-((((#t or ((#t and AA) and BB)) or ((#t and AA) and -(BB))) or ((#t and -(AA)) and BB)) or ((#t and -(AA)) and -(BB)))
+(((#t and -(AA)) and -(BB)) or (((#t and -(AA)) and BB) or (((#t and AA) and -(BB)) or (((#t and AA) and BB) or #t))))
