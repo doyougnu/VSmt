@@ -48,6 +48,12 @@
 
 ** IN PROG Solver
 
+   - Note taken on [2020-09-14 Mon 18:36] \\
+     Solver core is working for up to two choices now. However, the result module is not accumulating results properly. There are several problems:
+       1. mappend is erasing previous results
+       2. We fundamentally need a way to demarcate between variables which are local to the assertion stack and those which are not
+       3. the ~ite~ building is not occurring the linked list of return values
+
 *** Investigate possible uses of StableName
 
 *** Investigate possible uses with IORef patterns
