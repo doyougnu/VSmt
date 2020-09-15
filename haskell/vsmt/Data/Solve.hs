@@ -28,7 +28,7 @@ import           Control.Monad.Except       (MonadError)
 import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
                                              logDebug, runStdoutLoggingT)
 import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
-                                                   gets, modify', runStateT)
+                                                   gets, modify', runStateT,put)
 import           Control.Monad.Trans        (MonadIO, MonadTrans, lift, liftIO)
 import qualified Data.HashMap.Strict        as Map
 -- import qualified Data.Map.Strict            as M
@@ -54,6 +54,9 @@ logWith :: (MonadLogger m, Show a) => Text.Text -> a -> m ()
 logWith msg value = log $ msg <> sep <> Text.pack (show value)
   where sep :: Text.Text
         sep = " : "
+
+logState :: Solver ()
+logState = St.get >>= logWith "State: "
 
 ------------------------------ Internal Api -------------------------------------
 findVCore :: IL -> Solver VarCore
@@ -243,19 +246,21 @@ class Show a => Constrainable m a b where cached :: a -> m b
 
 -- TODO fix this duplication
 instance Constrainable Solver Var IL where
-  cached ref   = do st <- St.get
-                    case find ref $ extract st of
-                      Just x  -> return (Ref x)
-                      Nothing -> do newSym <- C.freshVar (Text.unpack ref)
-                                    St.modify' (`by` add ref newSym)
-                                    return (Ref newSym)
+  cached ref = do
+    st <- St.get
+    case find ref $ extract st of
+      Just x -> return (Ref x)
+      Nothing -> do
+        newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
+        St.modify' (`by` add ref newSym)
+        return (Ref newSym)
 
 instance Constrainable Solver (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
     do st <- St.get
        case find i $ extract st of
          Just x  -> return . Ref' . SI $ x
-         Nothing -> do newSym <- C.freshVar (Text.unpack i)
+         Nothing -> do newSym <- T.label (Text.unpack i) <$> C.freshVar (Text.unpack i)
                        St.modify' (`by` add i newSym)
                        return (Ref' . SI $ newSym)
 
@@ -263,7 +268,7 @@ instance Constrainable Solver (ExRefType Var) IL' where
     do st <- St.get
        case find d $ extract st of
          Just x  -> return . Ref' $ SD x
-         Nothing -> do newSym <- C.freshVar (Text.unpack d)
+         Nothing -> do newSym <- T.label (Text.unpack d) <$> C.freshVar (Text.unpack d)
                        St.modify' (`by` add d newSym)
                        return $! Ref' $ SD newSym
 
@@ -645,16 +650,22 @@ evaluate' (IIOp o l r) = let l' = accumulate' l
                              evaluate' $! accumulate' (IIOp o l' r')
 
 ------------------------- Removing Choices -------------------------------------
-store :: ( St.MonadState (Contains that) m
-         , Has that
-         , Semigroup that) => that -> m ()
-store = St.modify' . flip by . (<>)
+store :: Result -> Solver ()
+store s = do
+  logWith "Model: " s
+  St.modify' (`by` (<> s))
+  -- St.modify' . flip by . (<>)
 
-updateConfigs :: (Has that, St.MonadState State m, Contains that ~ State)
-              => that -> Prop' Dim -> m ()
-updateConfigs conf context = do
-  St.modify' (`by` const conf)
+updateConfigs :: (St.MonadState State m) => SVariantContext -> Prop' Dim -> (Dim, Bool) -> m ()
+updateConfigs conf context (d,val) = do
+  St.modify' (`by` flip (&&&) conf)
   St.modify' (`by` flip (&&&) (VariantContext context))
+  St.modify' (`by` add d val)
+
+resetTo :: (St.MonadState State m) => State -> m ()
+resetTo s = do
+  r <- St.gets result
+  St.put s{result=r}
 
 choose :: VarCore -> Solver ()
 choose (VarCore Unit) = do
@@ -662,34 +673,31 @@ choose (VarCore Unit) = do
   logWith "Choose Unit with State" s
   St.get >>= getResult . vConfig >>= store
 choose (VarCore (Chc d l r)) =
-  do let l' = toIL l -- keep these lazy they may
-         r' = toIL r -- not be chosen
-     sConf <- St.gets sConfig
-     S.getModelValue d <$> liftIO (S.sat sConf) >>= \case
-       Just True  -> log "left"  >> l' >>= choose . VarCore
-       Just False -> log "right" >> r' >>= choose . VarCore
-       Nothing ->
+  do conf <- St.gets config
+     case find d conf of
+       Just True  -> log "left"  >> toIL l >>= choose . VarCore
+       Just False -> log "right" >> toIL r >>= choose . VarCore
+       Nothing -> -- then this is a new dimension
          do
-           sD <- T.label "Dimension!" <$> C.freshVar d
+           sD <- T.label ("Dimension: " ++ d) <$> C.freshVar d
+           s <- St.get -- cache the state
+
          -- left side
            C.inNewAssertionStack $
              do log "New Stack Left"
-                c <- St.gets sConfig
-                logWith "Conf Before" c
-                logWith "LConf" (sConf &&& sD)
-                updateConfigs (sConf &&& sD) (bRef d)
-                c' <- St.gets sConfig
-                logWith "Conf After" c'
-                l' >>= evaluate >>= choose
-         -- right side
+                updateConfigs sD (bRef d) (d,True)
+                toIL l >>= evaluate >>= choose
+
+           -- reset for left side
+           resetTo s
+
+           -- right side
            C.inNewAssertionStack $
              do log "New Stack Right"
-                logWith "Conf Before" sConf
-                logWith "RConf" (sConf &&& sD)
-                updateConfigs (sConf &&& bnot sD) (bnot $ bRef d)
-                c' <- St.gets sConfig
-                logWith "Conf After" c'
-                r' >>= evaluate >>= choose
+                updateConfigs (bnot sD) (bnot $ bRef d) (d,False)
+                toIL r >>= evaluate >>= choose
+
+
 choose (VarCore (BBOp op (Chc d cl cr) r)) =
   do let l' = toIL cl
          r' = toIL cr

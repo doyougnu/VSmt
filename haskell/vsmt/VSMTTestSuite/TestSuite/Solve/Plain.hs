@@ -28,6 +28,6 @@ allTrue = flip sat Nothing $ bRef "foo" &&& bRef "bar" &&& bRef "baz"
 
 leftChoice' :: IO Result
 -- leftChoice = flip sat (Just $ VariantContext $ bRef "AA") $ bChc "AA" (bRef "aaa") (bRef "foo")
-leftChoice' = flip sat Nothing $ bChc "AA" (bRef "aaa") (bRef "foo") &&& true &&& true
+leftChoice' = flip sat Nothing $ bChc "AA" (bRef "left") (bRef "right")
 
 -- leftChoice = show <$> leftChoice'
