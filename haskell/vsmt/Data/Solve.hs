@@ -25,17 +25,20 @@
 module Data.Solve where
 
 import           Control.Monad.Except       (MonadError)
-import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
-                                             logDebug, runStdoutLoggingT)
+import Control.Monad.Logger
+  ( LoggingT
+  , MonadLogger(..)
+  , NoLoggingT(runNoLoggingT)
+  , logDebug
+  -- , runStdoutLoggingT
+  )
 import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
                                                    gets, modify', runStateT,put)
 import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
 import qualified Data.HashMap.Strict        as Map
--- import qualified Data.Map.Strict            as M
 import           Data.Maybe                 (fromJust, fromMaybe)
 import qualified Data.Text                  as Text
 import           Prelude                    hiding (EQ, GT, LT, log)
--- import Data.Function ((&))
 
 import qualified Data.SBV                   as S
 import           Data.SBV.Internals         (SolverContext (..))
@@ -73,8 +76,8 @@ solve i vConf =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConf
-         (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
-         C.query $ runStdoutLoggingT $ runSolver st $
+         (il, st) <- runNoLoggingT $ runSolver mempty $ toILSymbolic i
+         C.query $ runNoLoggingT $ runSolver st $
            do core <- findVCore il
               _ <- choose core
               solution
@@ -254,11 +257,21 @@ instance Constrainable Solver Var IL where
   cached ref = do
     st <- St.get
     case find ref $ extract st of
-      Just x -> logWith "cache hit" ref >> return (Ref x)
+      Just x -> return (Ref x)
       Nothing -> do
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
         St.modify' (`by` add ref newSym)
         return (Ref newSym)
+
+instance Constrainable Solver Dim T.SBool where
+  cached ref = do
+    st <- St.get
+    case find ref $ extract st of
+      Just x -> return x
+      Nothing -> do
+        newSym <- T.label ref <$> C.freshVar ref
+        St.modify' (`by` add ref newSym)
+        return newSym
 
 instance Constrainable Solver (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
@@ -439,6 +452,14 @@ data IL' = Ref' NRef
     | Chc' Dim NExpression NExpression
     deriving Show
 
+-- | A simple tree rotation helper function. This is pivotal because as we begin
+-- to remove choices we must ensure that each binary connective remains intact,
+-- this means that we cannot perform arbitrary recursion and thus must rotate
+-- the tree until we find a choice
+rotate :: IL -> IL
+rotate (BBOp opOuter (BBOp opInner l r) r') = BBOp opInner l (BBOp opOuter r r')
+rotate x = x
+
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
@@ -451,7 +472,7 @@ toIL :: ( St.MonadState State m
         ) => Proposition -> m IL
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
-toIL (RefB ref)    = do logWith "Found" ref; cached ref
+toIL (RefB ref)    = cached ref
 toIL (OpB op e)    = BOp op <$> toIL e
 toIL (OpBB op l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp op l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
@@ -474,9 +495,11 @@ toIL' (ChcI d l r)  = return $ Chc' d l r
 toILSymbolic :: Proposition -> PreSolver IL
 toILSymbolic (LitB True)   = return $! Ref T.sTrue
 toILSymbolic (LitB False)  = return $! Ref T.sFalse
-toILSymbolic (RefB ref)    = do logWith "Found" ref; cached ref
+toILSymbolic (RefB ref)    = cached ref
 toILSymbolic (OpB op e)    = BOp op <$> toILSymbolic e
-toILSymbolic (OpBB op l r) = do l' <- toILSymbolic  l; r' <- toILSymbolic r;  return $ BBOp op l' r'
+toILSymbolic (OpBB op l r) = do l' <- toILSymbolic  l
+                                r' <- toILSymbolic r
+                                return $ BBOp op l' r'
 toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $ IBOp op l' r'
 toILSymbolic (ChcB d l r)  = return $ Chc d l r
 
@@ -485,7 +508,9 @@ toILSymbolic' (LitI (I i))  = Ref' . SI <$> T.sInt32 (show i)
 toILSymbolic' (LitI (D d))  = Ref' . SD <$> T.sDouble (show d)
 toILSymbolic' (RefI a)      = cached a
 toILSymbolic' (OpI op e)    = IOp op <$> toILSymbolic' e
-toILSymbolic' (OpII op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $! IIOp op l' r'
+toILSymbolic' (OpII op l r) = do l' <- toILSymbolic' l
+                                 r' <- toILSymbolic' r
+                                 return $! IIOp op l' r'
 toILSymbolic' (ChcI d l r)  = return $ Chc' d l r
 
 -------------------------------- Accumulation -----------------------------------
@@ -554,7 +579,8 @@ accumulate x@(IBOp _ Chc' {} (Ref' _)) = x
 accumulate (BOp Not e)   = accumulate $ driveNotDown e
 accumulate (BBOp op l r) = let l' = accumulate l
                                r' = accumulate r in
-                              accumulate (BBOp op l' r')
+                              -- accumulate (BBOp op l' r')
+                              BBOp op l' r'
 accumulate (IBOp op l r) = accumulate $! IBOp op (accumulate' l) (accumulate' r)
 accumulate x = x
 
@@ -585,14 +611,18 @@ accumulate' (IIOp o l r) = let l' = accumulate' l
 toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
 toSolver a = do constrain a; return $! intoCore Unit
 
+isPlainValue :: IL -> Bool
+isPlainValue Unit    = True
+isPlainValue (Ref _) = True
+isPlainValue _       = False
+
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
 evaluate :: IL -> Solver VarCore
   -- computation rules
-evaluate Unit     = do log "Unit"
-                       s <- St.get
-                       logWith "State: " s
+evaluate Unit     = do s <- St.get
+                       logWith "Received Unit with State: " s
                        return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
@@ -628,8 +658,16 @@ evaluate (IBOp op l r)        = evaluate $! IBOp op (evaluate' l) (evaluate' r)
 evaluate x@(BOp Not _)  = evaluate $ accumulate x
 evaluate (BBOp And l r) = do (VarCore l') <- evaluate l
                              (VarCore r') <- evaluate r
-                             evaluate $! BBOp And l' r'
-evaluate (BBOp op l r)  = evaluate $! BBOp op (accumulate l) (accumulate r)
+                             let res = BBOp And l' r'
+                             -- this is a hot loop, but we want to make the
+                             -- variational core as small as possible because it
+                             -- will pay off in the solver. Thus we perform a
+                             -- check here to determine if we can reduce the
+                             -- variational core even after a single pass
+                             if isPlainValue l' || isPlainValue r'
+                               then evaluate res
+                               else return $! intoCore res
+evaluate (BBOp op l r)  = return $ intoCore $ BBOp op (accumulate l) (accumulate r)
 
 
 evaluate' :: IL' -> IL'
@@ -665,16 +703,54 @@ onVContext a@(Just _) Nothing = a
 onVContext Nothing b@(Just _) = b
 onVContext (Just l) (Just r)  = Just $ l &&& r
 
+-- | A function that enforces each configuration is updated in sync
 updateConfigs :: (St.MonadState State m) => SVariantContext -> Prop' Dim -> (Dim, Bool) -> m ()
 updateConfigs conf context (d,val) = do
   St.modify' (`by` flip (&&&) conf)
   St.modify' (`by` (`onVContext` (Just $ VariantContext context)))
   St.modify' (`by` add d val)
 
+-- | Reset the state but maintain the cache's
 resetTo :: (St.MonadState State m) => State -> m ()
 resetTo s = do
   st <- St.get
   St.put s{result=result st, bools=bools st, ints=ints st, doubles=doubles st}
+
+-- | Given a dimensions and a way to continue with the left alternative, and a
+-- way to continue with the right alternative. Spawn two new subprocesses that
+-- process the alternatives plugging the choice hole with its respective
+-- alternatives
+alternative ::
+     ( St.MonadState State m
+     , MonadLogger m
+     , MonadIO m
+     , C.MonadQuery m
+     , Constrainable m Dim T.SBool)
+  => Dim -> m () -> m () -> m ()
+alternative dim goLeft goRight =
+  do conf <- St.gets config
+     case find dim conf of
+       Just True  -> log "Left Selected"  >> goLeft
+       Just False -> log "Right Selected" >> goRight
+       Nothing -> -- then this is a new dimension
+         do
+           sD <- cached dim
+           s <- St.get -- cache the state
+
+         -- left side
+           C.inNewAssertionStack $
+             do log "Left Alternative"
+                updateConfigs sD (bRef dim) (dim,True)
+                goLeft
+
+           -- reset for left side
+           resetTo s
+
+           -- right side
+           C.inNewAssertionStack $
+             do log "Right Alternative"
+                updateConfigs (bnot sD) (bnot $ bRef dim) (dim,False)
+                goRight
 
 choose :: VarCore -> Solver ()
 choose (VarCore Unit) = do
@@ -682,33 +758,20 @@ choose (VarCore Unit) = do
   logWith "Choose Unit with State" s
   St.get >>= getResult . vConfig >>= store
 choose (VarCore (Chc d l r)) =
-  do conf <- St.gets config
-     case find d conf of
-       Just True  -> log "left"  >> toIL l >>= choose . VarCore
-       Just False -> log "right" >> toIL r >>= choose . VarCore
-       Nothing -> -- then this is a new dimension
-         do
-           sD <- T.label ("Dimension: " ++ d) <$> C.freshVar d
-           s <- St.get -- cache the state
-
-         -- left side
-           C.inNewAssertionStack $
-             do log "New Stack Left"
-                updateConfigs sD (bRef d) (d,True)
-                toIL l >>= evaluate >>= choose
-
-           -- reset for left side
-           resetTo s
-
-           -- right side
-           C.inNewAssertionStack $
-             do log "New Stack Right"
-                updateConfigs (bnot sD) (bnot $ bRef d) (d,False)
-                toIL r >>= evaluate >>= choose
+  do
+    log "singleton choice"
+    conf <- St.gets config
+    let goLeft  = toIL l >>= evaluate >>= choose
+        goRight = toIL r >>= evaluate >>= choose
+    case find d conf of
+      Just True  -> log "left"  >> goLeft
+      Just False -> log "right" >> goRight
+      Nothing    -> alternative d goLeft goRight -- then this is a new dimension
 
 
 choose (VarCore (BBOp op (Chc d cl cr) r)) =
   do
+    log "Choice in left"
     conf <- St.gets config
     let goLeft  = toIL cl >>= evaluate . (\x -> BBOp op x r) >>= choose
         goRight = toIL cr >>= evaluate . (\x -> BBOp op x r) >>= choose
@@ -716,26 +779,12 @@ choose (VarCore (BBOp op (Chc d cl cr) r)) =
     case find d conf of
        Just True  -> goLeft
        Just False -> goRight
-       Nothing    -> -- then we have not observed this choice before
-         do sD <- T.label ("Dimension: " ++ d) <$> C.freshVar d
-            s <- St.get -- cache the state
-
-            -- left side
-            C.inNewAssertionStack $ do
-              updateConfigs sD (bRef d) (d,True)
-              goLeft
-
-            -- reset
-            resetTo s
-
-            -- right side
-            C.inNewAssertionStack $ do
-              updateConfigs (bnot sD) (bnot $ bRef d) (d,False)
-              goRight
+       Nothing    -> alternative d goLeft goRight
 
 
 choose (VarCore (BBOp op l (Chc d cl cr))) =
   do
+    log "Choice in Right"
     conf <- St.gets config
     let goLeft  = toIL cl >>= evaluate . BBOp op l >>= choose
         goRight = toIL cr >>= evaluate . BBOp op l >>= choose
@@ -743,23 +792,8 @@ choose (VarCore (BBOp op l (Chc d cl cr))) =
     case find d conf of
        Just True  -> goLeft
        Just False -> goRight
-       Nothing    -> -- then we have not observed this choice before
-         do sD <- T.label ("Dimension: " ++ d) <$> C.freshVar d
-            s <- St.get -- cache the state
-
-            -- left side
-            C.inNewAssertionStack $ do
-              updateConfigs sD (bRef d) (d,True)
-              goLeft
-
-            -- reset
-            resetTo s
-
-            -- right side
-            C.inNewAssertionStack $ do
-              updateConfigs (bnot sD) (bnot $ bRef d) (d,False)
-              goRight
---   choose (VarCore l) >> choose (VarCore r)
+       Nothing    -> alternative d goLeft goRight
+choose (VarCore x@BBOp {}) = do log "rotating"; choose . VarCore $ rotate x
 choose _ = error "it did not cover all the cases"
 
 --------------------------- Variant Context Helpers ----------------------------

@@ -16,16 +16,17 @@ module Main where
 import Test.Tasty
 
 import qualified TestSuite.Solve.Plain
+import qualified TestSuite.Solve.Choices
 
 main :: IO ()
 main = defaultMain $
-  testGroup "Local" $
+  testGroup "Local"
   [ localOnlyTest
 
   ]
 
 localOnlyTest :: TestTree
 localOnlyTest = testGroup "VSMTLocalOnlyTests"
-  [
-  TestSuite.Solve.Plain.tests
+  [ TestSuite.Solve.Plain.tests
+  , TestSuite.Solve.Choices.tests
   ]

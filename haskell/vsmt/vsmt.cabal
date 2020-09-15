@@ -104,6 +104,7 @@ Test-Suite VSMTTest
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework
                   , TestSuite.Solve.Plain
+                  , TestSuite.Solve.Choices
 
 Benchmark VSMTBench
   type            : exitcode-stdio-1.0
