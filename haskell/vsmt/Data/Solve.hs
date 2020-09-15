@@ -29,7 +29,7 @@ import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
                                              logDebug, runStdoutLoggingT)
 import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
                                                    gets, modify', runStateT,put)
-import           Control.Monad.Trans        (MonadIO, MonadTrans, lift, liftIO)
+import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
 import qualified Data.HashMap.Strict        as Map
 -- import qualified Data.Map.Strict            as M
 import           Data.Maybe                 (fromJust, fromMaybe)
@@ -699,58 +699,57 @@ choose (VarCore (Chc d l r)) =
 
 
 choose (VarCore (BBOp op (Chc d cl cr) r)) =
-  do let l' = toIL cl
-         r' = toIL cr
-     sConf <- St.gets sConfig
+  do
+    conf <- St.gets config
+    let goLeft  = toIL cl >>= evaluate . (\x -> BBOp op x r) >>= choose
+        goRight = toIL cr >>= evaluate . (\x -> BBOp op x r) >>= choose
      -- check if d is in the configuration, and if so what is its value
-     T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
-       Just True  -> l' >>= choose . VarCore
-       Just False -> r' >>= choose . VarCore
+    case find d conf of
+       Just True  -> goLeft
+       Just False -> goRight
        Nothing    -> -- then we have not observed this choice before
-         do let sD = C.freshVar d
-                lConf = (sConf &&&)        <$> sD -- set Dim to true in conf
-                rConf = (sConf &&&) . bnot <$> sD -- Dim is false in conf
+         do sD <- T.label ("Dimension: " ++ d) <$> C.freshVar d
+            s <- St.get -- cache the state
+
             -- left side
-            C.inNewAssertionStack $
-              do
-                St.modify' (`by` add d True)
-                lConf >>= St.modify' . wrap -- set conf to new conf with new choice
-                St.modify' (`by` (&&&) (VariantContext $ bRef d))
-                (\x -> BBOp op x r) <$> l' >>= evaluate >>= choose -- plug the hole
+            C.inNewAssertionStack $ do
+              updateConfigs sD (bRef d) (d,True)
+              goLeft
+
+            -- reset
+            resetTo s
+
             -- right side
-            C.inNewAssertionStack $
-              do
-                St.modify' (`by` add d False)
-                rConf >>= St.modify' . wrap
-                St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
-                (\x -> BBOp op x r) <$> r' >>= evaluate >>= choose
+            C.inNewAssertionStack $ do
+              updateConfigs (bnot sD) (bnot $ bRef d) (d,False)
+              goRight
+
+
 choose (VarCore (BBOp op l (Chc d cl cr))) =
-  do let l' = toIL cl
-         r' = toIL cr
-     sConf <- St.gets sConfig
+  do
+    conf <- St.gets config
+    let goLeft  = toIL cl >>= evaluate . BBOp op l >>= choose
+        goRight = toIL cr >>= evaluate . BBOp op l >>= choose
      -- check if d is in the configuration, and if so what is its value
-     T.getModelValue d <$> liftIO (S.sat sConf) >>= \case
-       Just True  -> l' >>= choose . VarCore
-       Just False -> r' >>= choose . VarCore
+    case find d conf of
+       Just True  -> goLeft
+       Just False -> goRight
        Nothing    -> -- then we have not observed this choice before
-         do let sD = C.freshVar d
-                lConf = (sConf &&&)        <$> sD -- set Dim to true in conf
-                rConf = (sConf &&&) . bnot <$> sD -- Dim is false in conf
+         do sD <- T.label ("Dimension: " ++ d) <$> C.freshVar d
+            s <- St.get -- cache the state
+
             -- left side
-            C.inNewAssertionStack $
-              do
-                St.modify' (`by` add d True)
-                lConf >>= St.modify' . wrap -- set conf to new conf with new choice
-                St.modify' (`by` (&&&) (VariantContext $ bRef d))
-                BBOp op l <$> l' >>= evaluate >>= choose -- plug the hole
+            C.inNewAssertionStack $ do
+              updateConfigs sD (bRef d) (d,True)
+              goLeft
+
+            -- reset
+            resetTo s
+
             -- right side
-            C.inNewAssertionStack $
-              do
-                St.modify' (`by` add d False)
-                rConf >>= St.modify' . wrap
-                St.modify' (`by` (&&&) (VariantContext $ bnot $ bRef d))
-                BBOp op l <$> r' >>= evaluate >>= choose
--- choose (VarCore (BBOp And l r)) = -- recursive case
+            C.inNewAssertionStack $ do
+              updateConfigs (bnot sD) (bnot $ bRef d) (d,False)
+              goRight
 --   choose (VarCore l) >> choose (VarCore r)
 choose _ = error "it did not cover all the cases"
 
