@@ -48,6 +48,12 @@
 
 ** IN PROG Solver
 
+   - Note taken on [2020-09-15 Tue 02:36] \\
+     Fixed the result accumulation. I employed a Maybe to wrap around the Variant
+     Context. There needs to be hygiene work next, the code doesn't read well and
+     neither do the types. Which means that now I have a working implementation some
+     refactoring is in order
+
    - Note taken on [2020-09-14 Mon 18:36] \\
      Solver core is working for up to two choices now. However, the result module is not accumulating results properly. There are several problems:
        1. mappend is erasing previous results
