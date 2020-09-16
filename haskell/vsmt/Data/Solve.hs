@@ -812,9 +812,37 @@ choose (VarCore (IBOp op l (Chc' d cl cr))) =
       Nothing    -> alternative d goLeft goRight
 
 choose (VarCore (IBOp op l r)) = do log "arith recurrence"
-                                    choose' op l r
+                                    choose' op (toLoc l) (toLoc r)
 
 choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
+
+---------------------- Removing Choices in Arithmetic --------------------------
+-- | A zipper context that can only fold from the left
+data Ctx = InL Ctx NN_N IL' -- ^ In lhs, Ctx is parent node, by op, with right
+                            -- child IL'
+         | InR NRef NN_N Ctx
+         | Top
+         deriving Show
+
+type Loc = (IL', Ctx)
+
+toLoc :: IL' -> Loc
+toLoc x = (x, Top)
+
+-- | Find the values and return the value as the focus with context
+findChoice :: Loc -> Loc
+findChoice x@(Ref'{}, Top) = x -- done
+findChoice x@(Chc' {}, _) = x -- done
+findChoice (IIOp op l r, Top) = findChoice (l, InL Top op r) -- drive down to the left
+  -- discharge two references
+findChoice (l@Ref' {}, InL parent op r@Ref' {}) = findChoice (accumulate' $ IIOp op l r, parent)
+  -- fold
+findChoice (r@Ref' {}, InR acc op parent) = findChoice (accumulate' $ IIOp op (Ref' acc) r, parent)
+  -- switch
+findChoice (Ref' l, InL parent op r) = findChoice (r, InR l op parent)
+  -- recur
+findChoice (IIOp op l r, ctx) = findChoice (l, InL ctx op r)
+findChoice (IOp {}, _) = error "Can't have unary Ops in IL'!!!"
 
 -- | Here we need to detect choices that cannot be rotated up the tree due to
 -- the hard barrier between arithmetic and booleans, i.e., that arithmetic _can
@@ -822,64 +850,63 @@ choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variat
 -- we capture the outer context, recur down to the first choice and then call
 -- back up to the boolean solver. This is effectively a zipper encoded as a
 -- function.
-choose' :: NN_B -> IL' -> IL' -> Solver ()
-choose' rootOp x@(Ref' _) y@Ref' {} = evaluate (IBOp rootOp x y) >>= choose
+choose' :: NN_B -> Loc -> Loc -> Solver ()
+choose' rootOp (x@Ref' {}, Top) (y@Ref' {}, Top) = evaluate (IBOp rootOp x y) >>= choose
 
   -- lhs <B-Operator> (C <A-operator> r)
-choose' rootOp lhs (IIOp op (Chc' d cl cr) r) =
-  do conf <- St.gets config
-     let goLeft  = toIL' cl >>= choose' rootOp lhs . accumulate' . (\x -> IIOp op x r)
-         goRight = toIL' cr >>= choose' rootOp lhs . accumulate' . (\x -> IIOp op x r)
-
-     case find d conf of
-       Just True  -> goLeft
-       Just False -> goRight
-       Nothing    -> alternative d goLeft goRight
-
---   -- lhs <B-Operator> (l <A-operator> C)
-choose' rootOp lhs (IIOp op l (Chc' d cl cr)) =
-  do conf <- St.gets config
-     let goLeft  = toIL' cl >>= choose' rootOp lhs . accumulate' . IIOp op l
-         goRight = toIL' cr >>= choose' rootOp lhs . accumulate' . IIOp op l
-
-     case find d conf of
-       Just True  -> goLeft
-       Just False -> goRight
-       Nothing    -> alternative d goLeft goRight
-
   -- (l <A-operator> C) <B-Operator> rhs
-choose' rootOp (IIOp op l (Chc' d cl cr)) rhs =
-  do conf <- St.gets config
-     let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs) . accumulate' . IIOp op l
-         goRight = toIL' cr >>= (\x -> choose' rootOp x rhs) . accumulate' . IIOp op l
+choose' rootOp lhs rhs =
+  do
+  let l' = findChoice lhs
+      r' = findChoice rhs
+  case (l', r') of
+    ((Chc' d cl cr, ctx), rhs') ->
+      do
+        conf <- St.gets config
+        let goLeft  = toIL' cl >>= (\x -> choose' rootOp (x, ctx) rhs') . accumulate'
+            goRight = toIL' cr >>= (\x -> choose' rootOp (x, ctx) rhs') . accumulate'
 
-     case find d conf of
-       Just True  -> goLeft
-       Just False -> goRight
-       Nothing    -> alternative d goLeft goRight
+        case find d conf of
+          Just True  -> goLeft
+          Just False -> goRight
+          Nothing    -> alternative d goLeft goRight
+
+    (lhs', (Chc' d cl cr, ctx)) ->
+      do
+        conf <- St.gets config
+        let goLeft  = toIL' cl >>= (\x -> choose' rootOp lhs' (x, ctx)) . accumulate'
+            goRight = toIL' cr >>= (\x -> choose' rootOp lhs' (x, ctx)) . accumulate'
+
+        case find d conf of
+          Just True  -> goLeft
+          Just False -> goRight
+          Nothing    -> alternative d goLeft goRight
+
+
+    _ -> error "derp"
 
   -- (C <A-operator> r) <B-Operator> rhs
-choose' rootOp (IIOp op (Chc' d cl cr) r) rhs =
-  do conf <- St.gets config
-     let goLeft  = toIL' cl
-                   >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
+-- choose' rootOp (IIOp op (Chc' d cl cr) r) rhs =
+--   do conf <- St.gets config
+--      let goLeft  = toIL' cl
+--                    >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
 
-         goRight = toIL' cr
-                   >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
+--          goRight = toIL' cr
+--                    >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
 
-     case find d conf of
-       Just True  -> goLeft
-       Just False -> goRight
-       Nothing    -> alternative d goLeft goRight
+--      case find d conf of
+--        Just True  -> goLeft
+--        Just False -> goRight
+--        Nothing    -> alternative d goLeft goRight
 
   -- If we get here then a choice is not top level so we need to reduce expressions
   -- (l <A-op> r) <B-op> rhs
-choose' rootOp x@IIOp {}  rhs = log "Arith Rotation LHS" >> choose' rootOp rotate' x rhs
+-- choose' rootOp x@IIOp {}  rhs = log "Arith Rotation LHS" >> choose' rootOp rotate' x rhs
 
  -- lhs <B-op> (l <A-op> r)
 -- choose' rootOp lhs x@IIOp {}  = log "Arith Rotation RHS" >> choose' rootOp lhs (rotate' x)
 
-choose' root lhs rhs = error $ "Op: " <> show root <> "\nLHS: " <> show lhs <> "\n RHS: " <> show rhs
+-- choose' root lhs rhs = error $ "Op: " <> show root <> "\nLHS: " <> show lhs <> "\n RHS: " <> show rhs
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>
