@@ -48,17 +48,24 @@
 
 ** IN PROG Solver
 
-    - Note taken on [2020-09-15 Tue 02:36] \\
-      Fixed the result accumulation. I employed a Maybe to wrap around the Variant
-      Context. There needs to be hygiene work next, the code doesn't read well and
-      neither do the types. Which means that now I have a working implementation some
-      refactoring is in order
+   - Note taken on [2020-09-15 Tue 15:59] \\
+     I noticed that evaluate', the form of evaluate that works on arithmetics had
+     type ~IL' -> IL'~. This is strange because it is pure! Then I noticed that
+     ~evaluate'~ was _identical_ to ~accumulate'~ which makes sense because
+     accumulation is pure symbolic evaluation. Hence I removed ~evaluate'~ in favor
+     of ~accumulate'~ which is more accurate about the effects that are occurring
 
-    - Note taken on [2020-09-14 Mon 18:36] \\
-      Solver core is working for up to two choices now. However, the result module is not accumulating results properly. There are several problems:
-      1. mappend is erasing previous results
-      2. We fundamentally need a way to demarcate between variables which are local to the assertion stack and those which are not
-      3. the ~ite~ building is not occurring the linked list of return values
+   - Note taken on [2020-09-15 Tue 02:36] \\
+     Fixed the result accumulation. I employed a Maybe to wrap around the Variant
+     Context. There needs to be hygiene work next, the code doesn't read well and
+     neither do the types. Which means that now I have a working implementation some
+     refactoring is in order
+
+   - Note taken on [2020-09-14 Mon 18:36] \\
+     Solver core is working for up to two choices now. However, the result module is not accumulating results properly. There are several problems:
+     1. mappend is erasing previous results
+     2. We fundamentally need a way to demarcate between variables which are local to the assertion stack and those which are not
+     3. the ~ite~ building is not occurring the linked list of return values
 
 *** DONE Boolean solving
     CLOSED: [2020-09-15 Tue 15:08]

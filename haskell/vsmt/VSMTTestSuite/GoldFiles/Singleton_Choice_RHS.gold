@@ -1,0 +1,7 @@
+model := 
+Aleft   -->   (ite ~(AA) (0 :: Integer) (ite AA (-77 :: Integer) False :: Bool))
+Aright   -->   (ite ~(AA) (-77 :: Integer) False :: Bool)
+AA   -->   (ite ~(AA) (False :: Bool) (ite AA (False :: Bool) False :: Bool))
+
+Sat_Model := 
+(~(AA) or AA)

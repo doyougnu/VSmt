@@ -460,6 +460,10 @@ rotate :: IL -> IL
 rotate (BBOp opOuter (BBOp opInner l r) r') = BBOp opInner l (BBOp opOuter r r')
 rotate x = x
 
+rotate' :: IL' -> IL'
+rotate' (IIOp opOuter (IIOp opInner l r) r') = IIOp opInner l (IIOp opOuter r r')
+rotate' x = x
+
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
@@ -491,7 +495,7 @@ toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r)  = return $ Chc' d l r
 
 
--- TODO fix this redundancy
+-- TODO fix this redundancy with cached
 toILSymbolic :: Proposition -> PreSolver IL
 toILSymbolic (LitB True)   = return $! Ref T.sTrue
 toILSymbolic (LitB False)  = return $! Ref T.sFalse
@@ -605,7 +609,8 @@ accumulate' x@(IIOp _ Chc' {} (Ref' _))   = x
 accumulate' (IOp o e)  = accumulate' $ IOp o (accumulate' e)
 accumulate' (IIOp o l r) = let l' = accumulate' l
                                r' = accumulate' r in
-                             accumulate' (IIOp o l' r')
+                             -- accumulate' (IIOp o l' r')
+                             IIOp o l' r'
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
@@ -615,6 +620,10 @@ isValue :: IL -> Bool
 isValue Unit    = True
 isValue (Ref _) = True
 isValue _       = False
+
+isValue' :: IL' -> Bool
+isValue' (Ref' _) = True
+isValue' _        = False
 
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
@@ -652,7 +661,13 @@ evaluate (BBOp And l Unit)      = evaluate l
 evaluate (BBOp And Unit r)      = evaluate r
 evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; evaluate l
 evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; evaluate r
-evaluate (IBOp op l r)        = evaluate $! IBOp op (evaluate' l) (evaluate' r)
+evaluate (IBOp op l r)        = let l' = accumulate' l
+                                    r' = accumulate' r
+                                    res = IBOp op l' r' in
+                                  if isValue' l' && isValue' r'
+                                  then evaluate res
+                                  else return $! intoCore res
+
 
   -- accumulation cases
 evaluate x@(BOp Not _)  = evaluate $ accumulate x
@@ -668,29 +683,6 @@ evaluate (BBOp And l r) = do (VarCore l') <- evaluate l
                                then evaluate res
                                else return $! intoCore res
 evaluate (BBOp op l r)  = return $ intoCore $ BBOp op (accumulate l) (accumulate r)
-
-
-evaluate' :: IL' -> IL'
-evaluate' x@(Ref' _)                    = x
-evaluate' x@Chc' {}                     = x
-evaluate' (IOp Neg   (Ref' n))          = Ref' $! negate n
-evaluate' (IOp Abs   (Ref' n))          = Ref' $! abs n
-evaluate' (IOp Sign  (Ref' n))          = Ref' $! signum n
-evaluate' (IIOp Add  (Ref' l) (Ref' r)) = Ref' $! l + r
-evaluate' (IIOp Sub  (Ref' l) (Ref' r)) = Ref' $! l - r
-evaluate' (IIOp Mult (Ref' l) (Ref' r)) = Ref' $! l * r
-evaluate' (IIOp Div  (Ref' l) (Ref' r)) = Ref' $! l ./ r
-evaluate' (IIOp Mod  (Ref' l) (Ref' r)) = Ref' $! l .% r
-  -- choices
-evaluate' (IOp op (Chc' d l r))         = Chc' d (OpI op l) (OpI op r)
-evaluate' x@(IIOp _ Chc' {} Chc' {})    = x
-evaluate' x@(IIOp _ (Ref' _) Chc' {})   = x
-evaluate' x@(IIOp _ Chc' {} (Ref' _))   = x
-  -- accumulation rules
-evaluate' (IOp o e)  = evaluate' $! IOp o (accumulate' e)
-evaluate' (IIOp o l r) = let l' = accumulate' l
-                             r' = accumulate' r in
-                             evaluate' $! accumulate' (IIOp o l' r')
 
 ------------------------- Removing Choices -------------------------------------
 store :: Result -> Solver ()
@@ -798,9 +790,96 @@ choose (VarCore x@BBOp {}) =
   -- AST such that the the binary relation at the root is preserved
   do log "rotating"; choose . VarCore $ rotate x
 
-choose (VarCore IBOp {}) = undefined -- TODO implement choose for arith
+  -- Arithmetic
+choose (VarCore (IBOp op (Chc' d cl cr) r)) =
+  do
+    conf <- St.gets config
+    let goLeft  = toIL' cl >>= evaluate . (\x -> IBOp op x r) >>= choose
+        goRight = toIL' cr >>= evaluate . (\x -> IBOp op x r) >>= choose
+    case find d conf of
+      Just True  -> goLeft
+      Just False -> goRight
+      Nothing    -> alternative d goLeft goRight
+
+choose (VarCore (IBOp op l (Chc' d cl cr))) =
+  do
+    conf <- St.gets config
+    let goLeft  = toIL' cl >>= evaluate . IBOp op l >>= choose
+        goRight = toIL' cr >>= evaluate . IBOp op l >>= choose
+    case find d conf of
+      Just True  -> goLeft
+      Just False -> goRight
+      Nothing    -> alternative d goLeft goRight
+
+choose (VarCore (IBOp op l r)) = do log "arith recurrence"
+                                    choose' op l r
 
 choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
+
+-- | Here we need to detect choices that cannot be rotated up the tree due to
+-- the hard barrier between arithmetic and booleans, i.e., that arithmetic _can
+-- only_ exist in the context of an operator that concludes to a boolean. Thus,
+-- we capture the outer context, recur down to the first choice and then call
+-- back up to the boolean solver. This is effectively a zipper encoded as a
+-- function.
+choose' :: NN_B -> IL' -> IL' -> Solver ()
+choose' rootOp x@(Ref' _) y@Ref' {} = evaluate (IBOp rootOp x y) >>= choose
+
+  -- lhs <B-Operator> (C <A-operator> r)
+choose' rootOp lhs (IIOp op (Chc' d cl cr) r) =
+  do conf <- St.gets config
+     let goLeft  = toIL' cl >>= choose' rootOp lhs . accumulate' . (\x -> IIOp op x r)
+         goRight = toIL' cr >>= choose' rootOp lhs . accumulate' . (\x -> IIOp op x r)
+
+     case find d conf of
+       Just True  -> goLeft
+       Just False -> goRight
+       Nothing    -> alternative d goLeft goRight
+
+--   -- lhs <B-Operator> (l <A-operator> C)
+choose' rootOp lhs (IIOp op l (Chc' d cl cr)) =
+  do conf <- St.gets config
+     let goLeft  = toIL' cl >>= choose' rootOp lhs . accumulate' . IIOp op l
+         goRight = toIL' cr >>= choose' rootOp lhs . accumulate' . IIOp op l
+
+     case find d conf of
+       Just True  -> goLeft
+       Just False -> goRight
+       Nothing    -> alternative d goLeft goRight
+
+  -- (l <A-operator> C) <B-Operator> rhs
+choose' rootOp (IIOp op l (Chc' d cl cr)) rhs =
+  do conf <- St.gets config
+     let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs) . accumulate' . IIOp op l
+         goRight = toIL' cr >>= (\x -> choose' rootOp x rhs) . accumulate' . IIOp op l
+
+     case find d conf of
+       Just True  -> goLeft
+       Just False -> goRight
+       Nothing    -> alternative d goLeft goRight
+
+  -- (C <A-operator> r) <B-Operator> rhs
+choose' rootOp (IIOp op (Chc' d cl cr) r) rhs =
+  do conf <- St.gets config
+     let goLeft  = toIL' cl
+                   >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
+
+         goRight = toIL' cr
+                   >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
+
+     case find d conf of
+       Just True  -> goLeft
+       Just False -> goRight
+       Nothing    -> alternative d goLeft goRight
+
+  -- If we get here then a choice is not top level so we need to reduce expressions
+  -- (l <A-op> r) <B-op> rhs
+choose' rootOp x@IIOp {}  rhs = log "Arith Rotation LHS" >> choose' rootOp rotate' x rhs
+
+ -- lhs <B-op> (l <A-op> r)
+-- choose' rootOp lhs x@IIOp {}  = log "Arith Rotation RHS" >> choose' rootOp lhs (rotate' x)
+
+choose' root lhs rhs = error $ "Op: " <> show root <> "\nLHS: " <> show lhs <> "\n RHS: " <> show rhs
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>
