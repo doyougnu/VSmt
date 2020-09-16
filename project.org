@@ -70,7 +70,8 @@
 *** DONE Boolean solving
     CLOSED: [2020-09-15 Tue 15:08]
 
-*** Arithmetic smt solving
+*** DONE Arithmetic smt solving
+    CLOSED: [2020-09-16 Wed 12:45]
 
 *** Variant Contexts can be used to limit the solver
 
@@ -83,6 +84,11 @@
 ** TODO hedgehog properties vs quickcheck properties
 
 ** TODO Tasty setup and harness
+
+** DONE Quickcheck/smallcheck generators
+   CLOSED: [2020-09-16 Wed 14:40]
+
+** Quickcheck/smallcheck properties
 
 * Benchmarking
 

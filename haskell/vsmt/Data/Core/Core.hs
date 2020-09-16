@@ -23,6 +23,7 @@ module Data.Core.Core where
 
 
 import           Prelude                    hiding (EQ, GT, LT, log)
+import qualified Data.Set as Set
 
 import Data.Core.Types
 
@@ -73,3 +74,47 @@ instance Configurable PartialConfig (NExpr' a) where
   configure conf (OpI op a)    = OpI  op $ configure conf a
   configure conf (OpII op l r) = OpII op (configure conf l) (configure conf r)
   configure _ x = x
+
+
+-------------------------- Predicates ------------------------------------------
+-- | retrieve a set of all boolean references in a proposition
+booleans :: Proposition -> Set.Set Var
+booleans (RefB b)     = Set.singleton b
+booleans (OpB _ e)    = booleans e
+booleans (OpBB _ l r) = booleans l `Set.union` booleans r
+booleans (ChcB _ l r) = booleans l `Set.union` booleans r
+booleans _            = Set.empty
+
+-- | retrieve a set of all numeric references in a proposition
+numerics :: Proposition -> Set.Set Var
+numerics (OpIB _ l r) = numerics' l `Set.union` numerics' r
+numerics (OpB _ e)    = numerics e
+numerics (OpBB _ l r) = numerics l `Set.union` numerics r
+numerics (ChcB _ l r) = numerics l `Set.union` numerics r
+numerics _            = Set.empty
+
+numerics' :: NExpression -> Set.Set Var
+numerics' (RefI (ExRefTypeI i)) = Set.singleton i
+numerics' (RefI (ExRefTypeD d)) = Set.singleton d
+numerics' (OpI _ e)             = numerics' e
+numerics' (OpII _ l r)          = numerics' l `Set.union` numerics' r
+numerics' (ChcI _ l r)          = numerics' l `Set.union` numerics' r
+numerics' _                     = Set.empty
+
+-- | False if there is a numeric variable with the same name as a boolean variable
+refsAreDisjoint :: Proposition -> Bool
+refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop
+
+-- | True if the proposition lacks choices
+isPlain :: Proposition -> Bool
+isPlain ChcB {}      = False
+isPlain (OpB _ e)    = isPlain e
+isPlain (OpBB _ l r) = isPlain l && isPlain r
+isPlain (OpIB _ l r) = isPlain' l && isPlain' r
+isPlain _            = True
+
+isPlain' :: NExpression -> Bool
+isPlain' ChcI {}      = False
+isPlain' (OpI _ e)    = isPlain' e
+isPlain' (OpII _ l r) = isPlain' l && isPlain' r
+isPlain' _            = True

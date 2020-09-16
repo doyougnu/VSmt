@@ -855,13 +855,11 @@ choose' :: NN_B -> Loc -> Loc -> Solver ()
 choose' rootOp (x@Ref' {}, Top) (y@Ref' {}, Top) = evaluate (IBOp rootOp x y) >>= choose
 choose' rootOp lhs rhs =
   do
-  logWith "catch all: " $ "lhs: " <>  show lhs <> " " <>  "rhs: " <> show rhs
   let l' = findChoice lhs
       r' = findChoice rhs
   case (l', r') of
     ((Chc' d cl cr, ctx), rhs') ->
       do
-        log "Choice left side"
         conf <- St.gets config
         let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice (x,ctx)) . accumulate'
             goRight = toIL' cr >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice (x,ctx)) . accumulate'
@@ -883,7 +881,7 @@ choose' rootOp lhs rhs =
           Nothing    -> alternative d goLeft goRight
 
 
-    _ -> error $ "Error in Arithmetic Zipper, function choose': " ++ show a
+    a -> error $ "Error in Arithmetic Zipper, function choose': " ++ show a
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>

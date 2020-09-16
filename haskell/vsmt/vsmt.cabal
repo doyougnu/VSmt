@@ -103,6 +103,7 @@ Test-Suite VSMTTest
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework
+                  , Utils.VSMTGen
                   , TestSuite.Solve.Boolean.Plain
                   , TestSuite.Solve.Boolean.Choices
                   , TestSuite.Solve.Arithmetic.Plain
