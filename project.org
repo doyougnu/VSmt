@@ -22,7 +22,8 @@
     average case has is way more lookups then generations, so when we lookup we
     don't want any extra actions
 
-*** Remove CV's from result maps and just construct the string to represent smtlib program
+*** DONE Remove CV's from result maps and just construct the string to represent smtlib program
+    CLOSED: [2020-09-16 Wed 14:41]
 
 ** Optimizations
 
@@ -73,11 +74,11 @@
 *** DONE Arithmetic smt solving
     CLOSED: [2020-09-16 Wed 12:45]
 
-*** Variant Contexts can be used to limit the solver
+*** TODO Variant Contexts can be used to limit the solver
 
-*** Investigate possible uses of StableName
+*** TODO Investigate possible uses of StableName
 
-*** Investigate possible uses with IORef patterns
+*** TODO Investigate possible uses with IORef patterns
 
 * Testing
 
@@ -88,7 +89,7 @@
 ** DONE Quickcheck/smallcheck generators
    CLOSED: [2020-09-16 Wed 14:40]
 
-** Quickcheck/smallcheck properties
+** TODO Quickcheck/smallcheck properties
 
 * Benchmarking
 
