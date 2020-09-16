@@ -21,6 +21,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE ViewPatterns               #-}
 {-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TupleSections              #-}
 
 module Data.Solve where
 
@@ -852,19 +853,18 @@ findChoice (IOp {}, _) = error "Can't have unary Ops in IL'!!!"
 -- function.
 choose' :: NN_B -> Loc -> Loc -> Solver ()
 choose' rootOp (x@Ref' {}, Top) (y@Ref' {}, Top) = evaluate (IBOp rootOp x y) >>= choose
-
-  -- lhs <B-Operator> (C <A-operator> r)
-  -- (l <A-operator> C) <B-Operator> rhs
 choose' rootOp lhs rhs =
   do
+  logWith "catch all: " $ "lhs: " <>  show lhs <> " " <>  "rhs: " <> show rhs
   let l' = findChoice lhs
       r' = findChoice rhs
   case (l', r') of
     ((Chc' d cl cr, ctx), rhs') ->
       do
+        log "Choice left side"
         conf <- St.gets config
-        let goLeft  = toIL' cl >>= (\x -> choose' rootOp (x, ctx) rhs') . accumulate'
-            goRight = toIL' cr >>= (\x -> choose' rootOp (x, ctx) rhs') . accumulate'
+        let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice (x,ctx)) . accumulate'
+            goRight = toIL' cr >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice (x,ctx)) . accumulate'
 
         case find d conf of
           Just True  -> goLeft
@@ -874,8 +874,8 @@ choose' rootOp lhs rhs =
     (lhs', (Chc' d cl cr, ctx)) ->
       do
         conf <- St.gets config
-        let goLeft  = toIL' cl >>= (\x -> choose' rootOp lhs' (x, ctx)) . accumulate'
-            goRight = toIL' cr >>= (\x -> choose' rootOp lhs' (x, ctx)) . accumulate'
+        let goLeft  = toIL' cl >>= choose' rootOp lhs' . findChoice . (,ctx) . accumulate'
+            goRight = toIL' cr >>= choose' rootOp lhs' . findChoice . (,ctx) . accumulate'
 
         case find d conf of
           Just True  -> goLeft
@@ -883,30 +883,7 @@ choose' rootOp lhs rhs =
           Nothing    -> alternative d goLeft goRight
 
 
-    _ -> error "derp"
-
-  -- (C <A-operator> r) <B-Operator> rhs
--- choose' rootOp (IIOp op (Chc' d cl cr) r) rhs =
---   do conf <- St.gets config
---      let goLeft  = toIL' cl
---                    >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
-
---          goRight = toIL' cr
---                    >>= (\x -> choose' rootOp x rhs) . accumulate' . (\x -> IIOp op x r)
-
---      case find d conf of
---        Just True  -> goLeft
---        Just False -> goRight
---        Nothing    -> alternative d goLeft goRight
-
-  -- If we get here then a choice is not top level so we need to reduce expressions
-  -- (l <A-op> r) <B-op> rhs
--- choose' rootOp x@IIOp {}  rhs = log "Arith Rotation LHS" >> choose' rootOp rotate' x rhs
-
- -- lhs <B-op> (l <A-op> r)
--- choose' rootOp lhs x@IIOp {}  = log "Arith Rotation RHS" >> choose' rootOp lhs (rotate' x)
-
--- choose' root lhs rhs = error $ "Op: " <> show root <> "\nLHS: " <> show lhs <> "\n RHS: " <> show rhs
+    _ -> error $ "Error in Arithmetic Zipper, function choose': " ++ show a
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>

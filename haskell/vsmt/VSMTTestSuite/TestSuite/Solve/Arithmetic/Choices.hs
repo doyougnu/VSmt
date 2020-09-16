@@ -20,10 +20,10 @@ import Utils.VSMTTestFramework
 tests :: TestTree
 tests = testGroup "Variational formulas"
   [ goldenVsStringShow "Singleton_Choice_LHS" singletonChoiceLHS
-  -- , goldenVsStringShow "Singleton_Choice_RHS" singletonChoiceRHS
-  -- , goldenVsStringShow "TwoChoices_LHS" twoChoicesLHS
-  -- , goldenVsStringShow "TwoChoices_RHS" twoChoicesRHS
-  -- , goldenVsStringShow "DeepChoices_LHS" deepChoicesLHS
+  , goldenVsStringShow "Singleton_Choice_RHS" singletonChoiceRHS
+  , goldenVsStringShow "TwoChoices_LHS" twoChoicesLHS
+  , goldenVsStringShow "TwoChoices_RHS" twoChoicesRHS
+  , goldenVsStringShow "DeepChoices_LHS" deepChoicesLHS
   ]
 
 singletonChoiceLHS :: IO Result
