@@ -1,4 +1,7 @@
 model := 
+foo   -->   (ite  (True :: Bool) False :: Bool)
+baz   -->   (ite  (True :: Bool) False :: Bool)
+bar   -->   (ite  (True :: Bool) False :: Bool)
 
 Sat_Model := 
 

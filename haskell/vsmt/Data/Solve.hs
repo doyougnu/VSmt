@@ -49,6 +49,8 @@ import qualified Data.SBV.Trans.Control     as C
 import           Data.Core.Result
 import           Data.Core.Types
 
+import Debug.Trace
+
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
@@ -72,19 +74,33 @@ solution = extract <$> St.get
 -- | TODO abstract over the logging function
 -- | TODO pending on server create, create a load function to handle injection
 -- to the IL type
-solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
-solve i vConf =
+solveVerbose :: Proposition -> Maybe VariantContext -> IO (Result, State)
+solveVerbose  i vConf =
+    -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
+    T.runSMTWith T.z3{T.verbose=True} $
+      do let _ = fromMaybe true vConf
+         (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
+         C.query $ runStdoutLoggingT $ runSolver st $
+           findVCore il >>= choose >> solution
+           -- do core <- findVCore il
+           --    _ <- choose core
+           --    solution
+
+solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
+solveForCoreVerbose  i vConf =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConf
          (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
          C.query $ runStdoutLoggingT $ runSolver st $
            do core <- findVCore il
-              _ <- choose core
-              solution
+              logWith "Proposition: " i
+              logWith "Core: " core
+              logWith "Is Core Unit: " (isUnit core)
+              return core
 
-sat :: Proposition -> Maybe VariantContext -> IO Result
-sat = (fmap fst .) <$> solve
+satVerbose :: Proposition -> Maybe VariantContext -> IO Result
+satVerbose = (fmap fst .) <$> solveVerbose
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -458,6 +474,8 @@ data IL' = Ref' NRef
 -- this means that we cannot perform arbitrary recursion and thus must rotate
 -- the tree until we find a choice
 rotate :: IL -> IL
+-- TODO figure out if we need to keep Impl in the IL
+-- rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
 rotate (BBOp opOuter (BBOp opInner l r) r') = BBOp opInner l (BBOp opOuter r r')
 rotate x = x
 
@@ -535,6 +553,10 @@ newtype VarCore = VarCore IL
 intoCore :: IL -> VarCore
 intoCore = VarCore
 
+isUnit :: VarCore -> Bool
+isUnit (VarCore Unit) = True
+isUnit _              = False
+
 -- | drive negation down to the leaves as much as possible
 driveNotDown :: IL -> IL
 driveNotDown (Ref b)     = Ref (bnot b)
@@ -583,9 +605,11 @@ accumulate x@(IBOp _ Chc' {} (Ref' _)) = x
  -- congruence rules
 accumulate (BOp Not e)   = accumulate $ driveNotDown e
 accumulate (BBOp op l r) = let l' = accumulate l
-                               r' = accumulate r in
-                              -- accumulate (BBOp op l' r')
-                              BBOp op l' r'
+                               r' = accumulate r
+                               res = BBOp op l' r' in
+                             if isValue l' && isValue r'
+                             then accumulate res
+                             else res
 accumulate (IBOp op l r) = accumulate $! IBOp op (accumulate' l) (accumulate' r)
 accumulate x = x
 
@@ -608,10 +632,17 @@ accumulate' x@(IIOp _ (Ref' _) Chc' {})   = x
 accumulate' x@(IIOp _ Chc' {} (Ref' _))   = x
   -- congruence rules
 accumulate' (IOp o e)  = accumulate' $ IOp o (accumulate' e)
-accumulate' (IIOp o l r) = let l' = accumulate' l
-                               r' = accumulate' r in
-                             -- accumulate' (IIOp o l' r')
-                             IIOp o l' r'
+accumulate' x@(IIOp o l r) = let l'  = accumulate' l
+                                 r'  = accumulate' r
+                                 res = IIOp o l' r' in
+                               trace ("rec ---> " ++ show x ++ "\n") $
+                               -- this check is required or else we may
+                               -- infinitely recur on edge cases with choices
+                               -- TODO encode the property in the type system to
+                               -- avoid the check
+                               if isValue' l' && isValue' r'
+                               then accumulate' res
+                               else res
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
@@ -672,18 +703,28 @@ evaluate (IBOp op l r)        = let l' = accumulate' l
 
   -- accumulation cases
 evaluate x@(BOp Not _)  = evaluate $ accumulate x
-evaluate (BBOp And l r) = do (VarCore l') <- evaluate l
-                             (VarCore r') <- evaluate r
-                             let res = BBOp And l' r'
-                             -- this is a hot loop, but we want to make the
-                             -- variational core as small as possible because it
-                             -- will pay off in the solver. Thus we perform a
-                             -- check here to determine if we can reduce the
-                             -- variational core even after a single pass
-                             if isValue l' || isValue r'
-                               then evaluate res
-                               else return $! intoCore res
-evaluate (BBOp op l r)  = return $ intoCore $ BBOp op (accumulate l) (accumulate r)
+evaluate x@(BBOp And l r) = logWith "Eval And Recurring: " x >>
+  do (VarCore l') <- evaluate l
+     (VarCore r') <- evaluate r
+     let res = BBOp And l' r'
+     -- this is a hot loop, but we want to make the
+     -- variational core as small as possible because it
+     -- will pay off in the solver. Thus we perform a
+     -- check here to determine if we can reduce the
+     -- variational core even after a single pass
+     if isValue l' || isValue r'
+       then evaluate res
+       else return $! intoCore res
+evaluate x@(BBOp op l r)  = logWith "Eval General Recurring " x >>
+  let l' = accumulate l
+      r' = accumulate r
+      res = BBOp op l' r' in
+    if isValue l' || isValue r'
+       then logWith "Reducing more" res >> evaluate res
+    else do logWith "couldn't reduce" res
+            logWith "Left " l'
+            logWith "Right " r'
+            ; return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
 store :: Result -> Solver ()

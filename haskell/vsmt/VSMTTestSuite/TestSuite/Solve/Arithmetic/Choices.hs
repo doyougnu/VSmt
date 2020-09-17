@@ -27,25 +27,25 @@ tests = testGroup "Variational formulas"
   ]
 
 singletonChoiceLHS :: IO Result
-singletonChoiceLHS = flip sat Nothing $
+singletonChoiceLHS = flip satVerbose Nothing $
   iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") + 10 .== 23
 
 
 singletonChoiceRHS :: IO Result
-singletonChoiceRHS = flip sat Nothing $ 100 + iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") .== 23
+singletonChoiceRHS = flip satVerbose Nothing $ 100 + iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") .== 23
 
 twoChoicesLHS :: IO Result
-twoChoicesLHS = flip sat Nothing $
+twoChoicesLHS = flip satVerbose Nothing $
   (iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
   iChc "BB" (iRef "Bleft") (iRef "BRight")) .== 23
 
 twoChoicesRHS :: IO Result
-twoChoicesRHS = flip sat Nothing $
+twoChoicesRHS = flip satVerbose Nothing $
   23 .== (iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
           iChc "BB" (iRef "Bleft") (iRef "BRight"))
 
 deepChoicesLHS :: IO Result
-deepChoicesLHS = flip sat Nothing $
+deepChoicesLHS = flip satVerbose Nothing $
    (1 + 2 + (3 + c)) .== 23
   where c = iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
             iChc "BB" (iRef "Bleft") (iRef "BRight")

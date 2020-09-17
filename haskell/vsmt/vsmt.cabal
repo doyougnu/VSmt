@@ -96,6 +96,7 @@ Test-Suite VSMTTest
                   , tasty-quickcheck
                   , QuickCheck
                   , tasty-hspec
+                  , tasty-hunit
                   , filepath
                   , bytestring
                   , sbv

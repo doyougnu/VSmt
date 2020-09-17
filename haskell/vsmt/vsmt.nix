@@ -1,7 +1,7 @@
 { mkDerivation, base, bifunctors, containers, deepseq, gauge
 , hashable, monad-logger, mtl, QuickCheck, sbv, silently, stdenv
 , tasty, tasty-golden, tasty-quickcheck, text, filepath, bytestring
-, transformers, unordered-containers, z3, zlib, tasty-hspec
+, transformers, unordered-containers, z3, zlib, tasty-hspec, tasty-hunit
 }:
 mkDerivation {
   pname = "vsmt";
@@ -15,7 +15,7 @@ mkDerivation {
   executableSystemDepends = [ z3 zlib ];
   testHaskellDepends = [
     base QuickCheck tasty tasty-golden tasty-quickcheck tasty-hspec filepath
-    bytestring sbv text
+    bytestring sbv text tasty-hunit
   ];
   benchmarkHaskellDepends = [ base deepseq gauge silently ];
   homepage = "https://github.com/doyougnu/VSmt";

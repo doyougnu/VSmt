@@ -13,20 +13,27 @@
 
 module Utils.VSMTTestFramework
   ( module Test.Tasty
+  , module Test.Tasty.Hspec
+  , module Test.Tasty.HUnit
   , module Data.Core.Types
   , module Data.Core.Result
   , module Data.Core.Core
   , module Utils.VSMTGen
-  , solve
   , goldenVsStringShow
   , goldFile
   , Text
+  , liftIO
+  , satVerbose
+  , solveForCoreVerbose
   ) where
 
 import Test.Tasty (TestTree, TestName, testGroup)
 import Test.Tasty.Golden (goldenVsString)
+import Test.Tasty.Hspec
+import Test.Tasty.HUnit
 import Data.Text (Text)
-import Data.Solve (solve)
+import Control.Monad.IO.Class (liftIO)
+import Data.Solve (satVerbose, solveForCoreVerbose)
 import System.FilePath ((</>), (<.>))
 import qualified Data.ByteString.Lazy.Char8 as LBC
 import Utils.VSMTGen

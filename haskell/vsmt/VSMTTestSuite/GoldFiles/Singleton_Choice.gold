@@ -1,6 +1,6 @@
 model := 
-Aleft   -->   (ite ~(AA) (0 :: Integer) (ite AA (13 :: Integer) False :: Bool))
-Aright   -->   (ite ~(AA) (13 :: Integer) False :: Bool)
+Aleft   -->   (ite ~(AA) (False :: Bool) (ite AA (True :: Bool) False :: Bool))
+Aright   -->   (ite ~(AA) (True :: Bool) False :: Bool)
 AA   -->   (ite ~(AA) (False :: Bool) (ite AA (False :: Bool) False :: Bool))
 
 Sat_Model := 

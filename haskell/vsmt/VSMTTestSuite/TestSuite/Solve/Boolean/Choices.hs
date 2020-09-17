@@ -25,17 +25,17 @@ tests = testGroup "Variational formulas"
   ]
 
 singletonChoice :: IO Result
-singletonChoice = flip sat Nothing $ bChc "AA" (bRef "Aleft") (bRef "Aright")
+singletonChoice = flip satVerbose Nothing $ bChc "AA" (bRef "Aleft") (bRef "Aright")
 
 twoChoices :: IO Result
-twoChoices = flip sat Nothing $
+twoChoices = flip satVerbose Nothing $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 -- | test to make sure the solver returns true for every variable assignment
 -- where the asst will _not_ have a choice as a child of the root node. This
 -- forces the solver to rotate the variational core
 treeOfChoices :: IO Result
-treeOfChoices = flip sat Nothing $
+treeOfChoices = flip satVerbose Nothing $
              (bChc "AA" (bRef "Aleft") (bRef "Aright") &&&
              bChc "BB" (bRef "Bleft") (bRef "Bright")) &&&
              (bChc "CC" (bRef "Cleft") (bRef "Cright") &&&

@@ -176,14 +176,6 @@ iChc :: String -> NExpr' a -> NExpr' a -> NExpr' a
 iChc = ChcI
 {-# INLINE iChc #-}
 
--- dim :: String -> Dim
--- dim = Dim . pack
-
--- dimReference :: String -> Prop' Dim
--- dimReference = RefB . dim
-
--- dimToString :: Dim -> String
--- dimToString (Dim s) = unpack s
 
 -- | Begin primitive instances
 
