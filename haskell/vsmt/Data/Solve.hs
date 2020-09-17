@@ -748,7 +748,12 @@ updateConfigs conf context (d,val) = do
 resetTo :: (St.MonadState State m) => State -> m ()
 resetTo s = do
   st <- St.get
-  St.put s{result=result st, bools=bools st, ints=ints st, doubles=doubles st}
+  St.put s{ result=result st
+          , bools=bools st
+          , ints=ints st
+          , doubles=doubles st
+          , dimensions=dimensions st
+          }
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that

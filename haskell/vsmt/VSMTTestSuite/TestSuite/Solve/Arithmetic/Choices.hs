@@ -46,6 +46,6 @@ twoChoicesRHS = flip satVerbose Nothing $
 
 deepChoicesLHS :: IO Result
 deepChoicesLHS = flip satVerbose Nothing $
-   (1 + 2 + (3 + c)) .== 23
+   (1 + iRef "x" + (3 + c)) .== (23 + iRef "y")
   where c = iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
             iChc "BB" (iRef "Bleft") (iRef "BRight")

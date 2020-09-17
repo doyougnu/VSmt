@@ -39,14 +39,18 @@ instance Pretty a => Pretty (NExpr' a) where
   pretty (LitI (I i)) = Text.pack $ show i
   pretty (LitI (D d)) = Text.pack $ show d
   pretty (RefI b)     = pretty b
-  pretty (OpI Neg e)  = "-" <> parens (pretty e)
+  pretty (OpI o x@(RefI _))  = pretty o <> pretty x
   pretty (OpI Abs e)  = between "|" (pretty e) "|"
-  pretty (OpI Sign e) = "signum" <> parens (pretty e)
+  pretty (OpI o e)  = pretty o <> parens (pretty e)
   pretty (OpII o l r) = parens $ mconcat [pretty l, " ", pretty o, " ", pretty r]
   pretty (ChcI d l r) = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"
 
 instance Pretty a => Pretty (ExRefType a) where pretty (ExRefTypeI a) = pretty a
                                                 pretty (ExRefTypeD a) = pretty a
+
+instance Pretty N_N where pretty Neg  = "-"
+                          pretty Sign = "signum"
+                          pretty Abs  = "||"
 
 instance Pretty NN_N where pretty Add  = ".+"
                            pretty Sub  = ".-"
@@ -68,13 +72,15 @@ instance Pretty BB_B where pretty Impl = "impl"
                            pretty And  = "and"
                            pretty Or   = "or"
 
+instance Pretty B_B where pretty Not = "~"
 instance Pretty Dim where pretty = Text.pack
 
 instance Pretty a => Pretty (Prop' a) where
   pretty (LitB True)   = "#t"
   pretty (LitB False)  = "#f"
   pretty (RefB b)      = pretty b
-  pretty (OpB Not e)   = "~" <> parens (pretty e)
+  pretty (OpB Not r@(RefB _))   = "~" <> pretty r
+  pretty (OpB o e)   = pretty o <> parens (pretty e)
   pretty (OpBB op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
   pretty (OpIB op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
   pretty (ChcB d l r)  = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"

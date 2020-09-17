@@ -21,7 +21,7 @@ import qualified TestSuite.Solve.Arithmetic.Choices
 
 main :: IO ()
 main = do
-  setEnv "TASTY_QUICKCHECK_TESTS" "2000"
+  setEnv "TASTY_QUICKCHECK_TESTS" "500"
   defaultMain $ testGroup "Tests"
     [ booleans
     , arithmetics

@@ -32,6 +32,8 @@ import qualified Data.SBV.Trans         as S
 import qualified Data.SBV.Trans.Control as T
 import           Data.Text              (Text,pack,unpack)
 import           Data.Semigroup         ((<>))
+import           Data.Char              (isSpace)
+import           Data.List              (intercalate, nub)
 
 import qualified Data.HashMap.Strict    as M
 import           Data.String            (IsString, fromString)
@@ -80,7 +82,12 @@ instance Pretty d => Pretty (M.HashMap d ResultFormula) where
 -- | We use a Maybe to form the mempty for monoid, this leads to prettier pretty
 -- printing
 prettyResultFormula :: [(Maybe VariantContext, I.CV)] -> Text
-prettyResultFormula [] = "False :: Bool"
+prettyResultFormula [(Nothing, val)] = pretty val
+prettyResultFormula [(ctx, val)] = parens $
+  "ite" <> space <> pretty ctx <> space <> parens (pretty val) <> space <> done
+  where kw = I.kindOf val
+        done = "Undefined"
+
 prettyResultFormula ((ctx,val):xs) = parens $
                                      "ite " <>
                                      pretty ctx <> space <>
@@ -90,6 +97,8 @@ prettyResultFormula ((ctx,val):xs) = parens $
 instance Pretty i => Pretty (Maybe i) where
   pretty Nothing = ""
   pretty (Just a) = pretty a
+
+instance Pretty S.Kind where pretty = pack . show
 instance Pretty I.CV where pretty = pack . show
 instance Pretty S.SBool where pretty = pack . show
 instance Pretty [(Maybe VariantContext, I.CV)] where pretty = prettyResultFormula
@@ -146,6 +155,7 @@ isSat = do cs <- C.checkSat
 getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
 
+-- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.
 getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
 -- getResult Nothing =

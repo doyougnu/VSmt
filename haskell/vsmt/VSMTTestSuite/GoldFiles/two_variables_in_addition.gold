@@ -1,6 +1,6 @@
 model := 
-x   -->   (ite  (0 :: Integer) False :: Bool)
-y   -->   (ite  (2 :: Integer) False :: Bool)
+x   -->   0 :: Integer
+y   -->   2 :: Integer
 
 Sat_Model := 
 

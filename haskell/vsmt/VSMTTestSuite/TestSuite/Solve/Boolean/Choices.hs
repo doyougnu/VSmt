@@ -22,10 +22,14 @@ tests = testGroup "Variational formulas"
   [ goldenVsStringShow "Singleton_Choice" singletonChoice
   , goldenVsStringShow "Two_Choices" twoChoices
   , goldenVsStringShow "Tree_of_Choices" treeOfChoices
+  , goldenVsStringShow "Single_Choice_With_Vars" singletonChoiceWithVars
   ]
 
 singletonChoice :: IO Result
 singletonChoice = flip satVerbose Nothing $ bChc "AA" (bRef "Aleft") (bRef "Aright")
+
+singletonChoiceWithVars :: IO Result
+singletonChoiceWithVars = flip satVerbose Nothing $ bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one" &&& bRef "two"
 
 twoChoices :: IO Result
 twoChoices = flip satVerbose Nothing $
