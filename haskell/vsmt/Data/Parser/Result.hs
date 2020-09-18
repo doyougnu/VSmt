@@ -21,15 +21,15 @@ import           Control.Monad.Combinators.Expr
 
 import qualified Data.HashMap.Strict            as M
 
+import           Data.Functor                   (void)
 import qualified Data.Text                      as T
 import           Data.Text.IO                   (readFile)
 import           Data.Void                      (Void)
-import           Data.Functor                   (void)
 import           Prelude                        hiding (EQ, GT, LT, readFile)
 import           Text.Megaparsec
 import qualified Text.Megaparsec.Char           as C
 import qualified Text.Megaparsec.Char.Lexer     as L
-import Text.Megaparsec.Debug
+
 
 
 import           Data.Core.Types
@@ -47,7 +47,7 @@ resultParser = between sc eof go
 
 go :: Parser (Prop' Dim, CheckableResult)
 go = do modelHeader
-        ms <- dbg "model rows" $ many modelRow
+        ms <- many modelRow
         s <- lexeme satFormula
         return (s, mconcat ms)
 
@@ -132,17 +132,12 @@ plainValue = pure . (Nothing,) <$> value
 
 modelRow :: Parser CheckableResult
 modelRow = do var <- variable
-              dbg "is" is
-              -- rf <- try (parens iteTerm)
-              -- if rf is empty then we had a plain value
-              -- val <- dbg "here" $ if null rf then plainValue else return rf
-              val <- parens (dbg "ite" iteTerm) <|> dbg "trying plain" plainValue
+              is
+              val <- parens iteTerm <|> plainValue
               return . CheckableResult $ M.singleton var val
 
 satFormula :: Parser (Prop' Dim)
-satFormula = do dbg "Sat formula" satHeader
-                dbg "Expr" bExpr
-
+satFormula = satHeader >> bExpr
 
 dimension :: Parser Dim
 dimension = lexeme ((:) <$> C.letterChar <*> many C.alphaNumChar <?> "dimension")
