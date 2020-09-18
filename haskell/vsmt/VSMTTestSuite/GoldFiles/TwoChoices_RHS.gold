@@ -1,4 +1,4 @@
-model := 
+=: Model := 
 Aleft   -->   (ite (~AA and ~BB) (0 :: Integer) (ite (~AA and BB) (0 :: Integer) (ite (AA and ~BB) (23 :: Integer) (ite (AA and BB) (0 :: Integer) Undefined))))
 BRight   -->   (ite (~AA and ~BB) (23 :: Integer) (ite (~AA and BB) (0 :: Integer) (ite (AA and ~BB) (0 :: Integer) Undefined)))
 BB   -->   (ite (~AA and ~BB) (False :: Bool) (ite (~AA and BB) (False :: Bool) (ite (AA and ~BB) (False :: Bool) (ite (AA and BB) (False :: Bool) Undefined))))
@@ -6,5 +6,5 @@ Aright   -->   (ite (~AA and ~BB) (0 :: Integer) (ite (~AA and BB) (23 :: Intege
 AA   -->   (ite (~AA and ~BB) (False :: Bool) (ite (~AA and BB) (False :: Bool) (ite (AA and ~BB) (False :: Bool) (ite (AA and BB) (False :: Bool) Undefined))))
 Bleft   -->   (ite (~AA and ~BB) (0 :: Integer) (ite (~AA and BB) (0 :: Integer) (ite (AA and ~BB) (0 :: Integer) (ite (AA and BB) (23 :: Integer) Undefined))))
 
-Sat_Model := 
+=: Sat_Model := 
 ((~AA and ~BB) or ((~AA and BB) or ((AA and ~BB) or (AA and BB))))

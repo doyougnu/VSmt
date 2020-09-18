@@ -18,6 +18,9 @@ module Data.Core.Pretty where
 
 import qualified Data.Text       as Text
 import           Prelude         hiding (EQ, GT, LT, log)
+import qualified Data.HashMap.Strict as M
+import qualified Data.SBV.Internals     as I
+import qualified Data.SBV.Trans         as S
 
 import           Data.Core.Types
 
@@ -34,6 +37,15 @@ newline = "\n"
 
 space :: Text.Text
 space = " "
+
+comma :: Text.Text
+comma = ","
+
+bar :: Text.Text
+bar = Text.replicate 80 "-"
+
+seperator :: Text.Text
+seperator = newline <> bar <> newline <> bar <> newline
 
 instance Pretty a => Pretty (NExpr' a) where
   pretty (LitI (I i)) = Text.pack $ show i
@@ -73,7 +85,7 @@ instance Pretty BB_B where pretty Impl = "impl"
                            pretty Or   = "or"
 
 instance Pretty B_B where pretty Not = "~"
-instance Pretty Dim where pretty = Text.pack
+instance Pretty Char where pretty = Text.singleton
 
 instance Pretty a => Pretty (Prop' a) where
   pretty (LitB True)   = "#t"
@@ -85,5 +97,31 @@ instance Pretty a => Pretty (Prop' a) where
   pretty (OpIB op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
   pretty (ChcB d l r)  = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"
 
+instance Pretty CheckableResult where
+  pretty c = seperator <> pretty m <> seperator
+    where m = getChkResult c
+
+instance Pretty Value where pretty (N (I i)) = Text.pack $ show i
+                            pretty (N (D d)) = Text.pack $ show d
+                            pretty (B b)     = Text.pack $ show b
+
 instance Pretty VariantContext where pretty = pretty . getVarFormula
 instance Pretty Text.Text where pretty = id
+instance (Pretty a, Pretty b) => Pretty (a, b) where
+  pretty (a, b) = parens $ pretty a <> space <> comma <> space <> pretty b
+
+instance Pretty a => Pretty (Maybe a) where
+  pretty Nothing = mempty
+  pretty (Just a) = pretty a
+
+instance (Pretty k, Pretty v) => Pretty (M.HashMap k v) where
+  pretty =
+    M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
+
+instance Pretty a => Pretty [a] where
+  pretty [] = mempty
+  pretty xs = mconcat $ pretty <$> xs
+
+instance Pretty S.Kind where pretty = Text.pack . show
+instance Pretty I.CV where pretty = Text.pack . show
+instance Pretty S.SBool where pretty = Text.pack . show

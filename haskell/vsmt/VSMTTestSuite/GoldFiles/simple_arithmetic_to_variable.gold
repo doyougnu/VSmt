@@ -1,5 +1,5 @@
-model := 
+=: Model := 
 y   -->   7 :: Integer
 
-Sat_Model := 
+=: Sat_Model := 
 

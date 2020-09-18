@@ -2,6 +2,7 @@
 , hashable, monad-logger, mtl, QuickCheck, sbv, silently, stdenv
 , tasty, tasty-golden, tasty-quickcheck, text, filepath, bytestring
 , transformers, unordered-containers, z3, zlib, tasty-hspec, tasty-hunit
+, megaparsec, parser-combinators
 }:
 mkDerivation {
   pname = "vsmt";
@@ -9,7 +10,7 @@ mkDerivation {
   src = ./.;
   libraryHaskellDepends = [
     base bifunctors containers deepseq hashable monad-logger mtl sbv
-    text transformers unordered-containers
+    text transformers unordered-containers megaparsec parser-combinators
   ];
   librarySystemDepends = [ z3 zlib ];
   executableSystemDepends = [ z3 zlib ];

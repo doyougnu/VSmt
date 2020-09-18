@@ -66,10 +66,10 @@ instance (Eq d, Hashable d) => Semigroup (VariableMap d) where
 deriving instance (Eq d, Hashable d) => Monoid (VariableMap d)
 
 instance Pretty (Result' Var) where
-  pretty r = "model := " <> newline <>
+  pretty r = "=: Model := " <> newline <>
              pretty (variables r) <>
              newline <>
-             "Sat_Model := " <>
+             "=: Sat_Model := " <>
              newline <>
              pretty (satResult r) <>
              newline
@@ -94,13 +94,6 @@ prettyResultFormula ((ctx,val):xs) = parens $
                                      parens (pretty val) <> space <>
                                      pretty xs
 
-instance Pretty i => Pretty (Maybe i) where
-  pretty Nothing = ""
-  pretty (Just a) = pretty a
-
-instance Pretty S.Kind where pretty = pack . show
-instance Pretty I.CV where pretty = pack . show
-instance Pretty S.SBool where pretty = pack . show
 instance Pretty [(Maybe VariantContext, I.CV)] where pretty = prettyResultFormula
 instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
 

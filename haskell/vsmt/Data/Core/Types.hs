@@ -10,6 +10,7 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror #-}
+
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE FlexibleInstances          #-}
@@ -19,15 +20,16 @@
 
 module Data.Core.Types where
 
-import           Control.DeepSeq (NFData)
-import           Control.Monad   (liftM2)
-import           Data.Fixed      (mod')
-import qualified Data.SBV.Trans  as S
-import qualified Data.Sequence   as Seq
-import           Data.String     (IsString)
-import           Data.Text       (Text)
-import           GHC.Generics    (Generic)
-import           Prelude         hiding (EQ, GT, LT, lookup)
+import           Control.DeepSeq     (NFData)
+import           Control.Monad       (liftM2)
+import           Data.Fixed          (mod')
+import qualified Data.HashMap.Strict as M
+import qualified Data.SBV.Trans      as S
+import qualified Data.Sequence       as Seq
+import           Data.String         (IsString)
+import           Data.Text           (Text)
+import           GHC.Generics        (Generic)
+import           Prelude             hiding (EQ, GT, LT, lookup)
 
 
 -- | A feature is a named, boolean configuration option.
@@ -106,6 +108,17 @@ data Type = TBool
           | TInt
           | TDouble
           deriving (Eq,Generic,Show,Ord)
+
+
+data Value = N NPrim | B Bool deriving (Eq,Show)
+
+newtype CheckableResult =
+  CheckableResult { getChkResult :: M.HashMap Var [(Maybe VariantContext, Value)] }
+  deriving (Eq,Show,Semigroup,Monoid)
+
+toCheckableResult :: [(Var, [(Maybe VariantContext, Value)])] -> CheckableResult
+toCheckableResult = CheckableResult . M.fromList
+
 
 -- | Mirroring NPrim with Symbolic types for the solver
 data SymNum = SyI !S.SInt64

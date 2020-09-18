@@ -1,7 +1,7 @@
-model := 
+=: Model := 
 foo   -->   True :: Bool
 baz   -->   True :: Bool
 bar   -->   True :: Bool
 
-Sat_Model := 
+=: Sat_Model := 
 
