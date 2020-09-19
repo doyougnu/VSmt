@@ -49,6 +49,25 @@
 
 ** IN PROG Solver
 
+   - Note taken on [2020-09-19 Sat 04:47] \\
+     Massive changes to the internal model of the solver today. Most importantly I
+     was liberated of several assumptions I had made from vsat. In vsat I moved all
+     unary operators (just ~Not~) into either symbolic terms or into choices. This
+     worked well because there were never any edge cases where I would not be able to
+     move a negation via a distributive property. In vsmt this is not the case, you
+     may have a ~Not~ over and inequality that has complicated arithmetic in it and
+     thus you cannot distribute the ~Not~. Hence I combined the zipper I made
+     yesterday to include boolean contexts. This greatly simplified the code base and
+     made it much easier to reason about. I have check vsmt's soundness up to ~700
+     random tests with propositions that only hold boolean terms. For a mix of
+     arithmetic and boolean terms there are several problems: first is the quickcheck
+     is creating propositions that aren't satisfiable themselves and so the solver
+     concludes unsat and the test fails, secondly I've had to filter out a lot of
+     floats because they explode the search space and thus a ~check-sat~ call takes
+     too much time. I've limited the solver to 15 seconds per check sat in the
+     meantime. All things considered I'm very confident in the soundness of the
+     solver now, i'm sure there are edge cases lurking in the arithmetic but these
+     are likely too expensive to nail down and probably also exist in ~z3~ and ~sbv~.
    - Note taken on [2020-09-15 Tue 15:59] \\
      I noticed that evaluate', the form of evaluate that works on arithmetics had
      type ~IL' -> IL'~. This is strange because it is pure! Then I noticed that
