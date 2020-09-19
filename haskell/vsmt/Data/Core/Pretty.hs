@@ -60,8 +60,11 @@ instance Pretty a => Pretty (NExpr' a) where
 instance Pretty a => Pretty (ExRefType a) where pretty (ExRefTypeI a) = pretty a
                                                 pretty (ExRefTypeD a) = pretty a
 
+instance Pretty Char where pretty = Text.singleton
+instance Pretty String where pretty = Text.pack
+
 instance Pretty N_N where pretty Neg  = "-"
-                          pretty Sign = "signum"
+                          pretty Sign = "signum "
                           pretty Abs  = "||"
 
 instance Pretty NN_N where pretty Add  = ".+"
@@ -77,15 +80,13 @@ instance Pretty NN_B where pretty LT  = ".<"
                            pretty EQ  = ".=="
                            pretty NEQ = ".!="
 
+instance Pretty B_B where pretty Not = "~"
 
 instance Pretty BB_B where pretty Impl = "impl"
                            pretty Eqv  = "iff"
                            pretty XOr  = "xor"
                            pretty And  = "and"
                            pretty Or   = "or"
-
-instance Pretty B_B where pretty Not = "~"
-instance Pretty Char where pretty = Text.singleton
 
 instance Pretty a => Pretty (Prop' a) where
   pretty (LitB True)   = "#t"
@@ -114,13 +115,30 @@ instance Pretty a => Pretty (Maybe a) where
   pretty Nothing = mempty
   pretty (Just a) = pretty a
 
-instance (Pretty k, Pretty v) => Pretty (M.HashMap k v) where
+instance Pretty (M.HashMap Var [(Maybe VariantContext, Value)]) where
   pretty =
     M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
 
-instance Pretty a => Pretty [a] where
+instance Pretty [(Maybe VariantContext, Value)] where
   pretty [] = mempty
-  pretty xs = mconcat $ pretty <$> xs
+  pretty [(Nothing, val)] = pretty val
+  pretty [(Just ctx, val)]    = parens $
+    "ite"
+    <> space
+    <> pretty ctx
+    <> space
+    <> parens (pretty val)
+    <> space
+    <> done
+    where done = "Undefined"
+  pretty ((Nothing, val):xs) = "ite" <> space <> parens "True :: Bool" <> space
+                               <> parens (pretty val) <> space <> pretty xs
+  pretty ((Just ctx, val):xs) = "ite" <> space <> pretty ctx <> space
+                               <> parens (pretty val) <> space <> pretty xs
+
+-- instance {-# OVERLAPS #-} Pretty a => Pretty [a] where
+--   pretty [] = mempty
+--   pretty xs = mconcat $ pretty <$> xs
 
 instance Pretty S.Kind where pretty = Text.pack . show
 instance Pretty I.CV where pretty = Text.pack . show

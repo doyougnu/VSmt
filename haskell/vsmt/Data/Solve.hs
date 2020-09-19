@@ -48,6 +48,7 @@ import qualified Data.SBV.Trans.Control     as C
 
 import           Data.Core.Result
 import           Data.Core.Types
+import           Data.Core.Pretty
 
 import Debug.Trace
 
@@ -58,6 +59,11 @@ log = $(logDebug)
 -- TODO custom loggers for each function, i.e., [DEBUG:EVAL]: ...
 logWith :: (MonadLogger m, Show a) => Text.Text -> a -> m ()
 logWith msg value = log $ msg <> sep <> Text.pack (show value)
+  where sep :: Text.Text
+        sep = " : "
+
+logPretty :: (Pretty a, MonadLogger m, Show a) => Text.Text -> a -> m ()
+logPretty msg value = log $ msg <> sep <> pretty value
   where sep :: Text.Text
         sep = " : "
 
@@ -477,6 +483,7 @@ rotate :: IL -> IL
 -- TODO figure out if we need to keep Impl in the IL
 -- rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
 rotate (BBOp opOuter (BBOp opInner l r) r') = BBOp opInner l (BBOp opOuter r r')
+rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
 rotate x = x
 
 rotate' :: IL' -> IL'
@@ -630,6 +637,8 @@ accumulate' (IOp op (Chc' d l r))         = Chc' d (OpI op l) (OpI op r)
 accumulate' x@(IIOp _ Chc' {} Chc' {})    = x
 accumulate' x@(IIOp _ (Ref' _) Chc' {})   = x
 accumulate' x@(IIOp _ Chc' {} (Ref' _))   = x
+accumulate' (IIOp op c@Chc'{} r)   = IIOp op c $ accumulate' r
+accumulate' (IIOp op l c@Chc'{})   = IIOp op (accumulate' l) c
   -- congruence rules
 accumulate' (IOp o e)  = accumulate' $ IOp o (accumulate' e)
 accumulate' x@(IIOp o l r) = let l'  = accumulate' l
@@ -641,8 +650,8 @@ accumulate' x@(IIOp o l r) = let l'  = accumulate' l
                                -- TODO encode the property in the type system to
                                -- avoid the check
                                if isValue' l' && isValue' r'
-                               then accumulate' res
-                               else res
+                               then trace ("reducing :: " ++ show x) accumulate' res
+                               else trace ("Done reducing ::  " ++ show (pretty res)) res
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
@@ -693,12 +702,14 @@ evaluate (BBOp And l Unit)      = evaluate l
 evaluate (BBOp And Unit r)      = evaluate r
 evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; evaluate l
 evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; evaluate r
-evaluate (IBOp op l r)        = let l' = accumulate' l
-                                    r' = accumulate' r
-                                    res = IBOp op l' r' in
-                                  if isValue' l' && isValue' r'
-                                  then evaluate res
-                                  else return $! intoCore res
+evaluate x@(IBOp op l r)        =
+  logWith "Found relation" x >>
+  let l' = accumulate' l
+      r' = accumulate' r
+      res = IBOp op l' r' in
+    if isValue' l' && isValue' r'
+    then log "Trying to reduce relation" >> evaluate res
+    else return $! intoCore res
 
 
   -- accumulation cases
@@ -719,12 +730,12 @@ evaluate x@(BBOp op l r)  = logWith "Eval General Recurring " x >>
   let l' = accumulate l
       r' = accumulate r
       res = BBOp op l' r' in
-    if isValue l' || isValue r'
+    if isValue l' && isValue r'
        then logWith "Reducing more" res >> evaluate res
     else do logWith "couldn't reduce" res
             logWith "Left " l'
             logWith "Right " r'
-            ; return $! intoCore res
+            return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
 store :: Result -> Solver ()
@@ -835,7 +846,7 @@ choose (VarCore (BBOp op l (Chc d cl cr))) =
 choose (VarCore x@BBOp {}) =
   -- when choices do not appear in the child of the root node we must rotate the
   -- AST such that the the binary relation at the root is preserved
-  do log "rotating"; choose . VarCore $ rotate x
+  do logPretty "rotating: " x; choose . VarCore $ rotate x
 
   -- Arithmetic
 choose (VarCore (IBOp op (Chc' d cl cr) r)) =
@@ -957,3 +968,25 @@ contextToSBool (getVarFormula -> x) = go x
         dispatch Impl = (==>)
         dispatch Eqv  = (<=>)
         dispatch XOr  = (<=>)
+
+
+instance Pretty IL where
+  pretty Unit = "unit"
+  pretty (Ref b)      = pretty b
+  pretty (BOp Not r@(Ref _))   = "~" <> pretty r
+  pretty (BOp o e)   = pretty o <> parens (pretty e)
+  pretty (BBOp op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
+  pretty (IBOp op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
+  pretty (Chc d l r)  = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"
+
+instance Pretty NRef where
+  pretty (SI _) = "sInt"
+  pretty (SD _) = "sDouble"
+
+instance Pretty IL' where
+  pretty (Ref' b)     = pretty b
+  pretty (IOp o x@(Ref' _))  = pretty o <> pretty x
+  pretty (IOp Abs e)  = between "|" (pretty e) "|"
+  pretty (IOp o e)  = pretty o <> parens (pretty e)
+  pretty (IIOp o l r) = parens $ mconcat [pretty l, " ", pretty o, " ", pretty r]
+  pretty (Chc' d l r) = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"

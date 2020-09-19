@@ -110,7 +110,7 @@ data Type = TBool
           deriving (Eq,Generic,Show,Ord)
 
 
-data Value = N NPrim | B Bool deriving (Eq,Show)
+data Value = N NPrim | B Bool deriving (Eq,Show,Ord)
 
 newtype CheckableResult =
   CheckableResult { getChkResult :: M.HashMap Var [(Maybe VariantContext, Value)] }
@@ -274,6 +274,74 @@ instance PrimN SymNum where
   (SyI i) .% (SyD d)  = SyI $ i .% S.fromSDouble S.sRoundNearestTiesToAway d
   (SyD d) .% (SyD d') = SyD $ S.fpRem d d'
 
+instance Num Value where
+  fromInteger = N . I
+
+  abs (N (I i)) = N . I $ abs i
+  abs (N (D i)) = N . D $ abs i
+  abs (B  _) = error "Num called on bool"
+
+  negate (N (I i)) = N . I $ negate i
+  negate (N (D i)) = N . D $ negate i
+  negate (B _)     = error "Num called on bool"
+
+  signum (N (I i)) = N . I $ signum i
+  signum (N (D i)) = N . D $ signum i
+  signum (B _)     = error "Num called on bool"
+
+  (N (I i)) + (N (I j)) = N . I $ i + j
+  (N (D i)) + (N (I j)) = N . D $ i + fromInteger j
+  (N (I i)) + (N (D j)) = N . D $ fromInteger i + j
+  (N (D i)) + (N (D j)) = N . D $ i + j
+  _         + _         = error "Addition called on boolean"
+
+  (N (I i)) * (N (I j)) = N . I $ i * j
+  (N (D i)) * (N (I j)) = N . D $ i * fromInteger j
+  (N (I i)) * (N (D j)) = N . D $ fromInteger i * j
+  (N (D i)) * (N (D j)) = N . D $ i * j
+  _         * _         = error "Multiplication called on boolean"
+
+instance Fractional Value where
+  (N (I i)) / (N (I j)) = N . D $ fromInteger i / fromInteger j
+  (N (D i)) / (N (I j)) = N . D $ i / fromInteger j
+  (N (I i)) / (N (D j)) = N . D $ fromInteger i / j
+  (N (D i)) / (N (D j)) = N . D $ i / j
+  _         / _         = error "Division called on boolean"
+
+  fromRational = N . D . fromRational
+
+instance PrimN Value where
+  (N (I i)) ./ (N (I j)) = N . I $ i ./ j
+  (N (D i)) ./ (N (I j)) = N . D $ i ./ fromInteger j
+  (N (I i)) ./ (N (D j)) = N . D $ fromInteger i ./ j
+  (N (D i)) ./ (N (D j)) = N . D $ i ./ j
+  _         ./ _         = error "Division called on boolean"
+
+  (N (I i)) .% (N (I j)) = N . I $ i .% j
+  (N (D i)) .% (N (I j)) = N . D $ i .% fromInteger j
+  (N (I i)) .% (N (D j)) = N . D $ fromInteger i .% j
+  (N (D i)) .% (N (D j)) = N . D $ i .% j
+  _         .% _         = error "Modulus called on boolean"
+
+instance Integral Value where
+  toInteger (N (I i)) = i
+  toInteger (N (D _)) = undefined
+  toInteger (B _)     = error "ToInteger called on Boolean"
+
+  quotRem (N (I i)) (N (I j)) = (N (I a), N (I b))
+    where (a, b) = quotRem i j
+  quotRem _         _         = error "QuotRem called on non-integral"
+
+instance Real Value where
+  toRational (N (I i)) = toRational i
+  toRational (N (D d)) = toRational d
+  toRational _         = error "ToRational called on Boolean"
+
+instance Enum Value where
+  toEnum i = N (I (toInteger i))
+  fromEnum (N (I i)) = fromIntegral i
+  fromEnum (N (D _)) = error "Enum on double"
+  fromEnum (B b)     = fromEnum b
 
 instance PrimN S.SDouble where
   (./)  = S.fpDiv S.sRoundNearestTiesToAway

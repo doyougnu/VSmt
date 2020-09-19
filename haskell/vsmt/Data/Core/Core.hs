@@ -76,9 +76,9 @@ instance Configurable PartialConfig (NExpr' a) where
   configure _ x = x
 
 
--------------------------- Predicates ------------------------------------------
+-------------------------- Projections ------------------------------------------
 -- | retrieve a set of all boolean references in a proposition
-booleans :: Proposition -> Set.Set Var
+booleans :: Ord a => Prop' a -> Set.Set a
 booleans (RefB b)     = Set.singleton b
 booleans (OpB _ e)    = booleans e
 booleans (OpBB _ l r) = booleans l `Set.union` booleans r
@@ -86,14 +86,14 @@ booleans (ChcB _ l r) = booleans l `Set.union` booleans r
 booleans _            = Set.empty
 
 -- | retrieve a set of all numeric references in a proposition
-numerics :: Proposition -> Set.Set Var
+numerics :: Ord a => Prop' a -> Set.Set a
 numerics (OpIB _ l r) = numerics' l `Set.union` numerics' r
 numerics (OpB _ e)    = numerics e
 numerics (OpBB _ l r) = numerics l `Set.union` numerics r
 numerics (ChcB _ l r) = numerics l `Set.union` numerics r
 numerics _            = Set.empty
 
-numerics' :: NExpression -> Set.Set Var
+numerics' :: Ord a => NExpr' a -> Set.Set a
 numerics' (RefI (ExRefTypeI i)) = Set.singleton i
 numerics' (RefI (ExRefTypeD d)) = Set.singleton d
 numerics' (OpI _ e)             = numerics' e
@@ -101,6 +101,52 @@ numerics' (OpII _ l r)          = numerics' l `Set.union` numerics' r
 numerics' (ChcI _ l r)          = numerics' l `Set.union` numerics' r
 numerics' _                     = Set.empty
 
+dimensions :: Prop' a -> Set.Set Dim
+dimensions (ChcB d l r) = Set.singleton d `Set.union`
+                          dimensions l    `Set.union`
+                          dimensions r
+dimensions (OpIB _ l r) = dimensions' l `Set.union` dimensions' r
+dimensions (OpB _ e)    = dimensions e
+dimensions (OpBB _ l r) = dimensions l `Set.union` dimensions r
+dimensions _            = Set.empty
+
+dimensions' :: NExpr' a -> Set.Set Dim
+dimensions' (ChcI d l r)          = Set.singleton d `Set.union`
+                                    dimensions' l   `Set.union`
+                                    dimensions' r
+dimensions' (OpI _ e)             = dimensions' e
+dimensions' (OpII _ l r)          = dimensions' l `Set.union` dimensions' r
+dimensions' _                     = Set.empty
+
+
+numericsWithType :: Ord a => Prop' a -> Set.Set (ExRefType a)
+numericsWithType (LitB _)     = Set.empty
+numericsWithType (RefB _)     = Set.empty
+numericsWithType (OpB _ e)    = numericsWithType e
+numericsWithType (OpBB _ l r) = numericsWithType l `Set.union` numericsWithType r
+numericsWithType (OpIB _ l r) = numericsWithType' l `Set.union` numericsWithType' r
+numericsWithType (ChcB _ l r) = numericsWithType l `Set.union` numericsWithType r
+
+numericsWithType' :: Ord a => NExpr' a -> Set.Set (ExRefType a)
+numericsWithType' (LitI _)     = Set.empty
+numericsWithType' (OpI _ e)    = numericsWithType' e
+numericsWithType' (OpII _ l r) = numericsWithType' l `Set.union` numericsWithType' r
+numericsWithType' (ChcI _ l r) = numericsWithType' l `Set.union` numericsWithType' r
+numericsWithType' (RefI i)     = Set.singleton i
+
+integers :: Ord a => Prop' a -> Set.Set a
+integers = Set.map unbox . Set.filter isInt . numericsWithType
+  where isInt (ExRefTypeI _) = True
+        isInt (ExRefTypeD _) = False
+
+        unbox (ExRefTypeI i) = i
+        unbox (ExRefTypeD d) = d
+
+doubles :: Ord a => Prop' a -> Set.Set a
+doubles p = (Set.\\) (numerics p) (integers p)
+
+
+-------------------------- Predicates ------------------------------------------
 -- | False if there is a numeric variable with the same name as a boolean variable
 refsAreDisjoint :: Proposition -> Bool
 refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop

@@ -38,14 +38,14 @@ type Parser = Parsec Void T.Text
 
 parseFromFile ::
      FilePath
-  -> IO (Either (ParseErrorBundle T.Text Void) (Prop' Dim, CheckableResult))
+  -> IO (Either (ParseErrorBundle T.Text Void) (VariantContext, CheckableResult))
 parseFromFile f = parse resultParser f <$> readFile f
 
-resultParser :: Parser (Prop' Dim, CheckableResult)
+resultParser :: Parser (VariantContext, CheckableResult)
 resultParser = between sc eof go
 
 
-go :: Parser (Prop' Dim, CheckableResult)
+go :: Parser (VariantContext, CheckableResult)
 go = do modelHeader
         ms <- many modelRow
         s <- lexeme satFormula
@@ -136,14 +136,17 @@ modelRow = do var <- variable
               val <- parens iteTerm <|> plainValue
               return . CheckableResult $ M.singleton var val
 
-satFormula :: Parser (Prop' Dim)
-satFormula = satHeader >> bExpr
+satFormula :: Parser VariantContext
+satFormula = satHeader >> variantContext
 
 dimension :: Parser Dim
 dimension = lexeme ((:) <$> C.letterChar <*> many C.alphaNumChar <?> "dimension")
 
 context :: Parser VariantContext
 context = VariantContext <$> bExpr
+
+variantContext :: Parser VariantContext
+variantContext = context
 
 bExpr :: Parser (Prop' Dim)
 bExpr = makeExprParser bTerm bOperators

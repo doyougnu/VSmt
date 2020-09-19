@@ -18,15 +18,17 @@ import qualified TestSuite.Solve.Boolean.Plain
 import qualified TestSuite.Solve.Boolean.Choices
 import qualified TestSuite.Solve.Arithmetic.Plain
 import qualified TestSuite.Solve.Arithmetic.Choices
+import qualified TestSuite.Solve.Sound
 
 main :: IO ()
 main = do
-  setEnv "TASTY_QUICKCHECK_TESTS" "500"
+  setEnv "TASTY_QUICKCHECK_TESTS" "5"
   defaultMain $ testGroup "Tests"
-    [ booleans
-    , arithmetics
-    , booleanPs
-    , arithmeticPs
+    [ -- booleans
+    -- , arithmetics
+    -- , booleanPs
+    -- , arithmeticPs
+      soundness
     ]
 
 booleans :: TestTree
@@ -51,4 +53,9 @@ booleanPs = testGroup "Boolean Properties"
 arithmeticPs :: TestTree
 arithmeticPs = testGroup "Arithmetic Properties"
   [ TestSuite.Solve.Arithmetic.Plain.properties
+  ]
+
+soundness :: TestTree
+soundness = testGroup "Soundness of the Solver"
+  [ TestSuite.Solve.Sound.properties
   ]

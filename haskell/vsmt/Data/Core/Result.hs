@@ -76,6 +76,7 @@ instance Pretty (Result' Var) where
 
 -- TODO: use Text.PrintF from base for better formatted output
 deriving instance Pretty d => Pretty (VariableMap d)
+instance Pretty [(Maybe VariantContext, I.CV)] where pretty = prettyResultFormula
 instance Pretty d => Pretty (M.HashMap d ResultFormula) where
   pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
 
@@ -83,18 +84,21 @@ instance Pretty d => Pretty (M.HashMap d ResultFormula) where
 -- printing
 prettyResultFormula :: [(Maybe VariantContext, I.CV)] -> Text
 prettyResultFormula [(Nothing, val)] = pretty val
-prettyResultFormula [(ctx, val)] = parens $
+prettyResultFormula [(Just ctx, val)] = parens $
   "ite" <> space <> pretty ctx <> space <> parens (pretty val) <> space <> done
   where kw = I.kindOf val
         done = "Undefined"
-
-prettyResultFormula ((ctx,val):xs) = parens $
+prettyResultFormula ((Nothing,val):xs) = parens $
                                      "ite " <>
-                                     pretty ctx <> space <>
+                                     parens "True :: Bool" <> space <>
                                      parens (pretty val) <> space <>
                                      pretty xs
+prettyResultFormula ((Just ctx,val):xs) = parens $
+                                          "ite " <>
+                                          pretty ctx <> space <>
+                                          parens (pretty val) <> space <>
+                                          pretty xs
 
-instance Pretty [(Maybe VariantContext, I.CV)] where pretty = prettyResultFormula
 instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
 
 -- | newtype wrapper for better printing
@@ -106,9 +110,6 @@ deriving instance Monoid Result
 instance Show Result where show = unpack . pretty
 
 instance Pretty Result where pretty (Result r) = pretty r
-
-instance (Pretty a, Pretty b) => Pretty (a,b) where
-  pretty (a, b) = parens $ pretty a <> ", " <> pretty b
 
 data Result' d = Result' { variables :: VariableMap d
                          , satResult :: Maybe VariantContext

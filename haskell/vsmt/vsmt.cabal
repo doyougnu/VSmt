@@ -102,8 +102,10 @@ Test-Suite VSMTTest
                   , tasty-hunit
                   , filepath
                   , bytestring
+                  , unordered-containers
                   , sbv
                   , text
+                  , containers
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework
@@ -112,6 +114,7 @@ Test-Suite VSMTTest
                   , TestSuite.Solve.Boolean.Choices
                   , TestSuite.Solve.Arithmetic.Plain
                   , TestSuite.Solve.Arithmetic.Choices
+                  , TestSuite.Solve.Sound
 
 Benchmark VSMTBench
   type            : exitcode-stdio-1.0
