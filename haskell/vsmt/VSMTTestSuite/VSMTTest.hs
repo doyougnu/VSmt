@@ -24,25 +24,23 @@ main :: IO ()
 main = do
   setEnv "TASTY_QUICKCHECK_TESTS" "15"
   defaultMain $ testGroup "Tests"
-    [ -- booleans
-    -- , arithmetics
-    -- , booleanPs
-    -- , arithmeticPs
-      soundness
+    [ booleans
+    , arithmetics
+    , booleanPs
+    , arithmeticPs
+      -- soundness
     ]
 
 booleans :: TestTree
 booleans = testGroup "Boolean Tests"
   [ TestSuite.Solve.Boolean.Plain.tests
   , TestSuite.Solve.Boolean.Choices.tests
-  , TestSuite.Solve.Boolean.Plain.properties
   ]
 
 arithmetics :: TestTree
 arithmetics = testGroup "Arithmetic Tests"
   [ TestSuite.Solve.Arithmetic.Plain.tests
   , TestSuite.Solve.Arithmetic.Choices.tests
-  , TestSuite.Solve.Arithmetic.Plain.properties
   ]
 
 booleanPs :: TestTree

@@ -87,7 +87,7 @@ solveVerbose  i vConf =
       do let _ = fromMaybe true vConf
          (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
          C.query $ runStdoutLoggingT $ runSolver st $
-           findVCore il >>= choose >> solution
+           findVCore il >>= removeChoices >> solution
            -- do core <- findVCore il
            --    _ <- choose core
            --    solution
@@ -464,12 +464,10 @@ instance Prim T.SBool NRef where
 data IL = Unit
     | Ref BRef
     | BOp B_B IL
-    | BBOp BB_B' IL IL
+    | BBOp BB_B IL IL
     | IBOp NN_B IL' IL'
     | Chc Dim Proposition Proposition
     deriving Show
-
-data BB_B' = And' | Or' deriving Show
 
 data IL' = Ref' NRef
     | IOp N_N IL'
@@ -484,16 +482,16 @@ data IL' = Ref' NRef
 rotate :: IL -> IL
 -- TODO figure out if we need to keep Impl in the IL
 -- rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
-rotate (BBOp And' (BBOp And' c@Chc{} r) r') = BBOp And' c (BBOp And' r r')
-rotate (BBOp And' (BBOp And' l c@Chc{}) r')   = BBOp And' c (BBOp And' l r')
-rotate (BBOp Or' (BBOp Or' c@Chc{} r) r')   = BBOp Or'  c (BBOp Or' r r')
-rotate (BBOp Or' (BBOp Or' l c@Chc{}) r')     = BBOp Or'  c (BBOp Or' l r')
+rotate (BBOp And (BBOp And c@Chc{} r) r') = BBOp And c (BBOp And r r')
+rotate (BBOp And (BBOp And l c@Chc{}) r')   = BBOp And c (BBOp And l r')
+rotate (BBOp Or (BBOp Or c@Chc{} r) r')   = BBOp Or  c (BBOp Or r r')
+rotate (BBOp Or (BBOp Or l c@Chc{}) r')     = BBOp Or  c (BBOp Or l r')
   -- TODO These rotations could be costly, benchmark them
-rotate (BBOp Or' (BBOp And' q r) p) = BBOp And' (BBOp Or' p q) (BBOp Or' p r)
-rotate (BBOp And' (BBOp Or' q r) p) = BBOp Or' (BBOp And' p q) (BBOp And' p r)
+rotate (BBOp Or (BBOp And q r) p) = BBOp And (BBOp Or p q) (BBOp Or p r)
+rotate (BBOp And (BBOp Or q r) p) = BBOp Or (BBOp And p q) (BBOp And p r)
   -- General rotations
-rotate (BBOp Or' (BBOp Or' l r) r') = BBOp Or' l (BBOp Or' r r')
-rotate (BBOp And' (BBOp And' l r) r') = BBOp And' l (BBOp And' r r')
+rotate (BBOp Or (BBOp Or l r) r') = BBOp Or l (BBOp Or r r')
+rotate (BBOp And (BBOp And l r) r') = BBOp And l (BBOp And r r')
 rotate x = x
 
 rotate' :: IL' -> IL'
@@ -521,8 +519,8 @@ toIL (OpBB Eqv l r)  = toIL (OpBB And l' r')
 toIL (OpBB XOr l r) = toIL (OpBB And l' r')
   where l' = l ||| r
         r' = bnot (l &&& r)
-toIL (OpBB And l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp And' l' r'
-toIL (OpBB Or l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp Or' l' r'
+toIL (OpBB And l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp And l' r'
+toIL (OpBB Or l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp Or l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
@@ -554,10 +552,10 @@ toILSymbolic (OpBB XOr l r) = toILSymbolic (OpBB And l' r')
         r' = bnot (l &&& r)
 toILSymbolic (OpBB And l r) = do l' <- toILSymbolic  l
                                  r' <- toILSymbolic r
-                                 return $ BBOp And' l' r'
+                                 return $ BBOp And l' r'
 toILSymbolic (OpBB Or l r) = do l' <- toILSymbolic  l
                                 r' <- toILSymbolic r
-                                return $ BBOp Or' l' r'
+                                return $ BBOp Or l' r'
 toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $ IBOp op l' r'
 toILSymbolic (ChcB d l r)  = return $ Chc d l r
 
@@ -581,7 +579,7 @@ toILSymbolic' (ChcI d l r)  = return $ Chc' d l r
 -- | A variational core is a partially evaluated AST in the IL language. The
 -- goal is to reduce as much as possible all plain terms leaving only symbolic
 -- references, choices and logical connectives
-newtype VarCore = VarCore IL
+newtype VarCore = VarCore {getCore :: IL}
   deriving Show
 
 -- | Helper function to wrap an IL into a variational core
@@ -596,8 +594,12 @@ isUnit _              = False
 driveNotDown :: IL -> IL
 driveNotDown (Ref b)     = Ref (bnot b)
 driveNotDown (BOp Not e) = e
-driveNotDown (BBOp And' l r) = BBOp Or' (driveNotDown l) (driveNotDown r)
-driveNotDown (BBOp Or' l r) = BBOp And' (driveNotDown l) (driveNotDown r)
+driveNotDown (BBOp And l r) = BBOp Or (driveNotDown l) (driveNotDown r)
+driveNotDown (BBOp Or l r) = BBOp And (driveNotDown l) (driveNotDown r)
+driveNotDown (BBOp XOr l r) = driveNotDown p
+  where p = BBOp Or (BBOp And l (driveNotDown r)) (BBOp And (driveNotDown l) r)
+driveNotDown (BBOp Impl l r) = BBOp And l (driveNotDown r)
+driveNotDown (BBOp Eqv l r) = BBOp Eqv l (driveNotDown r)
 driveNotDown (IBOp EQ l r)  = IBOp NEQ l r
 driveNotDown (IBOp NEQ l r) = IBOp EQ l r
 driveNotDown (IBOp op l r)  = IBOp op r l -- 1 < 2 === -(2 < 1)
@@ -613,8 +615,8 @@ accumulate :: IL -> IL
 accumulate Unit                        = Unit
   -- bools
 accumulate (BOp Not (Ref r))           = Ref $! bnot r
-accumulate (BBOp And' (Ref l) (Ref r))  = Ref $! l &&& r
-accumulate (BBOp Or'  (Ref l) (Ref r))  = Ref $! l ||| r
+accumulate (BBOp And (Ref l) (Ref r))  = Ref $! l &&& r
+accumulate (BBOp Or  (Ref l) (Ref r))  = Ref $! l ||| r
   -- numerics
 accumulate (IBOp LT (Ref' l) (Ref' r))  = Ref $! l .< r
 accumulate (IBOp LTE (Ref' l) (Ref' r)) = Ref $! l .<= r
@@ -699,8 +701,8 @@ evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
-evaluate (BBOp And'  (Ref l) (Ref r)) = toSolver $! l &&& r
-evaluate (BBOp Or'   (Ref l) (Ref r)) = toSolver $! l ||| r
+evaluate (BBOp And  (Ref l) (Ref r)) = toSolver $! l &&& r
+evaluate (BBOp Or   (Ref l) (Ref r)) = toSolver $! l ||| r
   -- numerics
 evaluate (IBOp LT  (Ref' l) (Ref' r)) = toSolver $! l .< r
 evaluate (IBOp LTE (Ref' l) (Ref' r)) = toSolver $! l .<= r
@@ -716,10 +718,10 @@ evaluate x@(IBOp _ Chc' {} Chc' {})  = return $! intoCore x
 evaluate x@(IBOp _ (Ref' _) Chc' {}) = return $! intoCore x
 evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
-evaluate (BBOp And' l Unit)      = evaluate l
-evaluate (BBOp And' Unit r)      = evaluate r
-evaluate (BBOp And' l x@(Ref _)) = do _ <- evaluate x; evaluate l
-evaluate (BBOp And' x@(Ref _) r) = do _ <- evaluate x; evaluate r
+evaluate (BBOp And l Unit)      = evaluate l
+evaluate (BBOp And Unit r)      = evaluate r
+evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; evaluate l
+evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; evaluate r
 evaluate x@(IBOp op l r)        =
   logWith "Found relation" x >>
   let l' = accumulate' l
@@ -732,10 +734,10 @@ evaluate x@(IBOp op l r)        =
 
   -- accumulation cases
 evaluate x@(BOp Not _)  = evaluate $ accumulate x
-evaluate x@(BBOp And' l r) = logWith "Eval And Recurring: " x >>
+evaluate x@(BBOp And l r) = logWith "Eval And Recurring: " x >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
-     let res = BBOp And' l' r'
+     let res = BBOp And l' r'
      -- this is a hot loop, but we want to make the
      -- variational core as small as possible because it
      -- will pay off in the solver. Thus we perform a
@@ -756,6 +758,75 @@ evaluate x@(BBOp op l r)  = logWith "Eval General Recurring " x >>
             return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
+-- | We use a zipper to track the context when searching for choices, this
+-- removes the need to perform tree rotations
+data Ctx = InL Ctx BB_B IL -- ^ In lhs, Ctx' is parent node, by op, with right
+         | InR T.SBool BB_B Ctx
+         | InLB Ctx  NN_B IL'
+         | InRB NRef NN_B Ctx
+         | InL' Ctx  NN_N IL'
+         | InR' NRef NN_N Ctx
+         | Top
+         deriving Show
+
+data Loc = InBool IL  Ctx
+         | InNum  IL' Ctx
+         deriving Show
+
+toLoc :: IL -> Loc
+toLoc = toLocWith Top
+
+toLoc' :: IL' -> Loc
+toLoc' = toLocWith' Top
+
+toLocWith :: Ctx -> IL -> Loc
+toLocWith = flip InBool
+
+toLocWith' :: Ctx -> IL' -> Loc
+toLocWith' = flip InNum
+
+findChoice :: Loc -> Loc
+  -- base cases
+findChoice x@(InBool Ref{} Top) = x
+findChoice x@(InBool Unit Top)  = x
+findChoice x@(InBool Chc {} _)  = x
+findChoice x@(InNum Chc' {} _)  = x
+  -- discharge two references
+findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   = findChoice (InBool (accumulate  $ BBOp op l r) parent)
+findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) = findChoice (InBool (accumulate  $ IBOp op l r) parent)
+findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) = findChoice (InNum  (accumulate' $ IIOp op l r) parent)
+  -- fold
+findChoice (InBool r@Ref {} (InR acc op parent))  =
+  findChoice (InBool (accumulate $ BBOp op (Ref acc) r) parent)
+findChoice (InNum r@Ref' {} (InRB acc op parent)) =
+  findChoice (InBool (accumulate $ IBOp op (Ref' acc) r) parent)
+findChoice (InNum r@Ref' {} (InR' acc op parent)) =
+  findChoice (InNum (accumulate' $ IIOp op (Ref' acc) r) parent)
+  -- switch
+findChoice (InBool (Ref l) (InL parent op r))   = findChoice (InBool r $ InR l op parent)
+findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
+findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
+  -- recur
+findChoice (InBool (BBOp op l r) ctx) = findChoice (InBool l $ InL ctx op r)
+findChoice (InBool (IBOp op l r) ctx) = findChoice (InNum  l $ InLB ctx op r)
+findChoice (InNum (IIOp op l r) ctx) = findChoice (InNum  l $ InL' ctx op r)
+  -- legal to discharge Units under a conjunction only
+findChoice (InBool Unit (InL parent And r)) = findChoice (InBool r $ InR true And parent)
+findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
+findChoice (InBool BOp {} _) = error "Can't have unary Ops in IL!!!"
+findChoice (InNum IOp {} _) = error "Can't have unary Ops in IL!!!"
+  -- TODO Not sure if unit can ever exist with a context
+findChoice (InBool Unit ctx) = error $ "Unit with a context" ++ show ctx
+findChoice x@(InNum Ref'{} Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
+findChoice x@(InBool Ref{} InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
+findChoice x@(InBool Ref{} InRB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
+findChoice x@(InBool Ref{} InL'{}) = error $ "An impossible case bool reference in arithmetic: " ++ show x
+findChoice x@(InBool Ref{} InR'{}) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
+findChoice x@(InNum Ref'{} InL{}) = error $ "An impossible case: " ++ show x
+findChoice x@(InNum Ref'{} InR{}) = error $ "An impossible case: " ++ show x
+
+
+
 store :: Result -> Solver ()
 store = St.modify' . flip by . (<>)
 
@@ -821,104 +892,140 @@ alternative dim goLeft goRight =
                 goRight
 
 
-choose :: VarCore -> Solver ()
-choose (VarCore Unit) = log "Core reduced to Unit" >>
-                        St.get >>= getResult . vConfig >>= store
-choose (VarCore x@Ref{}) = do _ <- evaluate x; return ()
-choose (VarCore (Chc d l r)) =
+removeChoices :: VarCore -> Solver ()
+  -- singleton instances
+removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
+                               St.get >>= getResult . vConfig >>= store
+removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
+removeChoices (VarCore BOp {}) = error "How did a negation get into var core?"
+removeChoices (VarCore l) = choose (toLoc l)
+
+
+choose :: Loc -> Solver ()
+choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
+choose loc =
   do
-    log "singleton choice"
-    conf <- St.gets config
-    let goLeft  = toIL l >>= evaluate >>= choose
-        goRight = toIL r >>= evaluate >>= choose
-    case find d conf of
-      Just True  -> log "left"  >> goLeft
-      Just False -> log "right" >> goRight
-      Nothing    -> alternative d goLeft goRight -- then this is a new dimension
+    let loc' = findChoice loc
+    case loc' of
+      x@(InBool (Chc d cl cr) ctx) -> do
+        logWith "Got choice in context: " x
+        conf <- St.gets config
+        let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
+            goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+
+        case find d conf of
+          Just True  -> goLeft
+          Just False -> goRight
+          Nothing    -> alternative d goLeft goRight
+
+      x@(InNum (Chc' d cl cr) ctx) -> do
+        logWith "Got choice in context: " x
+        conf <- St.gets config
+        let goLeft  = toIL' cl >>= choose . findChoice . toLocWith' ctx . accumulate'
+            goRight = toIL' cr >>= choose . findChoice . toLocWith' ctx . accumulate'
+
+        case find d conf of
+          Just True  -> goLeft
+          Just False -> goRight
+          Nothing    -> alternative d goLeft goRight
+
+      (InBool Unit Top) -> removeChoices $ intoCore Unit
+      x -> error $ "Choosing and missed cases with: " ++ show x
 
 
-choose (VarCore (BBOp op (Chc d cl cr) r)) =
-  do
-    log "Choice in left"
-    conf <- St.gets config
-    let goLeft  = toIL cl >>= evaluate . (\x -> BBOp op x r) >>= choose
-        goRight = toIL cr >>= evaluate . (\x -> BBOp op x r) >>= choose
-     -- check if d is in the configuration, and if so what is its value
-    case find d conf of
-       Just True  -> goLeft
-       Just False -> goRight
-       Nothing    -> alternative d goLeft goRight
+-- choose (VarCore (Chc d l r)) =
+--   do
+--     log "singleton choice"
+--     conf <- St.gets config
+--     let goLeft  = toIL l >>= evaluate >>= choose
+--         goRight = toIL r >>= evaluate >>= choose
+--     case find d conf of
+--       Just True  -> log "left"  >> goLeft
+--       Just False -> log "right" >> goRight
+--       Nothing    -> alternative d goLeft goRight -- then this is a new dimension
 
 
-choose (VarCore (BBOp op l (Chc d cl cr))) =
-  do
-    log "Choice in Right"
-    conf <- St.gets config
-    let goLeft  = toIL cl >>= evaluate . BBOp op l >>= choose
-        goRight = toIL cr >>= evaluate . BBOp op l >>= choose
-     -- check if d is in the configuration, and if so what is its value
-    case find d conf of
-       Just True  -> goLeft
-       Just False -> goRight
-       Nothing    -> alternative d goLeft goRight
+-- choose (VarCore (BBOp op (Chc d cl cr) r)) =
+--   do
+--     log "Choice in left"
+--     conf <- St.gets config
+--     let goLeft  = toIL cl >>= evaluate . (\x -> BBOp op x r) >>= choose
+--         goRight = toIL cr >>= evaluate . (\x -> BBOp op x r) >>= choose
+--      -- check if d is in the configuration, and if so what is its value
+--     case find d conf of
+--        Just True  -> goLeft
+--        Just False -> goRight
+--        Nothing    -> alternative d goLeft goRight
 
-  -- Arithmetic
-choose (VarCore (IBOp op (Chc' d cl cr) r)) =
-  do
-    conf <- St.gets config
-    let goLeft  = toIL' cl >>= evaluate . (\x -> IBOp op x r) >>= choose
-        goRight = toIL' cr >>= evaluate . (\x -> IBOp op x r) >>= choose
-    case find d conf of
-      Just True  -> goLeft
-      Just False -> goRight
-      Nothing    -> alternative d goLeft goRight
 
-choose (VarCore (IBOp op l (Chc' d cl cr))) =
-  do
-    conf <- St.gets config
-    let goLeft  = toIL' cl >>= evaluate . IBOp op l >>= choose
-        goRight = toIL' cr >>= evaluate . IBOp op l >>= choose
-    case find d conf of
-      Just True  -> goLeft
-      Just False -> goRight
-      Nothing    -> alternative d goLeft goRight
+-- choose (VarCore (BBOp op l (Chc d cl cr))) =
+--   do
+--     log "Choice in Right"
+--     conf <- St.gets config
+--     let goLeft  = toIL cl >>= evaluate . BBOp op l >>= choose
+--         goRight = toIL cr >>= evaluate . BBOp op l >>= choose
+--      -- check if d is in the configuration, and if so what is its value
+--     case find d conf of
+--        Just True  -> goLeft
+--        Just False -> goRight
+--        Nothing    -> alternative d goLeft goRight
 
-choose (VarCore (IBOp op l r)) = do log "arith recurrence"
-                                    choose' op (toLoc l) (toLoc r)
-choose (VarCore x@BBOp {}) =
-  -- when choices do not appear in the child of the root node we must rotate the
-  -- AST such that the the binary relation at the root is preserved
-  do logPretty "rotating: " x; choose . VarCore $ rotate x
+--   -- Arithmetic
+-- choose (VarCore (IBOp op (Chc' d cl cr) r)) =
+--   do
+--     conf <- St.gets config
+--     let goLeft  = toIL' cl >>= evaluate . (\x -> IBOp op x r) >>= choose
+--         goRight = toIL' cr >>= evaluate . (\x -> IBOp op x r) >>= choose
+--     case find d conf of
+--       Just True  -> goLeft
+--       Just False -> goRight
+--       Nothing    -> alternative d goLeft goRight
 
-choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
+-- choose (VarCore (IBOp op l (Chc' d cl cr))) =
+--   do
+--     conf <- St.gets config
+--     let goLeft  = toIL' cl >>= evaluate . IBOp op l >>= choose
+--         goRight = toIL' cr >>= evaluate . IBOp op l >>= choose
+--     case find d conf of
+--       Just True  -> goLeft
+--       Just False -> goRight
+--       Nothing    -> alternative d goLeft goRight
+
+-- choose (VarCore (IBOp op l r)) = do log "arith recurrence"
+--                                     choose' op (toLoc' l) (toLoc' r)
+-- choose (VarCore x@BBOp {}) =
+--   -- when choices do not appear in the child of the root node we must rotate the
+--   -- AST such that the the binary relation at the root is preserved
+--   do logPretty "zippering: " x
+
+-- choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
 
 ---------------------- Removing Choices in Arithmetic --------------------------
 -- | A zipper context that can only fold from the left
-data Ctx = InL Ctx NN_N IL' -- ^ In lhs, Ctx is parent node, by op, with right
-                            -- child IL'
-         | InR NRef NN_N Ctx
-         | Top
-         deriving Show
+-- data Ctx' = InL' Ctx' NN_N IL' -- ^ In lhs, Ctx' is parent node, by op, with right child IL
+--          | InR' NRef NN_N Ctx'
+--          | Top'
+--          deriving Show
 
-type Loc = (IL', Ctx)
+-- type Loc' = (IL', Ctx')
 
-toLoc :: IL' -> Loc
-toLoc x = (x, Top)
+-- toLoc' :: IL' -> Loc'
+-- toLoc' x = (x, Top')
 
 -- | Find the values and return the value as the focus with context
-findChoice :: Loc -> Loc
-findChoice x@(Ref'{}, Top) = x -- done
-findChoice x@(Chc' {}, _) = x -- done
-findChoice (IIOp op l r, Top) = findChoice (l, InL Top op r) -- drive down to the left
-  -- discharge two references
-findChoice (l@Ref' {}, InL parent op r@Ref' {}) = findChoice (accumulate' $ IIOp op l r, parent)
-  -- fold
-findChoice (r@Ref' {}, InR acc op parent) = findChoice (accumulate' $ IIOp op (Ref' acc) r, parent)
-  -- switch
-findChoice (Ref' l, InL parent op r) = findChoice (r, InR l op parent)
-  -- recur
-findChoice (IIOp op l r, ctx) = findChoice (l, InL ctx op r)
-findChoice (IOp {}, _) = error "Can't have unary Ops in IL'!!!"
+-- findChoice' :: Loc -> Loc
+-- findChoice' x@(Ref'{}, Top') = x -- done
+-- findChoice' x@(Chc' {}, _) = x -- done
+-- findChoice' (IIOp op l r, Top') = findChoice' (l, InL' Top' op r) -- drive down to the left
+--   -- discharge two references
+-- findChoice' (l@Ref' {}, InL' parent op r@Ref' {}) = findChoice' (accumulate' $ IIOp op l r, parent)
+--   -- fold
+-- findChoice' (r@Ref' {}, InR' acc op parent) = findChoice' (accumulate' $ IIOp op (Ref' acc) r, parent)
+--   -- switch
+-- findChoice' (Ref' l, InL' parent op r) = findChoice' (r, InR' l op parent)
+--   -- recur
+-- findChoice' (IIOp op l r, ctx) = findChoice' (l, InL' ctx op r)
+-- findChoice' (IOp {}, _) = error "Can't have unary Ops in IL'!!!"
 
 -- | Here we need to detect choices that cannot be rotated up the tree due to
 -- the hard barrier between arithmetic and booleans, i.e., that arithmetic _can
@@ -926,37 +1033,38 @@ findChoice (IOp {}, _) = error "Can't have unary Ops in IL'!!!"
 -- we capture the outer context, recur down to the first choice and then call
 -- back up to the boolean solver. This is effectively a zipper encoded as a
 -- function.
-choose' :: NN_B -> Loc -> Loc -> Solver ()
-choose' rootOp (x@Ref' {}, Top) (y@Ref' {}, Top) = evaluate (IBOp rootOp x y) >>= choose
-choose' rootOp lhs rhs =
-  do
-  let l' = findChoice lhs
-      r' = findChoice rhs
-  case (l', r') of
-    ((Chc' d cl cr, ctx), rhs') ->
-      do
-        conf <- St.gets config
-        let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice (x,ctx)) . accumulate'
-            goRight = toIL' cr >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice (x,ctx)) . accumulate'
+-- choose' :: NN_B -> Loc -> Loc -> Solver IL
+-- choose' = undefined
+-- choose' rootOp (x@Ref' {}, Top') (y@Ref' {}, Top') = return $ accumulate (IBOp rootOp x y)
+-- choose' rootOp lhs rhs =
+--   do
+--   let l' = findChoice' lhs
+--       r' = findChoice' rhs
+--   case (l', r') of
+--     ((Chc' d cl cr, ctx), rhs') ->
+--       do
+--         conf <- St.gets config
+--         let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice' (x,ctx)) . accumulate'
+--             goRight = toIL' cr >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice' (x,ctx)) . accumulate'
 
-        case find d conf of
-          Just True  -> goLeft
-          Just False -> goRight
-          Nothing    -> alternative d goLeft goRight
+--         case find d conf of
+--           Just True  -> goLeft
+--           Just False -> goRight
+--           Nothing    -> alternative d goLeft goRight
 
-    (lhs', (Chc' d cl cr, ctx)) ->
-      do
-        conf <- St.gets config
-        let goLeft  = toIL' cl >>= choose' rootOp lhs' . findChoice . (,ctx) . accumulate'
-            goRight = toIL' cr >>= choose' rootOp lhs' . findChoice . (,ctx) . accumulate'
+--     (lhs', (Chc' d cl cr, ctx)) ->
+--       do
+--         conf <- St.gets config
+--         let goLeft  = toIL' cl >>= choose' rootOp lhs' . findChoice' . (,ctx) . accumulate'
+--             goRight = toIL' cr >>= choose' rootOp lhs' . findChoice' . (,ctx) . accumulate'
 
-        case find d conf of
-          Just True  -> goLeft
-          Just False -> goRight
-          Nothing    -> alternative d goLeft goRight
+--         case find d conf of
+--           Just True  -> goLeft
+--           Just False -> goRight
+--           Nothing    -> alternative d goLeft goRight
 
 
-    a -> error $ "Error in Arithmetic Zipper, function choose': " ++ show a
+--     a -> error $ "Error in Arithmetic Zipper, function choose': " ++ show a
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>
@@ -986,10 +1094,6 @@ contextToSBool (getVarFormula -> x) = go x
         dispatch Impl = (==>)
         dispatch Eqv  = (<=>)
         dispatch XOr  = (<=>)
-
-instance Pretty BB_B' where
-  pretty And' = "and"
-  pretty Or'  = "or"
 
 instance Pretty IL where
   pretty Unit = "unit"
