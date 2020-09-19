@@ -25,6 +25,7 @@ tests = testGroup "Plain formulas"
   [ goldenVsStringShow "simple_arithmetic_to_variable" singletonVar
   , goldenVsStringShow "two_variables_in_addition" twoVars
   , testCase "quickcheck-replay=739384" sub
+  , goldenVsStringShow "infinite prop" infinite
   ]
 
 properties :: TestTree
@@ -52,3 +53,7 @@ plainBecomesUnit = QC.testProperty
   $ \p -> isPlain p QC.==> QCM.monadicIO $
           do (core, _) <- liftIO $ solveForCoreVerbose p Nothing
              QCM.assert $ isUnit core
+
+infinite :: IO Result
+infinite = flip satVerbose Nothing p
+  where p = iChc "DD" (14.451303985118729 - (-(-22))) (signum 29.38464737058025) .== abs (iChc "EE" (signum (iRef ("uqqhmomillqezrrtwiunpyrdxqy" :: Text))) (-32) + (-29))

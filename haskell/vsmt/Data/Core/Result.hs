@@ -34,6 +34,7 @@ import           Data.Text              (Text,pack,unpack)
 import           Data.Semigroup         ((<>))
 import           Data.Char              (isSpace)
 import           Data.List              (intercalate, nub)
+import           Data.Maybe             (isNothing)
 
 import qualified Data.HashMap.Strict    as M
 import           Data.String            (IsString, fromString)
@@ -102,7 +103,7 @@ prettyResultFormula ((Just ctx,val):xs) = parens $
 instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
 
 -- | newtype wrapper for better printing
-newtype Result = Result (Result' Var) deriving (Eq,Generic)
+newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic)
 
 instance Semigroup Result where (Result a) <> (Result b) = Result (a <> b)
 deriving instance Monoid Result
@@ -145,6 +146,9 @@ isSat = do cs <- C.checkSat
                        C.Sat -> True
                        _     -> False
 
+wasSat :: Result -> Bool
+wasSat = isNothing . satResult . unboxResult
+
 -- | Generate a VSMT model
 getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
 getVSMTModel = T.getSMTResult
@@ -152,7 +156,6 @@ getVSMTModel = T.getSMTResult
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.
 getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
--- getResult Nothing =
 getResult vf =
   do model <- getVSMTModel
      return $!

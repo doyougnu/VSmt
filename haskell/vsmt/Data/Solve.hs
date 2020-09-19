@@ -475,29 +475,6 @@ data IL' = Ref' NRef
     | Chc' Dim NExpression NExpression
     deriving Show
 
--- | A simple tree rotation helper function. This is pivotal because as we begin
--- to remove choices we must ensure that each binary connective remains intact,
--- this means that we cannot perform arbitrary recursion and thus must rotate
--- the tree until we find a choice
-rotate :: IL -> IL
--- TODO figure out if we need to keep Impl in the IL
--- rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
-rotate (BBOp And (BBOp And c@Chc{} r) r') = BBOp And c (BBOp And r r')
-rotate (BBOp And (BBOp And l c@Chc{}) r')   = BBOp And c (BBOp And l r')
-rotate (BBOp Or (BBOp Or c@Chc{} r) r')   = BBOp Or  c (BBOp Or r r')
-rotate (BBOp Or (BBOp Or l c@Chc{}) r')     = BBOp Or  c (BBOp Or l r')
-  -- TODO These rotations could be costly, benchmark them
-rotate (BBOp Or (BBOp And q r) p) = BBOp And (BBOp Or p q) (BBOp Or p r)
-rotate (BBOp And (BBOp Or q r) p) = BBOp Or (BBOp And p q) (BBOp And p r)
-  -- General rotations
-rotate (BBOp Or (BBOp Or l r) r') = BBOp Or l (BBOp Or r r')
-rotate (BBOp And (BBOp And l r) r') = BBOp And l (BBOp And r r')
-rotate x = x
-
-rotate' :: IL' -> IL'
-rotate' (IIOp opOuter (IIOp opInner l r) r') = IIOp opInner l (IIOp opOuter r r')
-rotate' x = x
-
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
@@ -511,6 +488,8 @@ toIL :: ( St.MonadState State m
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = cached ref
+toIL x@(OpB op (ChcB d l r)) = do logWith "Moving Op inside choice" x
+                                  return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
 toIL (OpBB Impl l r) = toIL (OpBB Or (OpB Not l) r)
 toIL (OpBB Eqv l r)  = toIL (OpBB And l' r')
@@ -527,11 +506,14 @@ toIL (ChcB d l r)  = return $ Chc d l r
 toIL' :: ( T.MonadSymbolic m
          , St.MonadState State m
          , C.MonadQuery m
+         , MonadLogger m
          , Constrainable m (ExRefType Var) IL'
          ) => NExpression -> m IL'
 toIL' (LitI (I i))  = return . Ref' . SI $ T.literal i
 toIL' (LitI (D d))  = return . Ref' . SD $ T.literal d
 toIL' (RefI a)      = cached a
+toIL' x@(OpI op (ChcI d l r)) = do logWith "Moving op inside chc" x
+                                   return $ Chc' d (OpI op l) (OpI op r)
 toIL' (OpI op e)    = IOp op <$> toIL' e
 toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r)  = return $ Chc' d l r
@@ -556,7 +538,9 @@ toILSymbolic (OpBB And l r) = do l' <- toILSymbolic  l
 toILSymbolic (OpBB Or l r) = do l' <- toILSymbolic  l
                                 r' <- toILSymbolic r
                                 return $ BBOp Or l' r'
-toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $ IBOp op l' r'
+toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l
+                                r' <- toILSymbolic' r
+                                return $ IBOp op l' r'
 toILSymbolic (ChcB d l r)  = return $ Chc d l r
 
 toILSymbolic' :: NExpression -> PreSolver IL'
@@ -613,6 +597,8 @@ driveNotDown Unit = error "Not applied to a Unit!"
 accumulate :: IL -> IL
  -- computation rules
 accumulate Unit                        = Unit
+accumulate x@Ref{} = x
+accumulate x@Chc{} = x
   -- bools
 accumulate (BOp Not (Ref r))           = Ref $! bnot r
 accumulate (BBOp And (Ref l) (Ref r))  = Ref $! l &&& r
@@ -631,7 +617,6 @@ accumulate x@(BBOp _ Chc {} (Ref _))   = x
 accumulate x@(IBOp _ Chc' {} Chc' {})  = x
 accumulate x@(IBOp _ (Ref' _) Chc' {}) = x
 accumulate x@(IBOp _ Chc' {} (Ref' _)) = x
-
  -- congruence rules
 accumulate (BOp Not e)   = accumulate $ driveNotDown e
 accumulate (BBOp op l r) = let l' = accumulate l
@@ -641,7 +626,6 @@ accumulate (BBOp op l r) = let l' = accumulate l
                              then accumulate res
                              else res
 accumulate (IBOp op l r) = accumulate $! IBOp op (accumulate' l) (accumulate' r)
-accumulate x = x
 
 accumulate' :: IL' -> IL'
   -- computation rules
@@ -656,14 +640,19 @@ accumulate' (IIOp Div (Ref' l) (Ref' r))  = Ref' $! l ./ r
 accumulate' (IIOp Mod (Ref' l) (Ref' r))  = Ref' $! l .% r
   -- choices
 accumulate' x@Chc' {}                     = x
-accumulate' (IOp op (Chc' d l r))         = Chc' d (OpI op l) (OpI op r)
+accumulate' x@(IOp op (Chc' d l r))         = trace ("Op choice: " ++ show x) $ Chc' d (OpI op l) (OpI op r)
 accumulate' x@(IIOp _ Chc' {} Chc' {})    = x
 accumulate' x@(IIOp _ (Ref' _) Chc' {})   = x
 accumulate' x@(IIOp _ Chc' {} (Ref' _))   = x
 accumulate' (IIOp op c@Chc'{} r)   = IIOp op c $ accumulate' r
 accumulate' (IIOp op l c@Chc'{})   = IIOp op (accumulate' l) c
   -- congruence rules
-accumulate' (IOp o e)  = accumulate' $ IOp o (accumulate' e)
+accumulate' (IOp o e)  = let e'  = accumulate' e
+                             res = IOp o e' in
+                         if isValue' e'
+                         then accumulate' res
+                         else res
+
 accumulate' x@(IIOp o l r) = let l'  = accumulate' l
                                  r'  = accumulate' r
                                  res = IIOp o l' r' in
@@ -766,6 +755,7 @@ data Ctx = InL Ctx BB_B IL -- ^ In lhs, Ctx' is parent node, by op, with right
          | InRB NRef NN_B Ctx
          | InL' Ctx  NN_N IL'
          | InR' NRef NN_N Ctx
+         | InU N_N Ctx
          | Top
          deriving Show
 
@@ -796,6 +786,7 @@ findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   = findChoice (InBool (ac
 findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) = findChoice (InBool (accumulate  $ IBOp op l r) parent)
 findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) = findChoice (InNum  (accumulate' $ IIOp op l r) parent)
   -- fold
+findChoice (InNum r@Ref'{} (InU o e)) = findChoice (InNum (accumulate' $ IOp o r) e)
 findChoice (InBool r@Ref {} (InR acc op parent))  =
   findChoice (InBool (accumulate $ BBOp op (Ref acc) r) parent)
 findChoice (InNum r@Ref' {} (InRB acc op parent)) =
@@ -807,15 +798,16 @@ findChoice (InBool (Ref l) (InL parent op r))   = findChoice (InBool r $ InR l o
 findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
 findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
   -- recur
+findChoice (InNum (IOp o e) ctx) = findChoice (InNum e $ InU o ctx)
 findChoice (InBool (BBOp op l r) ctx) = findChoice (InBool l $ InL ctx op r)
 findChoice (InBool (IBOp op l r) ctx) = findChoice (InNum  l $ InLB ctx op r)
 findChoice (InNum (IIOp op l r) ctx) = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
 findChoice (InBool Unit (InL parent And r)) = findChoice (InBool r $ InR true And parent)
 findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
-findChoice (InBool BOp {} _) = error "Can't have unary Ops in IL!!!"
-findChoice (InNum IOp {} _) = error "Can't have unary Ops in IL!!!"
+findChoice (InBool BOp {} _) = error "Can't have boolean unary Ops in IL!!!"
   -- TODO Not sure if unit can ever exist with a context
+findChoice x@(InBool Ref{} InU{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
 findChoice (InBool Unit ctx) = error $ "Unit with a context" ++ show ctx
 findChoice x@(InNum Ref'{} Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
 findChoice x@(InBool Ref{} InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
@@ -824,7 +816,6 @@ findChoice x@(InBool Ref{} InL'{}) = error $ "An impossible case bool reference 
 findChoice x@(InBool Ref{} InR'{}) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
 findChoice x@(InNum Ref'{} InL{}) = error $ "An impossible case: " ++ show x
 findChoice x@(InNum Ref'{} InR{}) = error $ "An impossible case: " ++ show x
-
 
 
 store :: Result -> Solver ()

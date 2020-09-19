@@ -164,6 +164,9 @@ isPlain' (OpI _ e)    = isPlain' e
 isPlain' (OpII _ l r) = isPlain' l && isPlain' r
 isPlain' _            = True
 
+isVariational :: Proposition -> Bool
+isVariational = not . isPlain
+
 -- | Propositions which only consist of mathematical relations
 onlyRelations :: Proposition -> Bool
 onlyRelations OpIB {} = True

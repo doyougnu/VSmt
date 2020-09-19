@@ -597,6 +597,10 @@ instance Prim (Prop' d) (NExpr' d) where
   (.>=) = OpIB GTE
   (.>)  = OpIB GT
 
+instance Fractional (NExpr' a) where
+  (/) = (./)
+
+  fromRational = LitI . D . fromRational
 
 -- | conveniences
 instance (NFData a) => NFData (Prop' a)

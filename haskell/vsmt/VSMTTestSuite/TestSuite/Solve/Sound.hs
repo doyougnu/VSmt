@@ -151,15 +151,18 @@ properties =
 
 -- | TODO: https://github.com/doyougnu/VSmt/issues/4
 vsmtIsSound :: Proposition -> QC.Property
-vsmtIsSound p = noDoubles p QC.==> QCM.monadicIO $ do
+vsmtIsSound p = noDoubles p && isVariational p QC.==> QCM.monadicIO $ do
       let fileName = goldFile "soundness"
       liftIO $ T.putStrLn $ Text.pack "Prop   " <> pretty p
       result <- liftIO $ satVerbose p Nothing
-      liftIO $ T.putStrLn $ pretty result
-      -- roundtrip
-      liftIO . T.writeFile fileName . pretty $ result
-      liftIO $ putStrLn $ "dims: " <> show (dimensions p)
-      -- parsedResult <- liftIO $ parseGold fileName
-      -- test
-      -- liftIO $ checkResultProgram p parsedResult
-      return True
+      if wasSat result
+        then do liftIO $! T.putStrLn $ pretty result
+                -- roundtrip
+                liftIO $! T.writeFile fileName . pretty $ result
+                liftIO $! putStrLn $ "dims: " <> show (dimensions p)
+                -- parsedResult <- liftIO $ parseGold fileName
+                -- test
+                -- liftIO $ checkResultProgram p parsedResult
+                return True
+        else
+        return True -- skip the test
