@@ -145,7 +145,6 @@ integers = Set.map unbox . Set.filter isInt . numericsWithType
 doubles :: Ord a => Prop' a -> Set.Set a
 doubles p = (Set.\\) (numerics p) (integers p)
 
-
 -------------------------- Predicates ------------------------------------------
 -- | False if there is a numeric variable with the same name as a boolean variable
 refsAreDisjoint :: Proposition -> Bool
@@ -169,3 +168,6 @@ isPlain' _            = True
 onlyRelations :: Proposition -> Bool
 onlyRelations OpIB {} = True
 onlyRelations _       = False
+
+noDoubles :: Proposition -> Bool
+noDoubles = Set.null . doubles

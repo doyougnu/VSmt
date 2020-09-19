@@ -1,5 +1,4 @@
 =: Model := 
-u   -->   True :: Bool
 
 =: Sat_Model := 
 

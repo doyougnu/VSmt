@@ -464,10 +464,12 @@ instance Prim T.SBool NRef where
 data IL = Unit
     | Ref BRef
     | BOp B_B IL
-    | BBOp BB_B IL IL
+    | BBOp BB_B' IL IL
     | IBOp NN_B IL' IL'
     | Chc Dim Proposition Proposition
     deriving Show
+
+data BB_B' = And' | Or' deriving Show
 
 data IL' = Ref' NRef
     | IOp N_N IL'
@@ -482,8 +484,16 @@ data IL' = Ref' NRef
 rotate :: IL -> IL
 -- TODO figure out if we need to keep Impl in the IL
 -- rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
-rotate (BBOp opOuter (BBOp opInner l r) r') = BBOp opInner l (BBOp opOuter r r')
-rotate (BBOp Impl l r) = rotate (BBOp Or (BOp Not l) r)
+rotate (BBOp And' (BBOp And' c@Chc{} r) r') = BBOp And' c (BBOp And' r r')
+rotate (BBOp And' (BBOp And' l c@Chc{}) r')   = BBOp And' c (BBOp And' l r')
+rotate (BBOp Or' (BBOp Or' c@Chc{} r) r')   = BBOp Or'  c (BBOp Or' r r')
+rotate (BBOp Or' (BBOp Or' l c@Chc{}) r')     = BBOp Or'  c (BBOp Or' l r')
+  -- TODO These rotations could be costly, benchmark them
+rotate (BBOp Or' (BBOp And' q r) p) = BBOp And' (BBOp Or' p q) (BBOp Or' p r)
+rotate (BBOp And' (BBOp Or' q r) p) = BBOp Or' (BBOp And' p q) (BBOp And' p r)
+  -- General rotations
+rotate (BBOp Or' (BBOp Or' l r) r') = BBOp Or' l (BBOp Or' r r')
+rotate (BBOp And' (BBOp And' l r) r') = BBOp And' l (BBOp And' r r')
 rotate x = x
 
 rotate' :: IL' -> IL'
@@ -504,7 +514,15 @@ toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = cached ref
 toIL (OpB op e)    = BOp op <$> toIL e
-toIL (OpBB op l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp op l' r'
+toIL (OpBB Impl l r) = toIL (OpBB Or (OpB Not l) r)
+toIL (OpBB Eqv l r)  = toIL (OpBB And l' r')
+  where l' = bnot l ||| r -- l ==> r
+        r' = bnot r ||| l -- r ==> l
+toIL (OpBB XOr l r) = toIL (OpBB And l' r')
+  where l' = l ||| r
+        r' = bnot (l &&& r)
+toIL (OpBB And l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp And' l' r'
+toIL (OpBB Or l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp Or' l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
@@ -527,9 +545,19 @@ toILSymbolic (LitB True)   = return $! Ref T.sTrue
 toILSymbolic (LitB False)  = return $! Ref T.sFalse
 toILSymbolic (RefB ref)    = cached ref
 toILSymbolic (OpB op e)    = BOp op <$> toILSymbolic e
-toILSymbolic (OpBB op l r) = do l' <- toILSymbolic  l
+toILSymbolic (OpBB Impl l r) = toILSymbolic (OpBB Or (OpB Not l) r)
+toILSymbolic (OpBB Eqv l r)  = toILSymbolic (OpBB And l' r')
+  where l' = bnot l ||| r -- l ==> r
+        r' = bnot r ||| l -- r ==> l
+toILSymbolic (OpBB XOr l r) = toILSymbolic (OpBB And l' r')
+  where l' = l ||| r
+        r' = bnot (l &&& r)
+toILSymbolic (OpBB And l r) = do l' <- toILSymbolic  l
+                                 r' <- toILSymbolic r
+                                 return $ BBOp And' l' r'
+toILSymbolic (OpBB Or l r) = do l' <- toILSymbolic  l
                                 r' <- toILSymbolic r
-                                return $ BBOp op l' r'
+                                return $ BBOp Or' l' r'
 toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l; r' <- toILSymbolic' r; return $ IBOp op l' r'
 toILSymbolic (ChcB d l r)  = return $ Chc d l r
 
@@ -568,12 +596,8 @@ isUnit _              = False
 driveNotDown :: IL -> IL
 driveNotDown (Ref b)     = Ref (bnot b)
 driveNotDown (BOp Not e) = e
-driveNotDown (BBOp And l r) = BBOp Or (driveNotDown l) (driveNotDown r)
-driveNotDown (BBOp Or l r) = BBOp And (driveNotDown l) (driveNotDown r)
-driveNotDown (BBOp XOr l r) = driveNotDown p
-  where p = BBOp Or (BBOp And l (driveNotDown r)) (BBOp And (driveNotDown l) r)
-driveNotDown (BBOp Impl l r) = BBOp And l (driveNotDown r)
-driveNotDown (BBOp Eqv l r) = BBOp Eqv l (driveNotDown r)
+driveNotDown (BBOp And' l r) = BBOp Or' (driveNotDown l) (driveNotDown r)
+driveNotDown (BBOp Or' l r) = BBOp And' (driveNotDown l) (driveNotDown r)
 driveNotDown (IBOp EQ l r)  = IBOp NEQ l r
 driveNotDown (IBOp NEQ l r) = IBOp EQ l r
 driveNotDown (IBOp op l r)  = IBOp op r l -- 1 < 2 === -(2 < 1)
@@ -589,11 +613,8 @@ accumulate :: IL -> IL
 accumulate Unit                        = Unit
   -- bools
 accumulate (BOp Not (Ref r))           = Ref $! bnot r
-accumulate (BBOp And (Ref l) (Ref r))  = Ref $! l &&& r
-accumulate (BBOp Or  (Ref l) (Ref r))  = Ref $! l ||| r
-accumulate (BBOp Impl (Ref l) (Ref r)) = Ref $! l ==> r
-accumulate (BBOp Eqv  (Ref l) (Ref r)) = Ref $! l <=> r
-accumulate (BBOp XOr  (Ref l) (Ref r)) = Ref $! l <+> r
+accumulate (BBOp And' (Ref l) (Ref r))  = Ref $! l &&& r
+accumulate (BBOp Or'  (Ref l) (Ref r))  = Ref $! l ||| r
   -- numerics
 accumulate (IBOp LT (Ref' l) (Ref' r))  = Ref $! l .< r
 accumulate (IBOp LTE (Ref' l) (Ref' r)) = Ref $! l .<= r
@@ -678,11 +699,8 @@ evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
-evaluate (BBOp And  (Ref l) (Ref r)) = toSolver $! l &&& r
-evaluate (BBOp Or   (Ref l) (Ref r)) = toSolver $! l ||| r
-evaluate (BBOp Impl (Ref l) (Ref r)) = toSolver $! l ==> r
-evaluate (BBOp Eqv  (Ref l) (Ref r)) = toSolver $! l <=> r
-evaluate (BBOp XOr  (Ref l) (Ref r)) = toSolver $! l <+> r
+evaluate (BBOp And'  (Ref l) (Ref r)) = toSolver $! l &&& r
+evaluate (BBOp Or'   (Ref l) (Ref r)) = toSolver $! l ||| r
   -- numerics
 evaluate (IBOp LT  (Ref' l) (Ref' r)) = toSolver $! l .< r
 evaluate (IBOp LTE (Ref' l) (Ref' r)) = toSolver $! l .<= r
@@ -698,10 +716,10 @@ evaluate x@(IBOp _ Chc' {} Chc' {})  = return $! intoCore x
 evaluate x@(IBOp _ (Ref' _) Chc' {}) = return $! intoCore x
 evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
-evaluate (BBOp And l Unit)      = evaluate l
-evaluate (BBOp And Unit r)      = evaluate r
-evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; evaluate l
-evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; evaluate r
+evaluate (BBOp And' l Unit)      = evaluate l
+evaluate (BBOp And' Unit r)      = evaluate r
+evaluate (BBOp And' l x@(Ref _)) = do _ <- evaluate x; evaluate l
+evaluate (BBOp And' x@(Ref _) r) = do _ <- evaluate x; evaluate r
 evaluate x@(IBOp op l r)        =
   logWith "Found relation" x >>
   let l' = accumulate' l
@@ -714,10 +732,10 @@ evaluate x@(IBOp op l r)        =
 
   -- accumulation cases
 evaluate x@(BOp Not _)  = evaluate $ accumulate x
-evaluate x@(BBOp And l r) = logWith "Eval And Recurring: " x >>
+evaluate x@(BBOp And' l r) = logWith "Eval And Recurring: " x >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
-     let res = BBOp And l' r'
+     let res = BBOp And' l' r'
      -- this is a hot loop, but we want to make the
      -- variational core as small as possible because it
      -- will pay off in the solver. Thus we perform a
@@ -802,6 +820,7 @@ alternative dim goLeft goRight =
                 updateConfigs (bnot sD) (bnot $ bRef dim) (dim,False)
                 goRight
 
+
 choose :: VarCore -> Solver ()
 choose (VarCore Unit) = log "Core reduced to Unit" >>
                         St.get >>= getResult . vConfig >>= store
@@ -843,11 +862,6 @@ choose (VarCore (BBOp op l (Chc d cl cr))) =
        Just False -> goRight
        Nothing    -> alternative d goLeft goRight
 
-choose (VarCore x@BBOp {}) =
-  -- when choices do not appear in the child of the root node we must rotate the
-  -- AST such that the the binary relation at the root is preserved
-  do logPretty "rotating: " x; choose . VarCore $ rotate x
-
   -- Arithmetic
 choose (VarCore (IBOp op (Chc' d cl cr) r)) =
   do
@@ -871,6 +885,10 @@ choose (VarCore (IBOp op l (Chc' d cl cr))) =
 
 choose (VarCore (IBOp op l r)) = do log "arith recurrence"
                                     choose' op (toLoc l) (toLoc r)
+choose (VarCore x@BBOp {}) =
+  -- when choices do not appear in the child of the root node we must rotate the
+  -- AST such that the the binary relation at the root is preserved
+  do logPretty "rotating: " x; choose . VarCore $ rotate x
 
 choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
 
@@ -969,6 +987,9 @@ contextToSBool (getVarFormula -> x) = go x
         dispatch Eqv  = (<=>)
         dispatch XOr  = (<=>)
 
+instance Pretty BB_B' where
+  pretty And' = "and"
+  pretty Or'  = "or"
 
 instance Pretty IL where
   pretty Unit = "unit"

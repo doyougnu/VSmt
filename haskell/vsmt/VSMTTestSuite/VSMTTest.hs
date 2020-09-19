@@ -22,7 +22,7 @@ import qualified TestSuite.Solve.Sound
 
 main :: IO ()
 main = do
-  setEnv "TASTY_QUICKCHECK_TESTS" "5"
+  setEnv "TASTY_QUICKCHECK_TESTS" "15"
   defaultMain $ testGroup "Tests"
     [ -- booleans
     -- , arithmetics
