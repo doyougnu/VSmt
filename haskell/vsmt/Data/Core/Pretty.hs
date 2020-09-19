@@ -62,6 +62,7 @@ instance Pretty a => Pretty (ExRefType a) where pretty (ExRefTypeI a) = pretty a
 
 instance Pretty Char where pretty = Text.singleton
 instance Pretty String where pretty = Text.pack
+instance Pretty Dim where pretty = getDim
 
 instance Pretty N_N where pretty Neg  = "-"
                           pretty Sign = "signum "

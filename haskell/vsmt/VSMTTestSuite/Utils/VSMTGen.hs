@@ -16,9 +16,8 @@ module Utils.VSMTGen where
 
 import Test.Tasty.QuickCheck
 import Prelude hiding (LT,GT,EQ)
-import Data.Text (Text,singleton,unpack)
+import Data.Text (Text,singleton,toUpper,pack)
 import Control.Monad (liftM2,liftM3)
-import Data.Char (toUpper)
 
 import Data.Core.Types
 import Data.Core.Core
@@ -32,10 +31,10 @@ genAlphaNumStr :: Gen Text
 genAlphaNumStr = fmap mconcat $ flip suchThat (not . null) $ listOf genAlphaNum
 
 genDim :: Gen Dim
-genDim = fmap toUpper . unpack <$> genAlphaNumStr
+genDim = Dim . toUpper <$> genAlphaNumStr
 
 genSharedDim :: Gen Dim
-genSharedDim = fmap toUpper <$> elements (zipWith (\a b -> [a,b]) ['a'..'d'] ['a'..'d'])
+genSharedDim = Dim . toUpper . pack <$> elements (zipWith (\a b -> [a,b]) ['a'..'d'] ['a'..'d'])
 
 genSharedVar :: Gen Var
 genSharedVar = singleton <$> elements ['a'..'j']
@@ -104,6 +103,7 @@ arbProposition = (((flip suchThat refsAreDisjoint .) . ) .) . arbProposition_
 
 ------------------------------- Instances --------------------------------------
 instance Arbitrary Var where arbitrary = genVar
+instance Arbitrary Dim where arbitrary = genDim
 instance Arbitrary NPrim where arbitrary = genPrim
 instance Arbitrary N_N where arbitrary = genNN
 instance Arbitrary (ExRefType Var) where arbitrary = genRefN

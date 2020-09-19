@@ -85,6 +85,7 @@ solveVerbose  i vConf =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConf
+         S.setTimeOut 15000 -- timeout at 15 seconds
          (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
          C.query $ runStdoutLoggingT $ runSolver st $
            findVCore il >>= removeChoices >> solution
@@ -287,12 +288,12 @@ instance Constrainable Solver Var IL where
         return (Ref newSym)
 
 instance Constrainable Solver Dim T.SBool where
-  cached ref = do
+  cached (getDim -> ref) = do
     st <- St.get
     case find ref $ extract st of
       Just x -> return x
       Nothing -> do
-        newSym <- T.label ref <$> C.freshVar ref
+        newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
         St.modify' (`by` add ref newSym)
         return newSym
 
@@ -607,7 +608,7 @@ accumulate (BBOp Or  (Ref l) (Ref r))  = Ref $! l ||| r
 accumulate (IBOp LT (Ref' l) (Ref' r))  = Ref $! l .< r
 accumulate (IBOp LTE (Ref' l) (Ref' r)) = Ref $! l .<= r
 accumulate (IBOp EQ (Ref' l) (Ref' r))  = Ref $! l .== r
-accumulate (IBOp NEQ (Ref' l) (Ref' r)) = Ref $! l ./= r
+accumulate (IBOp NEQ (Ref' l) (Ref' r)) = trace "hit IBOP" $ Ref $! l ./= r
 accumulate (IBOp GT (Ref' l) (Ref' r))  = Ref $! l .>  r
 accumulate (IBOp GTE (Ref' l) (Ref' r)) = Ref $! l .>= r
   -- choices
@@ -618,14 +619,30 @@ accumulate x@(IBOp _ Chc' {} Chc' {})  = x
 accumulate x@(IBOp _ (Ref' _) Chc' {}) = x
 accumulate x@(IBOp _ Chc' {} (Ref' _)) = x
  -- congruence rules
-accumulate (BOp Not e)   = accumulate $ driveNotDown e
-accumulate (BBOp op l r) = let l' = accumulate l
-                               r' = accumulate r
-                               res = BBOp op l' r' in
+-- accumulate (BOp Not x@(IBOp _ _ _)) = let e' = accumulate x
+--                                           res = BOp Not e' in
+--                                         if isValue x
+--                                         then accumulate res
+--                                         else res
+
+-- accumulate (BOp Not e)   = accumulate $ driveNotDown e
+accumulate x@(BOp Not e) = let e' = accumulate e
+                               res = BOp Not e' in
+                               if isValue e'
+                                 then (trace $ "BOp recursive reducing" ++ show x ++ "\n") $ accumulate res
+                                 else (trace $ "can't reduce " ++ show res ++ "\n") res
+accumulate x@(BBOp op l r) = let l' = accumulate l
+                                 r' = accumulate r
+                                 res = BBOp op l' r' in
                              if isValue l' && isValue r'
-                             then accumulate res
-                             else res
-accumulate (IBOp op l r) = accumulate $! IBOp op (accumulate' l) (accumulate' r)
+                             then trace ("BBOp Reducing more: " ++ show res) accumulate res
+                             else trace ("BBOp Can't reduce more: " ++ show res ++ "\nHad: " ++ show x) res
+accumulate (IBOp op l r) = let l' = accumulate' l
+                               r' = accumulate' r
+                               res = IBOp op l' r' in
+                             if isValue' l' && isValue' r'
+                             then trace ("BBOp Reducing more: " ++ show res) accumulate res
+                             else trace ("BBOp Can't reduce more: " ++ show res) res
 
 accumulate' :: IL' -> IL'
   -- computation rules
@@ -662,7 +679,7 @@ accumulate' x@(IIOp o l r) = let l'  = accumulate' l
                                -- TODO encode the property in the type system to
                                -- avoid the check
                                if isValue' l' && isValue' r'
-                               then trace ("reducing :: " ++ show x) accumulate' res
+                               then trace ("reducing :: " ++ show res) accumulate' res
                                else trace ("Done reducing ::  " ++ show (pretty res)) res
 
 -------------------------------- Evaluation -----------------------------------
@@ -722,7 +739,9 @@ evaluate x@(IBOp op l r)        =
 
 
   -- accumulation cases
-evaluate x@(BOp Not _)  = evaluate $ accumulate x
+evaluate x@(BOp Not _)  =  logWith "Unary Boolean Op in Eval" x >>
+  do let x'  = accumulate x
+     if isValue x' then evaluate x' else return $ intoCore x'
 evaluate x@(BBOp And l r) = logWith "Eval And Recurring: " x >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
@@ -755,7 +774,8 @@ data Ctx = InL Ctx BB_B IL -- ^ In lhs, Ctx' is parent node, by op, with right
          | InRB NRef NN_B Ctx
          | InL' Ctx  NN_N IL'
          | InR' NRef NN_N Ctx
-         | InU N_N Ctx
+         | InU  B_B Ctx
+         | InU' N_N Ctx
          | Top
          deriving Show
 
@@ -786,7 +806,8 @@ findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   = findChoice (InBool (ac
 findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) = findChoice (InBool (accumulate  $ IBOp op l r) parent)
 findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) = findChoice (InNum  (accumulate' $ IIOp op l r) parent)
   -- fold
-findChoice (InNum r@Ref'{} (InU o e)) = findChoice (InNum (accumulate' $ IOp o r) e)
+findChoice (InBool r@Ref{} (InU o e))   = findChoice (InBool (accumulate $ BOp o r) e)
+findChoice (InNum r@Ref'{}  (InU' o e)) = findChoice (InNum (accumulate' $ IOp o r) e)
 findChoice (InBool r@Ref {} (InR acc op parent))  =
   findChoice (InBool (accumulate $ BBOp op (Ref acc) r) parent)
 findChoice (InNum r@Ref' {} (InRB acc op parent)) =
@@ -798,16 +819,17 @@ findChoice (InBool (Ref l) (InL parent op r))   = findChoice (InBool r $ InR l o
 findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
 findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
   -- recur
-findChoice (InNum (IOp o e) ctx) = findChoice (InNum e $ InU o ctx)
 findChoice (InBool (BBOp op l r) ctx) = findChoice (InBool l $ InL ctx op r)
 findChoice (InBool (IBOp op l r) ctx) = findChoice (InNum  l $ InLB ctx op r)
+findChoice x@(InBool (BOp o e) ctx) = trace ("BOp: " ++ show x) $ findChoice (InBool e $ InU o ctx)
+findChoice (InNum (IOp o e) ctx) = findChoice (InNum e $ InU' o ctx)
 findChoice (InNum (IIOp op l r) ctx) = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
 findChoice (InBool Unit (InL parent And r)) = findChoice (InBool r $ InR true And parent)
 findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
-findChoice (InBool BOp {} _) = error "Can't have boolean unary Ops in IL!!!"
   -- TODO Not sure if unit can ever exist with a context
-findChoice x@(InBool Ref{} InU{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
+findChoice x@(InBool Ref{} InU'{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
+findChoice x@(InNum Ref'{} InU{}) = error $ "Boolean unary operator applied to numeric: " ++ show x
 findChoice (InBool Unit ctx) = error $ "Unit with a context" ++ show ctx
 findChoice x@(InNum Ref'{} Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
 findChoice x@(InBool Ref{} InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
@@ -888,7 +910,6 @@ removeChoices :: VarCore -> Solver ()
 removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
                                St.get >>= getResult . vConfig >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
-removeChoices (VarCore BOp {}) = error "How did a negation get into var core?"
 removeChoices (VarCore l) = choose (toLoc l)
 
 
@@ -924,151 +945,21 @@ choose loc =
       x -> error $ "Choosing and missed cases with: " ++ show x
 
 
--- choose (VarCore (Chc d l r)) =
---   do
---     log "singleton choice"
---     conf <- St.gets config
---     let goLeft  = toIL l >>= evaluate >>= choose
---         goRight = toIL r >>= evaluate >>= choose
---     case find d conf of
---       Just True  -> log "left"  >> goLeft
---       Just False -> log "right" >> goRight
---       Nothing    -> alternative d goLeft goRight -- then this is a new dimension
-
-
--- choose (VarCore (BBOp op (Chc d cl cr) r)) =
---   do
---     log "Choice in left"
---     conf <- St.gets config
---     let goLeft  = toIL cl >>= evaluate . (\x -> BBOp op x r) >>= choose
---         goRight = toIL cr >>= evaluate . (\x -> BBOp op x r) >>= choose
---      -- check if d is in the configuration, and if so what is its value
---     case find d conf of
---        Just True  -> goLeft
---        Just False -> goRight
---        Nothing    -> alternative d goLeft goRight
-
-
--- choose (VarCore (BBOp op l (Chc d cl cr))) =
---   do
---     log "Choice in Right"
---     conf <- St.gets config
---     let goLeft  = toIL cl >>= evaluate . BBOp op l >>= choose
---         goRight = toIL cr >>= evaluate . BBOp op l >>= choose
---      -- check if d is in the configuration, and if so what is its value
---     case find d conf of
---        Just True  -> goLeft
---        Just False -> goRight
---        Nothing    -> alternative d goLeft goRight
-
---   -- Arithmetic
--- choose (VarCore (IBOp op (Chc' d cl cr) r)) =
---   do
---     conf <- St.gets config
---     let goLeft  = toIL' cl >>= evaluate . (\x -> IBOp op x r) >>= choose
---         goRight = toIL' cr >>= evaluate . (\x -> IBOp op x r) >>= choose
---     case find d conf of
---       Just True  -> goLeft
---       Just False -> goRight
---       Nothing    -> alternative d goLeft goRight
-
--- choose (VarCore (IBOp op l (Chc' d cl cr))) =
---   do
---     conf <- St.gets config
---     let goLeft  = toIL' cl >>= evaluate . IBOp op l >>= choose
---         goRight = toIL' cr >>= evaluate . IBOp op l >>= choose
---     case find d conf of
---       Just True  -> goLeft
---       Just False -> goRight
---       Nothing    -> alternative d goLeft goRight
-
--- choose (VarCore (IBOp op l r)) = do log "arith recurrence"
---                                     choose' op (toLoc' l) (toLoc' r)
--- choose (VarCore x@BBOp {}) =
---   -- when choices do not appear in the child of the root node we must rotate the
---   -- AST such that the the binary relation at the root is preserved
---   do logPretty "zippering: " x
-
--- choose (VarCore BOp {}) = error "Impossible occurred: received a Not in a variational core!!"
-
----------------------- Removing Choices in Arithmetic --------------------------
--- | A zipper context that can only fold from the left
--- data Ctx' = InL' Ctx' NN_N IL' -- ^ In lhs, Ctx' is parent node, by op, with right child IL
---          | InR' NRef NN_N Ctx'
---          | Top'
---          deriving Show
-
--- type Loc' = (IL', Ctx')
-
--- toLoc' :: IL' -> Loc'
--- toLoc' x = (x, Top')
-
--- | Find the values and return the value as the focus with context
--- findChoice' :: Loc -> Loc
--- findChoice' x@(Ref'{}, Top') = x -- done
--- findChoice' x@(Chc' {}, _) = x -- done
--- findChoice' (IIOp op l r, Top') = findChoice' (l, InL' Top' op r) -- drive down to the left
---   -- discharge two references
--- findChoice' (l@Ref' {}, InL' parent op r@Ref' {}) = findChoice' (accumulate' $ IIOp op l r, parent)
---   -- fold
--- findChoice' (r@Ref' {}, InR' acc op parent) = findChoice' (accumulate' $ IIOp op (Ref' acc) r, parent)
---   -- switch
--- findChoice' (Ref' l, InL' parent op r) = findChoice' (r, InR' l op parent)
---   -- recur
--- findChoice' (IIOp op l r, ctx) = findChoice' (l, InL' ctx op r)
--- findChoice' (IOp {}, _) = error "Can't have unary Ops in IL'!!!"
-
--- | Here we need to detect choices that cannot be rotated up the tree due to
--- the hard barrier between arithmetic and booleans, i.e., that arithmetic _can
--- only_ exist in the context of an operator that concludes to a boolean. Thus,
--- we capture the outer context, recur down to the first choice and then call
--- back up to the boolean solver. This is effectively a zipper encoded as a
--- function.
--- choose' :: NN_B -> Loc -> Loc -> Solver IL
--- choose' = undefined
--- choose' rootOp (x@Ref' {}, Top') (y@Ref' {}, Top') = return $ accumulate (IBOp rootOp x y)
--- choose' rootOp lhs rhs =
---   do
---   let l' = findChoice' lhs
---       r' = findChoice' rhs
---   case (l', r') of
---     ((Chc' d cl cr, ctx), rhs') ->
---       do
---         conf <- St.gets config
---         let goLeft  = toIL' cl >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice' (x,ctx)) . accumulate'
---             goRight = toIL' cr >>= (\x -> choose' rootOp x rhs') . (\x -> findChoice' (x,ctx)) . accumulate'
-
---         case find d conf of
---           Just True  -> goLeft
---           Just False -> goRight
---           Nothing    -> alternative d goLeft goRight
-
---     (lhs', (Chc' d cl cr, ctx)) ->
---       do
---         conf <- St.gets config
---         let goLeft  = toIL' cl >>= choose' rootOp lhs' . findChoice' . (,ctx) . accumulate'
---             goRight = toIL' cr >>= choose' rootOp lhs' . findChoice' . (,ctx) . accumulate'
-
---         case find d conf of
---           Just True  -> goLeft
---           Just False -> goRight
---           Nothing    -> alternative d goLeft goRight
-
-
---     a -> error $ "Error in Arithmetic Zipper, function choose': " ++ show a
-
 --------------------------- Variant Context Helpers ----------------------------
-contextToSBool :: (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m) =>
-  VariantContext -> m T.SBool
+contextToSBool ::
+     (Has Dimensions, S.MonadSymbolic m, St.MonadState State m, MonadLogger m)
+  => VariantContext
+  -> m T.SBool
 contextToSBool (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
         go (LitB True)  = return S.sTrue
         go (LitB False) = return S.sFalse
         go (RefB d)     = do ds <- St.gets dimensions
+                             let dStr = Text.unpack . getDim $ d
                              case find d ds of
                                Just d' -> return d' -- then we've seen it before
                                Nothing -> do
-                                 newSym <- T.label d <$> T.sBool d
+                                 newSym <- T.label dStr <$> T.sBool dStr
                                  logWith "making symb" d
                                  St.modify' (`by` add d newSym)
                                  return $! newSym

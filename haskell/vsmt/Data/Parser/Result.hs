@@ -140,7 +140,10 @@ satFormula :: Parser VariantContext
 satFormula = satHeader >> variantContext
 
 dimension :: Parser Dim
-dimension = lexeme ((:) <$> C.letterChar <*> many C.alphaNumChar <?> "dimension")
+dimension = lexeme $ Dim . T.pack <$> getString
+  where
+    getString :: Parser String
+    getString = (:) <$> C.letterChar <*> many C.alphaNumChar <?> "dimension"
 
 context :: Parser VariantContext
 context = VariantContext <$> bExpr

@@ -1,0 +1,7 @@
+=: Model := 
+RZD   -->   (ite ~RZD (False :: Bool) Undefined)
+ngyithekwjlolcawjwhwgrgwhwwfvdbuuvirpewkcydekyriasvmwapkx   -->   (ite ~RZD (0 :: Integer) Undefined)
+bgvopjtokkmmgbkgugutmouubjf   -->   (ite ~RZD (8 :: Integer) Undefined)
+
+=: Sat_Model := 
+~RZD

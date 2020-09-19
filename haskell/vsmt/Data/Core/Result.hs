@@ -34,7 +34,7 @@ import           Data.Text              (Text,pack,unpack)
 import           Data.Semigroup         ((<>))
 import           Data.Char              (isSpace)
 import           Data.List              (intercalate, nub)
-import           Data.Maybe             (isNothing)
+import           Data.Maybe             (isJust)
 
 import qualified Data.HashMap.Strict    as M
 import           Data.String            (IsString, fromString)
@@ -147,7 +147,7 @@ isSat = do cs <- C.checkSat
                        _     -> False
 
 wasSat :: Result -> Bool
-wasSat = isNothing . satResult . unboxResult
+wasSat = isJust . satResult . unboxResult
 
 -- | Generate a VSMT model
 getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
