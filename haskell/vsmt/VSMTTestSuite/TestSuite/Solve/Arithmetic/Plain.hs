@@ -26,6 +26,7 @@ tests = testGroup "Plain formulas"
   , goldenVsStringShow "two_variables_in_addition" twoVars
   , testCase "quickcheck-replay=739384" sub
   , goldenVsStringShow "infinite prop" infinite
+    -- goldenVsStringShow "edgeCase" edgeCase
   ]
 
 properties :: TestTree
@@ -57,3 +58,20 @@ plainBecomesUnit = QC.testProperty
 infinite :: IO Result
 infinite = flip satVerbose Nothing p
   where p = iChc "DD" (14.451303985118729 - (-(-22))) (signum 29.38464737058025) .== abs (iChc "EE" (signum (iRef ("uqqhmomillqezrrtwiunpyrdxqy" :: Text))) (-32) + (-29))
+
+-- | fails because there are no variables!
+edgeCase :: IO Result
+edgeCase = flip satVerbose Nothing p
+  where
+    p =
+      OpIB
+        NEQ
+        (OpI Sign (LitI (D (-1.504250655492034))))
+        (OpI
+           Neg
+           (OpI
+              Sign
+              (ChcI
+                 "OHGQLFWBZTJFMGPMHAGGUOFYLOQTU"
+                 (OpII Div (LitI (I (-52))) (LitI (I (-55))))
+                 (LitI (D (-58.00783156897094))))))

@@ -115,6 +115,7 @@ Test-Suite VSMTTest
                   , TestSuite.Solve.Arithmetic.Plain
                   , TestSuite.Solve.Arithmetic.Choices
                   , TestSuite.Solve.Sound
+                  , TestSuite.Core.Parser.Result
 
 Benchmark VSMTBench
   type            : exitcode-stdio-1.0

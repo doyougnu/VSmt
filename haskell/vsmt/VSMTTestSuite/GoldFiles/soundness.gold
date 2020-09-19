@@ -1,14 +1,7 @@
 =: Model := 
-BB   -->   (ite ((~CC and ~AA) and BB) (False :: Bool) Undefined)
-dnjn   -->   (ite ((~CC and ~AA) and BB) (0 :: Integer) (ite (~CC and AA) (0 :: Integer) Undefined))
-iyfa   -->   (ite ((~CC and ~AA) and BB) (0 :: Integer) (ite (~CC and AA) (0 :: Integer) Undefined))
-rzoql   -->   (ite ((~CC and ~AA) and BB) (0 :: Integer) (ite (~CC and AA) (0 :: Integer) Undefined))
-wmovy   -->   (ite ((~CC and ~AA) and BB) (0 :: Integer) (ite (~CC and AA) (0 :: Integer) Undefined))
-AA   -->   (ite ((~CC and ~AA) and BB) (False :: Bool) (ite (~CC and AA) (False :: Bool) Undefined))
-CC   -->   (ite ((~CC and ~AA) and BB) (False :: Bool) (ite (~CC and AA) (False :: Bool) Undefined))
-BQ   -->   (ite ((~CC and ~AA) and BB) (False :: Bool) (ite (~CC and AA) (False :: Bool) Undefined))
-s   -->   (ite ((~CC and ~AA) and BB) (0 :: Integer) (ite (~CC and AA) (-1 :: Integer) Undefined))
-tmtljx   -->   (ite ((~CC and ~AA) and BB) (False :: Bool) Undefined)
+UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW   -->   (ite ~UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW (False :: Bool) (ite UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW (False :: Bool) Undefined))
+lhikssrqtlkdexantolhbiloxstdyezzizfpbczygiebfyts   -->   (ite ~UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW (0 :: Integer) (ite UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW (0 :: Integer) Undefined))
+ci   -->   (ite ~UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW (0 :: Integer) Undefined)
 
 =: Sat_Model := 
-(((~CC and ~AA) and BB) or (~CC and AA))
+(~UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW or UVQKJESUGOIUAIOPACBWHBNUYBIRGCPGZBFYWPEBHZUCMOHDOVUOWLPJJOJNUXAHSLZKRCPDSNUW)

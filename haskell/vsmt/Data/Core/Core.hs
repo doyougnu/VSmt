@@ -174,3 +174,9 @@ onlyRelations _       = False
 
 noDoubles :: Proposition -> Bool
 noDoubles = Set.null . doubles
+
+hasVariables :: Proposition -> Bool
+hasVariables p = (not . Set.null $ booleans p) || (not . Set.null $ numerics p)
+
+onlyBools :: Proposition -> Bool
+onlyBools = Set.null . numerics

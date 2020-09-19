@@ -188,12 +188,12 @@ properties =
     "Soundness"
     [ QC.testProperty
         "All results reported from vsmt as satisfiable are indeed satisfiable"
-        vsmtIsSound
+        vsmtIsSoundBools
     ]
 
 -- | TODO: https://github.com/doyougnu/VSmt/issues/4
 vsmtIsSound :: Proposition -> QC.Property
-vsmtIsSound p = noDoubles p && isVariational p QC.==> QCM.monadicIO $ do
+vsmtIsSound p = hasVariables p && noDoubles p && isVariational p QC.==> QCM.monadicIO $ do
       let fileName = goldFile "soundness"
       liftIO $ T.putStrLn $ Text.pack "Prop   " <> pretty p
       liftIO $ putStrLn $ "PropShow   " <> show p
@@ -206,6 +206,24 @@ vsmtIsSound p = noDoubles p && isVariational p QC.==> QCM.monadicIO $ do
                 parsedResult <- liftIO $ parseGold fileName
                 -- test
                 liftIO $! putStrLn $ "Parsed Result: " <> show parsedResult <> "\n"
-                -- liftIO $ checkResultProgram p parsedResult
-                return True
+                liftIO $ checkResultProgram p parsedResult
+                -- return True
+        else return True -- skip the test
+
+vsmtIsSoundBools :: Proposition -> QC.Property
+vsmtIsSoundBools p = hasVariables p && onlyBools p QC.==> QCM.monadicIO $ do
+      let fileName = goldFile "Boolean_soundness"
+      liftIO $ T.putStrLn $ Text.pack "Prop   " <> pretty p
+      liftIO $ putStrLn $ "PropShow   " <> show p
+      result <- liftIO $ satVerbose p Nothing
+      if wasSat result
+        then do liftIO $! T.putStrLn $ pretty result
+                -- roundtrip
+                liftIO $! T.writeFile fileName . pretty $ result
+                liftIO $! putStrLn $ "dims: " <> show (dimensions p)
+                parsedResult <- liftIO $ parseGold fileName
+                -- test
+                liftIO $! putStrLn $ "Parsed Result: " <> show parsedResult <> "\n"
+                liftIO $ checkResultProgram p parsedResult
+                -- return True
         else return True -- skip the test

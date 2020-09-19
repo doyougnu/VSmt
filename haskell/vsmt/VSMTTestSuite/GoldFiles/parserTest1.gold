@@ -1,0 +1,9 @@
+=: Model := 
+l   -->   (ite ~CC (False :: Bool) (ite CC (False :: Bool) Undefined))
+qok   -->   (ite ~CC (0 :: Integer) (ite CC (-1 :: Integer) Undefined))
+vqn   -->   (ite ~CC (False :: Bool) Undefined)
+ui   -->   (ite ~CC (1 :: Integer) (ite CC (0 :: Integer) Undefined))
+CC   -->   (ite ~CC (False :: Bool) (ite CC (False :: Bool) Undefined))
+
+=: Sat_Model := 
+(~CC or CC)

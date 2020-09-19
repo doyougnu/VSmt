@@ -31,7 +31,6 @@ import qualified Text.Megaparsec.Char           as C
 import qualified Text.Megaparsec.Char.Lexer     as L
 
 
-
 import           Data.Core.Types
 
 type Parser = Parsec Void T.Text
@@ -78,6 +77,9 @@ headerL = lexeme $ void $ symbol "=:"
 integer :: Parser Integer
 integer = lexeme L.decimal
 
+float :: Parser Double
+float = lexeme L.float
+
 literal :: T.Text -> Parser T.Text
 literal = lexeme . C.string
 
@@ -111,9 +113,11 @@ typeTerm = choice [b,i,d]
         d = literal "Double"  >> return TDouble
 
 numericValue :: Parser Value
-numericValue = choice [i,d]
-  where i = N . I <$> lexeme integer
-        d = N . D <$> lexeme L.float
+numericValue = choice [i,d,si,sd]
+  where i = N . I <$> integer
+        d = N . D <$> float
+        si = N . I <$> L.signed sc integer
+        sd = N . D <$> L.signed sc float
 
 boolValue :: Parser Value
 boolValue = choice [t, f]
