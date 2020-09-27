@@ -29,7 +29,7 @@ import           Control.Monad.Except       (MonadError)
 import Control.Monad.Logger
   ( LoggingT
   , MonadLogger(..)
-  -- , NoLoggingT(runNoLoggingT)
+  , NoLoggingT(runNoLoggingT)
   , logDebug
   , runStdoutLoggingT
   )
@@ -77,8 +77,8 @@ findVCore = evaluate
 solution :: (St.MonadState State m, Has Result) => m Result
 solution = extract <$> St.get
 
--- | TODO abstract over the logging function
 -- | TODO pending on server create, create a load function to handle injection
+-- | TODO reduce redundancy after config module is written
 -- to the IL type
 solveVerbose :: Proposition -> Maybe VariantContext -> IO (Result, State)
 solveVerbose  i vConf =
@@ -86,20 +86,29 @@ solveVerbose  i vConf =
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConf
          S.setTimeOut 15000 -- timeout at 15 seconds
-         (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
-         C.query $ runStdoutLoggingT $ runSolver st $
+         (il, st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ toIL i
+         C.query $ runSolverWith runStdoutLoggingT st $
            findVCore il >>= removeChoices >> solution
-           -- do core <- findVCore il
-           --    _ <- choose core
-           --    solution
+
+solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
+solve  i vConf =
+    -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
+    T.runSMTWith T.z3 $
+      do let _ = fromMaybe true vConf
+         S.setTimeOut 15000 -- timeout at 15 seconds
+         (il, st) <- runSolverWith runNoLoggingT mempty $ unPre $ toIL i
+         C.query $ runSolverWith runNoLoggingT st $
+           do core <- evaluate il
+              removeChoices core
+              solution
 
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
 solveForCoreVerbose  i vConf =
     -- (context,dims) <- runStdoutLoggingT $ St.runStateT (contextToSBool conf) mempty{config=conf}
     T.runSMTWith T.z3{T.verbose=True} $
       do let _ = fromMaybe true vConf
-         (il, st) <- runStdoutLoggingT $ runSolver mempty $ toILSymbolic i
-         C.query $ runStdoutLoggingT $ runSolver st $
+         (il, st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ toIL i
+         C.query $ runSolverWith runStdoutLoggingT st $
            do core <- findVCore il
               logWith "Proposition: " i
               logWith "Core: " core
@@ -264,20 +273,43 @@ instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
   contextState    = lift contextState
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
-instance C.MonadQuery m    => C.MonadQuery (LoggingT m)    where queryState  = lift C.queryState
-instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m) where symbolicEnv = lift T.symbolicEnv
+instance (Monad m, SolverContext m) => SolverContext (NoLoggingT m) where
+  constrain       = lift . T.constrain
+  softConstrain   = lift . T.softConstrain
+  setOption       = lift . S.setOption
+  namedConstraint = (lift .) . T.namedConstraint
+  addAxiom        = (lift .) . T.addAxiom
+  contextState    = lift contextState
+  constrainWithAttribute = (lift .) . T.constrainWithAttribute
+
+
+instance C.MonadQuery m    => C.MonadQuery (LoggingT m)      where
+  queryState  = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m)   where
+  symbolicEnv = lift T.symbolicEnv
+instance C.MonadQuery m    => C.MonadQuery (NoLoggingT m)    where
+  queryState  = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
+  symbolicEnv = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
 type Solver = SolverT (LoggingT C.Query)
-type PreSolver = SolverT (LoggingT T.Symbolic)
+newtype PreSolver m a = PreSolver { unPre :: SolverT m a }
+  deriving (Functor, Applicative, Monad, St.MonadState State
+           , MonadLogger, MonadIO, T.MonadSymbolic, C.MonadQuery)
 
-runSolver :: State -> SolverT m a -> m (a, State)
-runSolver s = flip St.runStateT s . runSolverT
+runSolverWith :: (m (a, State) -> c) -> State -> SolverT m a -> c
+runSolverWith f s = f . flip St.runStateT s . runSolverT
+
+-- runSolverLog = runSolverWith runStdoutLoggingT
+
+-- runSolver = runSolverWith runNoLoggingT
 
 class Show a => Constrainable m a b where cached :: a -> m b
 
--- TODO fix this duplication
-instance Constrainable Solver Var IL where
+-- TODO fix this duplication with derivingVia
+instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
+  Constrainable (SolverT m) Var IL where
   cached ref = do
     st <- St.get
     case find ref $ extract st of
@@ -287,7 +319,8 @@ instance Constrainable Solver Var IL where
         St.modify' (`by` add ref newSym)
         return (Ref newSym)
 
-instance Constrainable Solver Dim T.SBool where
+instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
+  Constrainable (SolverT m) Dim T.SBool where
   cached (getDim -> ref) = do
     st <- St.get
     case find ref $ extract st of
@@ -297,7 +330,8 @@ instance Constrainable Solver Dim T.SBool where
         St.modify' (`by` add ref newSym)
         return newSym
 
-instance Constrainable Solver (ExRefType Var) IL' where
+instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
+  Constrainable (SolverT m) (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
     do st <- St.get
        case find i $ extract st of
@@ -314,7 +348,8 @@ instance Constrainable Solver (ExRefType Var) IL' where
                        St.modify' (`by` add d newSym)
                        return $! Ref' $ SD newSym
 
-instance Constrainable PreSolver Var IL where
+instance (Monad m, T.MonadSymbolic m) =>
+  Constrainable (PreSolver m) Var IL where
   cached ref   = do st <- St.get
                     case find ref $ extract st of
                       Just x  -> return (Ref x)
@@ -322,7 +357,8 @@ instance Constrainable PreSolver Var IL where
                                     St.modify' (`by` add ref newSym)
                                     return (Ref newSym)
 
-instance Constrainable PreSolver (ExRefType Var) IL' where
+instance (Monad m, T.MonadSymbolic m) =>
+  Constrainable (PreSolver m) (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
     do st <- St.get
        case find i $ extract st of
@@ -479,13 +515,10 @@ data IL' = Ref' NRef
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
-toIL :: ( St.MonadState State m
-        , T.MonadSymbolic m
-        , C.MonadQuery m
-        , MonadLogger m
-        , Constrainable m Var IL
+toIL :: ( MonadLogger m
         , Constrainable m (ExRefType Var) IL'
-        ) => Proposition -> m IL
+        , Constrainable m Var IL) =>
+        Prop' Var -> m IL
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = cached ref
@@ -504,12 +537,9 @@ toIL (OpBB Or l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp Or l' r'
 toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)  = return $ Chc d l r
 
-toIL' :: ( T.MonadSymbolic m
-         , St.MonadState State m
-         , C.MonadQuery m
-         , MonadLogger m
-         , Constrainable m (ExRefType Var) IL'
-         ) => NExpression -> m IL'
+toIL' :: ( Constrainable m (ExRefType Var) IL'
+         , MonadLogger m) =>
+         NExpr' Var -> m IL'
 toIL' (LitI (I i))  = return . Ref' . SI $ T.literal i
 toIL' (LitI (D d))  = return . Ref' . SD $ T.literal d
 toIL' (RefI a)      = cached a
@@ -518,41 +548,6 @@ toIL' x@(OpI op (ChcI d l r)) = do logWith "Moving op inside chc" x
 toIL' (OpI op e)    = IOp op <$> toIL' e
 toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r)  = return $ Chc' d l r
-
-
--- TODO fix this redundancy with cached
-toILSymbolic :: Proposition -> PreSolver IL
-toILSymbolic (LitB True)   = return $! Ref T.sTrue
-toILSymbolic (LitB False)  = return $! Ref T.sFalse
-toILSymbolic (RefB ref)    = cached ref
-toILSymbolic (OpB op e)    = BOp op <$> toILSymbolic e
-toILSymbolic (OpBB Impl l r) = toILSymbolic (OpBB Or (OpB Not l) r)
-toILSymbolic (OpBB Eqv l r)  = toILSymbolic (OpBB And l' r')
-  where l' = bnot l ||| r -- l ==> r
-        r' = bnot r ||| l -- r ==> l
-toILSymbolic (OpBB XOr l r) = toILSymbolic (OpBB And l' r')
-  where l' = l ||| r
-        r' = bnot (l &&& r)
-toILSymbolic (OpBB And l r) = do l' <- toILSymbolic  l
-                                 r' <- toILSymbolic r
-                                 return $ BBOp And l' r'
-toILSymbolic (OpBB Or l r) = do l' <- toILSymbolic  l
-                                r' <- toILSymbolic r
-                                return $ BBOp Or l' r'
-toILSymbolic (OpIB op l r) = do l' <- toILSymbolic' l
-                                r' <- toILSymbolic' r
-                                return $ IBOp op l' r'
-toILSymbolic (ChcB d l r)  = return $ Chc d l r
-
-toILSymbolic' :: NExpression -> PreSolver IL'
-toILSymbolic' (LitI (I i))  = return . Ref' . SI $ T.literal i
-toILSymbolic' (LitI (D d))  = return . Ref' . SD $ T.literal d
-toILSymbolic' (RefI a)      = cached a
-toILSymbolic' (OpI op e)    = IOp op <$> toILSymbolic' e
-toILSymbolic' (OpII op l r) = do l' <- toILSymbolic' l
-                                 r' <- toILSymbolic' r
-                                 return $! IIOp op l' r'
-toILSymbolic' (ChcI d l r)  = return $ Chc' d l r
 
 -------------------------------- Accumulation -----------------------------------
 -- For both evaluation and accumulation we implement the functions in a verbose
@@ -574,23 +569,6 @@ intoCore = VarCore
 isUnit :: VarCore -> Bool
 isUnit (VarCore Unit) = True
 isUnit _              = False
-
--- | drive negation down to the leaves as much as possible
-driveNotDown :: IL -> IL
-driveNotDown (Ref b)     = Ref (bnot b)
-driveNotDown (BOp Not e) = e
-driveNotDown (BBOp And l r) = BBOp Or (driveNotDown l) (driveNotDown r)
-driveNotDown (BBOp Or l r) = BBOp And (driveNotDown l) (driveNotDown r)
-driveNotDown (BBOp XOr l r) = driveNotDown p
-  where p = BBOp Or (BBOp And l (driveNotDown r)) (BBOp And (driveNotDown l) r)
-driveNotDown (BBOp Impl l r) = BBOp And l (driveNotDown r)
-driveNotDown (BBOp Eqv l r) = BBOp Eqv l (driveNotDown r)
-driveNotDown (IBOp EQ l r)  = IBOp NEQ l r
-driveNotDown (IBOp NEQ l r) = IBOp EQ l r
-driveNotDown (IBOp op l r)  = IBOp op r l -- 1 < 2 === -(2 < 1)
-driveNotDown (Chc d l r)    = Chc d (bnot l) (bnot r)
-
-driveNotDown Unit = error "Not applied to a Unit!"
 
 -- | Accumulation: we purposefully are verbose to provide the optimizer better
 -- opportunities. Accumulation seeks to combine as much as possible the plain
@@ -698,7 +676,11 @@ isValue' _        = False
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
-evaluate :: IL -> Solver VarCore
+evaluate :: ( St.MonadState a m
+            , MonadLogger m
+            , Show a
+            , SolverContext m) =>
+            IL -> m VarCore
   -- computation rules
 evaluate Unit     = do s <- St.get
                        logWith "Received Unit with State: " s
@@ -840,7 +822,7 @@ findChoice x@(InNum Ref'{} InL{}) = error $ "An impossible case: " ++ show x
 findChoice x@(InNum Ref'{} InR{}) = error $ "An impossible case: " ++ show x
 
 
-store :: Result -> Solver ()
+store :: (St.MonadState State m) => Result -> m ()
 store = St.modify' . flip by . (<>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
@@ -905,15 +887,31 @@ alternative dim goLeft goRight =
                 goRight
 
 
-removeChoices :: VarCore -> Solver ()
+removeChoices :: ( MonadLogger m
+                 , St.MonadState State m
+                 , SolverContext m
+                 , C.MonadQuery m
+                 , MonadIO m
+                 , T.MonadSymbolic m
+                 , Constrainable m Var IL
+                 , Constrainable m Dim T.SBool
+                 , Constrainable m (ExRefType Var) IL'
+                 ) => VarCore -> m ()
   -- singleton instances
 removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
                                St.get >>= getResult . vConfig >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
-
-choose :: Loc -> Solver ()
+choose :: ( St.MonadState State m
+          , SolverContext m
+          , MonadLogger m
+          , C.MonadQuery m
+          , T.MonadSymbolic m
+          , Constrainable m (ExRefType Var) IL'
+          , Constrainable m Var IL
+          , Constrainable m Dim T.SBool) =>
+          Loc -> m ()
 choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
 choose loc =
   do
