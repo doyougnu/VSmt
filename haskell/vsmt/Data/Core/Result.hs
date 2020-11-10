@@ -184,7 +184,7 @@ getResult !vf =
      -- Result' {variables = VariableMap $! M.foldMapWithKey
      --          (\(!k) (!a) -> M.singleton (fromString k) (ResultFormula $! pure (vf, a))) m'
      --         ,satResult=vf}
-     Result' {variables = {-# SCC "vaarible_map" #-}VariableMap $!
+     Result' {variables = VariableMap $!
                           M.fromList $!
                           fmap (\(!k,!v) -> (fromString k, ResultFormula $! pure (vf, v))) m'
              ,satResult=vf}

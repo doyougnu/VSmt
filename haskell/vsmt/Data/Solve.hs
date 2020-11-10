@@ -88,7 +88,7 @@ solveVerbose  i (fromMaybe true -> conf) = do
     (toVC,   fromMain) <- U.newChan -- channel end points for main solver
 
   -- init the worker thread
-    let vcChans   = VCChannels $ pure (fromMain, toMain)
+    let vcChans   = VCChannels   $ pure (fromMain, toMain)
         mainChans = MainChannels $ pure (fromVC, toVC)
     tid <- initVCWorker conf vcChans
 
@@ -97,7 +97,8 @@ solveVerbose  i (fromMaybe true -> conf) = do
       do (il, st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ toIL i
          C.query $
            runSolverWith runStdoutLoggingT st{ vcChans = vcChans
-                                             , mainChans = mainChans} $
+                                             , mainChans = mainChans
+                                             } $
            findVCore il >>= removeChoices >> solution
     killThread tid
     return  results
@@ -147,12 +148,13 @@ type Doubles      = Store Var T.SDouble
 type Bools        = Store Var T.SBool
 type Dimensions   = Store Dim T.SBool
 type Context      = Store Dim Bool
+type ShouldNegate = Bool
 
 -- channel synonyms for nice types
-type FromVC = U.OutChan (Maybe Bool) -- the writer side
-type ToVC   = U.InChan  S.SBool     -- the reader side
+type FromVC = U.OutChan (Maybe Bool)        -- the writer side, the bool value of a sat check
+type ToVC   = U.InChan  (Dim, ShouldNegate) -- the reader side, a dim and flag
 
-type FromMain = U.OutChan S.SBool
+type FromMain = U.OutChan (Dim, ShouldNegate)
 type ToMain   = U.InChan (Maybe Bool)
 
 newtype VCChannels    = VCChannels   { getVcChans :: Maybe (FromMain, ToMain)}
@@ -940,39 +942,35 @@ alternative dim goLeft goRight =
        Just False -> log "Right Selected" >> goRight
        Nothing -> -- then this is a new dimension
          do s <- St.get -- cache the state
-            logWith "New dimension!" dim
-            sD <- cached dim
-            logWith "With State" s
-            let trueAlternative     = sD      &&& sConfig s
-                falseAlternative    = bnot sD &&& sConfig s
-                Just (fromVC, toVC) = getMainChans . mainChans $ s
+            let Just (fromVC, toVC) = getMainChans . mainChans $ s
                 skip                = return ()
+
+            let dontNegate          = False
+                pleaseNegate        = True
 
             -- When we see a new dimension we check if both of its possible
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
-            -- TODO: use incremental solving for the variant context
-            checkDimTrue <- liftIO $ U.writeChan toVC sD >> U.readChan fromVC
+            checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
             logWith "Checked New Dimension received: " checkDimTrue
             case checkDimTrue of
               Just True  -> C.inNewAssertionStack $!
                             do log "Left Alternative"
-                               updateConfigs trueAlternative (bRef dim) (dim,True)
+                               updateConfigs true (bRef dim) (dim,True)
                                goLeft
               _          -> skip -- something happened or variant ruled out
 
             -- reset for left side
             resetTo s
 
-           -- right side, notice that we negate the symbolic, we equally could
-           -- pattern match for False
-            checkDimFalse <- liftIO $ U.writeChan toVC (bnot sD) >> U.readChan fromVC
+           -- right side, notice that we negate the symbolic
+            checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
             logWith "Checked New Dimension received: " checkDimFalse
             case checkDimFalse of
               Just True -> C.inNewAssertionStack $!
                            do log "Right Alternative"
-                              updateConfigs falseAlternative (bnot $ bRef dim) (dim,False)
+                              updateConfigs false (bnot $ bRef dim) (dim,False)
                               goRight
               _         -> skip
 
@@ -1038,23 +1036,38 @@ choose loc =
 
 --------------------------- Variant Context Helpers ----------------------------
 initVCWorker :: VariantContext -> VCChannels -> IO ThreadId
-initVCWorker vc (getVcChans -> Just (fromMain, toMain)) = forkIO $ forever $
+initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
+  forkIO $
+  forever $
   S.runSMT $
   do (context,_) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool vc
      S.constrain context
      C.query $
-       do C.inNewAssertionStack $
-            do s <- C.io $ U.readChan fromMain
-               T.constrain s
-               C.checkSat >>= \case
-                 C.Sat -> do value <- C.getValue s
-                             C.io $ U.writeChan toMain (Just value)
-                 _     -> C.io $ U.writeChan toMain Nothing
+       let loop dimensions =
+             do C.inNewAssertionStack $
+                  do -- catch a dimension
+                    (d, shouldNegate) <- C.io $ U.readChan fromMain
+                    -- check if we've seen the dim before
+                    (sD, dimensions') <-
+                      case Map.lookup d dimensions of
+                        Just s -> return (s, dimensions) -- then we've seen it
+                        Nothing -> do let textDim = Text.unpack . getDim $ d
+                                      newSym <- T.label textDim <$> C.freshVar textDim
+                                      let newDimensions = Map.insert d newSym dimensions
+                                      return (newSym, newDimensions)
+
+                    -- constrain the symbolic dim, checksat and return a value
+                    T.constrain $ if shouldNegate then (bnot sD) else sD
+                    C.checkSat >>= \case
+                      C.Sat -> do value <- C.getValue sD
+                                  C.io $ U.writeChan toMain (Just value)
+                      _     -> C.io $ U.writeChan toMain Nothing
+
+                    -- now recur
+                    loop dimensions' in
+         loop mempty
  -- this can never happen and even if it does we want to stop
 initVCWorker _ _ = error "passed no channels to initVCWorker!"
-
-
-
 
 contextToSBool :: VariantContext -> PreSolver (LoggingT S.Symbolic) T.SBool
 contextToSBool (getVarFormula -> x) = go x

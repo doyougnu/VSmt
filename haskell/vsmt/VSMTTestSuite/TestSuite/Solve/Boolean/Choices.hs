@@ -24,6 +24,7 @@ tests = testGroup "Variational formulas"
   , goldenVsStringShow "Tree_of_Choices" treeOfChoices
   , goldenVsStringShow "Single_Choice_With_Vars" singletonChoiceWithVars
   , goldenVsStringShow "Single_Choice_With_VC"  singletonChoiceWithVC
+  , goldenVsStringShow "Two_Choices_With_VC"  twoChoicesWithVC
   ]
 
 singletonChoice :: IO Result
@@ -37,6 +38,10 @@ singletonChoiceWithVars = flip satVerbose Nothing $ bChc "AA" (bRef "Aleft") (bR
 
 twoChoices :: IO Result
 twoChoices = flip satVerbose Nothing $
+             bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
+
+twoChoicesWithVC :: IO Result
+twoChoicesWithVC = flip satVerbose (Just $ toVariantContext $ (bRef "AA") &&& (bRef "BB")) $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 -- | test to make sure the solver returns true for every variable assignment
