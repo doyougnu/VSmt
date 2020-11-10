@@ -161,6 +161,7 @@ getVSMTModel = force <$> T.getSMTResult
 getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
 getResult !vf =
   do !model <- getVSMTModel
+     T.io $ putStrLn $ "[SBV Model]" ++ show (S.SatResult model)
      return $!
        Result $!
        case model of

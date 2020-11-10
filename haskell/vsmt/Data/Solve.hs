@@ -28,7 +28,7 @@
 
 module Data.Solve where
 
-import           Control.Monad              (forever)
+import           Control.Monad              (forever,when)
 import           Control.Monad.Except       (MonadError)
 import           Control.Monad.IO.Class     (liftIO)
 import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
@@ -71,6 +71,9 @@ logPretty msg value = log $ msg <> sep <> pretty value
 logState :: Solver ()
 logState = St.get >>= logWith "State: "
 
+logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
+logThenPass str a = logWith str a >> return a
+
 ------------------------------ Internal Api -------------------------------------
 findVCore :: IL -> Solver VarCore
 findVCore = evaluate
@@ -99,17 +102,16 @@ solveVerbose  i (fromMaybe true -> conf) = do
            runSolverWith runStdoutLoggingT st{ vcChans = vcChans
                                              , mainChans = mainChans
                                              } $
-           findVCore il >>= removeChoices >> solution
+           findVCore il >>= logThenPass "Core: " >>= removeChoices >> solution
     killThread tid
     return  results
 
 solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
 solve  i (fromMaybe true -> conf) = do
     T.runSMTWith T.z3 $
-      do (context,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool conf
-         let initialState = iState{sConfig = context}
+      do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool conf
              -- S.setTimeOut 15000 -- timeout at 15 seconds
-         (il, st) <- runSolverWith runNoLoggingT initialState $ unPre $ toIL i
+         (il, st) <- runSolverWith runNoLoggingT iState $ unPre $ toIL i
          C.query $ runSolverWith runNoLoggingT st $
            do core <- evaluate il
               removeChoices core
@@ -118,9 +120,8 @@ solve  i (fromMaybe true -> conf) = do
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
 solveForCoreVerbose  i (fromMaybe true -> conf) = do
     T.runSMTWith T.z3{T.verbose=True} $
-      do (context,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool conf
-         let initialState = iState{sConfig = context}
-         (il, st) <- runSolverWith runStdoutLoggingT initialState $ unPre $ toIL i
+      do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool conf
+         (il, st) <- runSolverWith runStdoutLoggingT iState $ unPre $ toIL i
          C.query $ runSolverWith runStdoutLoggingT st $
            do core <- findVCore il
               logWith "Proposition: "  i
@@ -151,11 +152,11 @@ type Context      = Store Dim Bool
 type ShouldNegate = Bool
 
 -- channel synonyms for nice types
-type FromVC = U.OutChan (Maybe Bool)        -- the writer side, the bool value of a sat check
+type FromVC = U.OutChan Bool                -- the writer side, the bool value of a sat check
 type ToVC   = U.InChan  (Dim, ShouldNegate) -- the reader side, a dim and flag
 
 type FromMain = U.OutChan (Dim, ShouldNegate)
-type ToMain   = U.InChan (Maybe Bool)
+type ToMain   = U.InChan Bool
 
 newtype VCChannels    = VCChannels   { getVcChans :: Maybe (FromMain, ToMain)}
 newtype MainChannels  = MainChannels { getMainChans :: Maybe (FromVC, ToVC)}
@@ -197,11 +198,6 @@ class Has that where
   by this f = flip wrap this . f . extract $ this
 
 -- avoiding lens and generic-deriving dependencies
-instance Has SVariantContext where
-  type Contains SVariantContext = State
-  extract     = sConfig
-  wrap    c w = w{sConfig = c}
-
 instance Has Ints    where extract   = ints
                            wrap    i w = w{ints = i}
 
@@ -242,7 +238,6 @@ data State = State
     { result     :: Result
     , vConfig    :: Maybe VariantContext    -- the formula representation of the config
     , config     :: Context                 -- a map or set representation of the config
-    , sConfig    :: SVariantContext         -- the symbolic representation of the config
     , ints       :: Ints
     , doubles    :: Doubles
     , bools      :: Bools
@@ -254,11 +249,10 @@ data State = State
 instance Show State where
   show State{..} = mconcat $
     zipWith (\x y -> x <> "  :  " <> y <> "\n")
-    ["result","vConfig","config","sConfig","ints","doubles","bools","dimensions"]
+    ["result","vConfig","config","ints","doubles","bools","dimensions"]
     $ [ show result -- ya hate to see it
       , show vConfig
       , show config
-      , show sConfig
       , show ints
       , show doubles
       , show bools
@@ -271,7 +265,6 @@ instance Semigroup State where
                                     in (a' <> b')
                  , config     = config  a <> config  b
                  , vConfig    = vConfig a <> vConfig b
-                 , sConfig    = sConfig a <> sConfig b
                  , ints       = ints    a <> ints    b
                  , doubles    = doubles a <> doubles b
                  , bools      = bools   a <> bools   b
@@ -286,7 +279,6 @@ instance Semigroup State where
 instance Monoid State where
   mempty = State{ result     = mempty
                 , config     = mempty
-                , sConfig    = mempty
                 , vConfig    = mempty
                 , ints       = mempty
                 , doubles    = mempty
@@ -900,17 +892,17 @@ store :: (St.MonadState State m) => Result -> m ()
 store = St.modify' . flip by . (<>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
-onVContext :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
-onVContext Nothing Nothing    = Nothing
-onVContext a@(Just _) Nothing = a
-onVContext Nothing b@(Just _) = b
-onVContext (Just l) (Just r)  = Just $ l &&& r
+mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
+mergeVC Nothing Nothing    = Nothing
+mergeVC a@(Just _) Nothing = a
+mergeVC Nothing b@(Just _) = b
+mergeVC (Just l) (Just r)  = Just $ l &&& r
 
 -- | A function that enforces each configuration is updated in sync
-updateConfigs :: (St.MonadState State m) => SVariantContext -> Prop' Dim -> (Dim, Bool) -> m ()
-updateConfigs conf context (d,val) = do
-  St.modify' (`by` const conf)
-  St.modify' (`by` (`onVContext` (Just $ VariantContext context)))
+updateConfigs :: (St.MonadState State m) => Prop' Dim -> (Dim, Bool) -> m ()
+{-# INLINE updateConfigs #-}
+updateConfigs context (d,val) = do
+  St.modify' (`by` (`mergeVC` (Just $ VariantContext context)))
   St.modify' (`by` add d val)
 
 -- | Reset the state but maintain the cache's
@@ -943,9 +935,7 @@ alternative dim goLeft goRight =
        Nothing -> -- then this is a new dimension
          do s <- St.get -- cache the state
             let Just (fromVC, toVC) = getMainChans . mainChans $ s
-                skip                = return ()
-
-            let dontNegate          = False
+                dontNegate          = False
                 pleaseNegate        = True
 
             -- When we see a new dimension we check if both of its possible
@@ -953,26 +943,22 @@ alternative dim goLeft goRight =
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
             checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
-            logWith "Checked New Dimension received: " checkDimTrue
-            case checkDimTrue of
-              Just True  -> C.inNewAssertionStack $!
-                            do log "Left Alternative"
-                               updateConfigs true (bRef dim) (dim,True)
-                               goLeft
-              _          -> skip -- something happened or variant ruled out
+            when checkDimTrue $
+              C.inNewAssertionStack $!
+              do log "Left Alternative"
+                 updateConfigs (bRef dim) (dim,True)
+                 goLeft
 
             -- reset for left side
             resetTo s
 
            -- right side, notice that we negate the symbolic
             checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
-            logWith "Checked New Dimension received: " checkDimFalse
-            case checkDimFalse of
-              Just True -> C.inNewAssertionStack $!
-                           do log "Right Alternative"
-                              updateConfigs false (bnot $ bRef dim) (dim,False)
-                              goRight
-              _         -> skip
+            when checkDimFalse $
+              C.inNewAssertionStack $!
+              do log "Right Alternative"
+                 updateConfigs (bnot $ bRef dim) (dim,False)
+                 goRight
 
 
 removeChoices :: ( MonadLogger m
@@ -1038,34 +1024,24 @@ choose loc =
 initVCWorker :: VariantContext -> VCChannels -> IO ThreadId
 initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
   forkIO $
-  forever $
   S.runSMT $
   do (context,_) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool vc
      S.constrain context
      C.query $
-       let loop dimensions =
-             do C.inNewAssertionStack $
-                  do -- catch a dimension
-                    (d, shouldNegate) <- C.io $ U.readChan fromMain
-                    -- check if we've seen the dim before
-                    (sD, dimensions') <-
-                      case Map.lookup d dimensions of
-                        Just s -> return (s, dimensions) -- then we've seen it
-                        Nothing -> do let textDim = Text.unpack . getDim $ d
-                                      newSym <- T.label textDim <$> C.freshVar textDim
-                                      let newDimensions = Map.insert d newSym dimensions
-                                      return (newSym, newDimensions)
+       do forever $
+            C.inNewAssertionStack $
+            do -- catch a dimension
+              (d, shouldNegate) <- C.io $ U.readChan fromMain
 
-                    -- constrain the symbolic dim, checksat and return a value
-                    T.constrain $ if shouldNegate then (bnot sD) else sD
-                    C.checkSat >>= \case
-                      C.Sat -> do value <- C.getValue sD
-                                  C.io $ U.writeChan toMain (Just value)
-                      _     -> C.io $ U.writeChan toMain Nothing
+              -- constrain the symbolic dim, checksat and return a value
+              let textDim = Text.unpack . getDim $ d
+              sD <- T.label textDim <$> C.freshVar textDim
+              T.constrain $ if shouldNegate then (bnot sD) else sD
 
-                    -- now recur
-                    loop dimensions' in
-         loop mempty
+              C.checkSat >>= C.io . \case
+                C.Sat -> U.writeChan toMain True
+                _     -> U.writeChan toMain False
+
  -- this can never happen and even if it does we want to stop
 initVCWorker _ _ = error "passed no channels to initVCWorker!"
 
