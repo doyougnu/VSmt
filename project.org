@@ -22,6 +22,8 @@
     average case has is way more lookups then generations, so when we lookup we
     don't want any extra actions
 
+*** TODO Add serialization for incremental incremental vsmt (may add this to sbv)
+
 *** DONE Remove CV's from result maps and just construct the string to represent smtlib program
     CLOSED: [2020-09-16 Wed 14:41]
 
@@ -103,12 +105,28 @@
 
 ** TODO hedgehog properties vs quickcheck properties
 
-** TODO Tasty setup and harness
+** DONE Tasty setup and harness
+   CLOSED: [2020-09-19 Sat 14:38]
 
 ** DONE Quickcheck/smallcheck generators
    CLOSED: [2020-09-16 Wed 14:40]
 
-** TODO Quickcheck/smallcheck properties
+** DONE Quickcheck/smallcheck properties
+   CLOSED: [2020-09-19 Sat 14:39]
+
+   - Note taken on [2020-09-19 Sat 14:39] \\
+     soundness is setup and working but we need newtype wrappers instead of
+     predicates, see https://github.com/doyougnu/VSmt/issues/4
+
+** Good Properties to prove
+
+*** A variational core is at most a single unreducible operator, a symbolic and a choice
+
+*** Parser roundtripping
+
+*** Mathematical equivalences which should always hold
+
+*** Boolean equivalences which should always hold
 
 * Benchmarking
 

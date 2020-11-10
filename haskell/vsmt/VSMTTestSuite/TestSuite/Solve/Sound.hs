@@ -44,7 +44,7 @@ checkResultProgram p (vc, res) =
          bs :: [String]
          bs = fmap show . Set.toList $ booleans satRes -- the set of dimensions
      putStrLn $ "Sat Result: " ++ show satRes
-     S.AllSatResult (_,_,_,as) <- S.allSat $
+     S.AllSatResult _ _ _ _ as <- S.allSat $
        do symBs <- mapM S.sBool bs
           let sBs = M.fromList $ zip (toDim <$> bs) symBs
           eval satRes sBs >>= S.constrain

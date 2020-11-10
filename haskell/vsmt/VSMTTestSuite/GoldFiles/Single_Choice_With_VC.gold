@@ -1,0 +1,6 @@
+=: Model := 
+Aleft   -->   (ite AA (True :: Bool) Undefined)
+AA   -->   (ite AA (False :: Bool) Undefined)
+
+=: Sat_Model := 
+AA

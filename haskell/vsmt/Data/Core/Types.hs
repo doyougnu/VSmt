@@ -55,7 +55,10 @@ newtype Plain a = Plain a
 -- \in prop they describe but this artificially restricts the expressiveness of
 -- the system and is best left to the end-user
 newtype VariantContext = VariantContext { getVarFormula :: Prop' Dim }
-  deriving (Eq,Generic,Ord,Show)
+  deriving (Eq,Generic,Ord,Show,NFData)
+
+toVariantContext :: Prop' Dim -> VariantContext
+toVariantContext = VariantContext
 
 -- | An SMT Program is a sequence of statements interacting with the base solver
 type Prog = Seq.Seq

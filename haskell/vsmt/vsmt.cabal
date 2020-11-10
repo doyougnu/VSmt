@@ -1,4 +1,5 @@
-cabal-version: >=1.10
+cabal-version: 2.2
+
 Name:          vsmt
 Version:       0.0.1
 Category:      Formal Methods, Theorem Provers, Bit vectors, Symbolic Computation, Math, SMT, Variational Programming
@@ -6,7 +7,7 @@ Synopsis:      SMT Based Verification with first class variational programming c
 Description:   Efficiently solve SMT problems in the context of variation.
                For details, please see: TODO: create website
 Copyright:     Jeffrey Young, 2016-2020
-License:       BSD3
+License:       BSD-3-Clause
 License-file:  LICENSE
 Stability:     Experimental
 Author:        Jeffrey Young
@@ -15,6 +16,16 @@ Bug-reports:   https://github.com/doyougnu/VSmt/issues
 Maintainer:    Jeffrey Young (youngjef@oregonstate.edu)
 Build-Type:    Simple
 Extra-Source-Files: INSTALL, README.md, COPYRIGHT, CHANGES.md
+
+
+common common-settings
+   default-language: Haskell2010
+   ghc-options     : -Wall -O2
+   build-depends   : base >= 4.11 && < 5
+
+   if impl(ghc >= 8.10.1)
+      ghc-options  : -Wunused-packages
+
 
 library
   exposed-modules: Data.Core.Core
@@ -31,11 +42,12 @@ library
                , megaparsec
                , monad-logger
                , mtl
-               , parser-combinators >= 1.2.1
-               , sbv >= 8.6
+               , parser-combinators
+               , sbv >= 8.8
                , text
                , transformers >= 0.5.6.2
-               , unordered-containers >= 0.2.12
+               , unordered-containers >= 0.2.10
+               , unagi-chan
   default-language: Haskell2010
   other-extensions: BangPatterns
                     CPP
@@ -102,6 +114,7 @@ Test-Suite VSMTTest
                   , tasty-hunit
                   , filepath
                   , bytestring
+
                   , unordered-containers
                   , sbv
                   , text
@@ -120,7 +133,9 @@ Test-Suite VSMTTest
 Benchmark VSMTBench
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -with-rtsopts=-K64m -O2
+  ghc-options     : -O2
+  -- ghc-options     : -O2 "-with-rtsopts=-p -s -hm -L800 "
+  -- ghc-options     : -Wall -O2 -threaded "-with-rtsopts=-qg"
   other-extensions: DataKinds
                     DeriveAnyClass
                     DeriveDataTypeable
@@ -139,8 +154,13 @@ Benchmark VSMTBench
                   , vsmt
                   , gauge
                   , deepseq
-                  , silently
-  Hs-Source-Dirs  : SBVBenchSuite
-  main-is         : SBVBench.hs
-  -- Other-modules   : Utils.SBVBenchFramework
-  --                 , BenchSuite.Bench.Bench
+                  , megaparsec
+                  , parser-combinators
+                  , text
+                  , sbv
+                  , containers
+  Hs-Source-Dirs  : VSMTBench
+  main-is         : VSMTBench.hs
+  Other-modules   : BusyBox.Parser
+-- Utils.SBVBenchFramework
+--                   , BenchSuite.Bench.Bench

@@ -9,6 +9,7 @@
 -- Result module implementing variational smt models for the vsmt library
 -----------------------------------------------------------------------------
 
+{-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE ExistentialQuantification  #-}
 {-# LANGUAGE FlexibleContexts           #-}
@@ -19,29 +20,28 @@
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE BangPatterns               #-}
 
 module Data.Core.Result where
 
 import           Control.Monad.IO.Class (MonadIO)
-import           Data.Data              (Typeable)
+
 import           Data.Hashable          (Hashable)
+import           Control.DeepSeq     (NFData,force)
 import           Data.Map               (toList)
 import qualified Data.SBV.Control       as C
 import qualified Data.SBV.Internals     as I
 import qualified Data.SBV.Trans         as S
 import qualified Data.SBV.Trans.Control as T
-import           Data.Text              (Text,pack,unpack)
-import           Data.Semigroup         ((<>))
-import           Data.Char              (isSpace)
-import           Data.List              (intercalate, nub)
+import           Data.Text              (Text,unpack)
 import           Data.Maybe             (isJust)
-
 import qualified Data.HashMap.Strict    as M
 import           Data.String            (IsString, fromString)
 import           GHC.Generics           (Generic)
+import qualified Data.Sequence          as Seq
 
 import           Data.Core.Types
-import           Data.Core.Core
+
 import           Data.Core.Pretty
 
 -- | An SMT Result formula, spine strict, we leave values lazy because they may
@@ -52,19 +52,20 @@ import           Data.Core.Pretty
 -- You should view this as an internal datatype, in the average case this will
 -- be transformed into a Map of "variable" -> SMTLIB2 program where the SMTLIB2
 -- program will dispatch the right value based on the values of dimensions
-newtype ResultFormula = ResultFormula [(Maybe VariantContext, I.CV)]
-    deriving (Eq,Show,Generic,Semigroup,Monoid)
+newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext, I.CV))
+    deriving (Eq,Show,Semigroup,Monoid,Generic,NFData)
 
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
 -- cleaner implementation on our end.
 newtype VariableMap d = VariableMap {getVMap :: M.HashMap d ResultFormula }
-  deriving (Eq,Show)
+  deriving (Eq,Show,Generic,NFData)
 
-instance (Eq d, Hashable d) => Semigroup (VariableMap d) where
-  (VariableMap l) <> (VariableMap r) = VariableMap $ M.unionWith (<>) l r
+instance (Eq d, Hashable d, NFData d) => Semigroup (VariableMap d) where
+  (VariableMap !l) <> (VariableMap !r) = VariableMap $! M.unionWith go l r
+    where go !l' !r' = l' <> r'
 
-deriving instance (Eq d, Hashable d) => Monoid (VariableMap d)
+deriving instance (Eq d, Hashable d, NFData d) => Monoid (VariableMap d)
 
 instance Pretty (Result' Var) where
   pretty r = "=: Model := " <> newline <>
@@ -77,24 +78,24 @@ instance Pretty (Result' Var) where
 
 -- TODO: use Text.PrintF from base for better formatted output
 deriving instance Pretty d => Pretty (VariableMap d)
-instance Pretty [(Maybe VariantContext, I.CV)] where pretty = prettyResultFormula
+instance Pretty (Seq.Seq (Maybe VariantContext, I.CV)) where pretty = prettyResultFormula
 instance Pretty d => Pretty (M.HashMap d ResultFormula) where
   pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
 
 -- | We use a Maybe to form the mempty for monoid, this leads to prettier pretty
 -- printing
-prettyResultFormula :: [(Maybe VariantContext, I.CV)] -> Text
-prettyResultFormula [(Nothing, val)] = pretty val
-prettyResultFormula [(Just ctx, val)] = parens $
+prettyResultFormula :: Seq.Seq (Maybe VariantContext, I.CV) -> Text
+prettyResultFormula Seq.Empty = mempty
+prettyResultFormula ((Nothing, val) Seq.:<| Seq.Empty)  = pretty val
+prettyResultFormula ((Just ctx, val) Seq.:<| Seq.Empty) = parens $
   "ite" <> space <> pretty ctx <> space <> parens (pretty val) <> space <> done
-  where kw = I.kindOf val
-        done = "Undefined"
-prettyResultFormula ((Nothing,val):xs) = parens $
+  where done = "Undefined"
+prettyResultFormula ((Nothing,val) Seq.:<| xs) = parens $!
                                      "ite " <>
                                      parens "True :: Bool" <> space <>
                                      parens (pretty val) <> space <>
                                      pretty xs
-prettyResultFormula ((Just ctx,val):xs) = parens $
+prettyResultFormula ((Just ctx,val) Seq.:<| xs) = parens $!
                                           "ite " <>
                                           pretty ctx <> space <>
                                           parens (pretty val) <> space <>
@@ -103,9 +104,9 @@ prettyResultFormula ((Just ctx,val):xs) = parens $
 instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
 
 -- | newtype wrapper for better printing
-newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic)
+newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic,NFData)
 
-instance Semigroup Result where (Result a) <> (Result b) = Result (a <> b)
+instance Semigroup Result where (Result !a) <> (Result !b) = Result (a <> b)
 deriving instance Monoid Result
 
 instance Show Result where show = unpack . pretty
@@ -114,17 +115,19 @@ instance Pretty Result where pretty (Result r) = pretty r
 
 data Result' d = Result' { variables :: VariableMap d
                          , satResult :: Maybe VariantContext
-                         } deriving (Eq, Show)
+                         } deriving (Eq, Show,Generic)
 
-instance (Eq d, Hashable d) => Semigroup (Result' d) where
-  (<>) Result' {variables=vl,satResult=sl} Result'{variables=vr,satResult=sr} =
+instance NFData d => NFData (Result' d)
+
+instance (Eq d, Hashable d, NFData d) => Semigroup (Result' d) where
+  (<>) Result' {variables=(!vl),satResult=(!sl)} Result'{variables=(!vr),satResult=(!sr)} =
     Result' { variables = vl <> vr
             , satResult = sl <> sr}
 
-instance (Eq d, Hashable d) => Monoid (Result' d) where
+instance (Eq d, Hashable d, NFData d) => Monoid (Result' d) where
   mempty = Result'{variables=mempty
                  ,satResult=mempty}
-  mappend = (<>)
+  mappend !x !y = x <> y
 
 onVariables :: (VariableMap d -> VariableMap d) -> Result' d -> Result' d
 onVariables f Result'{..} = Result'{variables=f variables, satResult}
@@ -151,21 +154,24 @@ wasSat = isJust . satResult . unboxResult
 
 -- | Generate a VSMT model
 getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
-getVSMTModel = T.getSMTResult
+getVSMTModel = force <$> T.getSMTResult
 
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.
 getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
-getResult vf =
-  do model <- getVSMTModel
+getResult !vf =
+  do !model <- getVSMTModel
      return $!
-       Result $
+       Result $!
        case model of
          m@(S.Satisfiable _ _)         ->
         -- when satisfiable we get the model dictionary, turn it into a
         -- result map and then insert the config proposition that created the
         -- satisfiable result into the __Sat element of the map
-           toResMap . M.fromList . toList . S.getModelDictionary $! m
+           let !gMD = S.getModelDictionary $! m
+               xs = toList gMD
+               res = toResMap xs
+               in res
       -- (S.Unsatisfiable _ unsatCore) ->
         -- we apply f to True here because in the case of an unsat we want to
         -- save the proposition that produced the unsat, if we applied to
@@ -174,7 +180,11 @@ getResult vf =
         -- unSatToResult (f True) $ fromMaybe mempty unsatCore
          _                           -> mempty
  where
-   toResMap m' =
-     Result' {variables = VariableMap $ M.foldMapWithKey
-              (\k a -> M.singleton (fromString k) (ResultFormula $ pure (vf, a))) m'
+   toResMap !m' =
+     -- Result' {variables = VariableMap $! M.foldMapWithKey
+     --          (\(!k) (!a) -> M.singleton (fromString k) (ResultFormula $! pure (vf, a))) m'
+     --         ,satResult=vf}
+     Result' {variables = {-# SCC "vaarible_map" #-}VariableMap $!
+                          M.fromList $!
+                          fmap (\(!k,!v) -> (fromString k, ResultFormula $! pure (vf, v))) m'
              ,satResult=vf}

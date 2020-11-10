@@ -14,7 +14,11 @@ let
                 zlib = pkgs.zlib;
               };
 
-              sbv = haskellPackagesNew.callPackage ./sbv.nix { };
+              sbv = haskellPackagesNew.callPackage ./sbv.nix {
+                z3 = pkgs.z3;
+              };
+              # sbv = haskellPackagesNew.callPackage ~/programming/sbv/sbv.nix { };
+              unordered-containers = haskellPackagesNew.callPackage ./unordered-containers.nix {};
             };
           };
         };
@@ -35,8 +39,10 @@ in
                                  haskellPackages.stylish-haskell
                                  haskellPackages.hasktags
                                  haskellPackages.apply-refact
-                                 haskellPackages.hindent
+                                 # haskellPackages.hindent
                                  haskellPackages.ghcide
+                                 haskellPackages.ghc-prof-flamegraph
+                                 haskellPackages.profiteur
                                  zlib
                                  z3
                                  cabal-install

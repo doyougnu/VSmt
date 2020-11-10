@@ -23,14 +23,13 @@ import qualified TestSuite.Core.Parser.Result
 
 main :: IO ()
 main = do
-  setEnv "TASTY_QUICKCHECK_TESTS" "3000"
+  setEnv "TASTY_QUICKCHECK_TESTS" "300"
   defaultMain $ testGroup "Tests"
-    [ -- booleans
-      -- arithmetics
-    -- , booleanPs
-    -- , arithmeticPs
-      soundness
-      -- parsers
+    [ booleans
+    , arithmetics
+    , booleanPs
+    , arithmeticPs
+    -- , parsers
     ]
 
 booleans :: TestTree

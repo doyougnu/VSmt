@@ -34,6 +34,6 @@ parserFail = do
   m <- parseFromFile fileName
   assertBool "Didn't parse" $
     case m of
-      Left x -> False
+      Left _ -> False
       Right _ -> True
   where p = OpBB Impl (OpIB LTE (iRef "ui") (iRef ("qok" :: Text))) (ChcB "CC" (RefB "l") (RefB "vqn"))

@@ -1,28 +1,30 @@
-{ mkDerivation, array, async, base, bytestring, containers
-, crackNum, deepseq, directory, doctest, filepath, gauge
-, generic-deriving, Glob, hlint, mtl, pretty, process, QuickCheck
-, random, silently, stdenv, syb, tasty, tasty-golden, tasty-hunit
+{ mkDerivation, array, async, base, bench-show, bytestring
+, containers, crackNum, deepseq, directory, doctest, filepath
+, gauge, Glob, hlint, mtl, pretty, process, QuickCheck, random
+, silently, stdenv, syb, tasty, tasty-golden, tasty-hunit
 , tasty-quickcheck, template-haskell, time, transformers, z3
+, abc-verifier
 }:
 mkDerivation {
   pname = "sbv";
-  version = "8.7";
-  sha256 = "34107492915af8a3577394ced6c2cb8388a23629e512edba740646a0f2a03746";
+  version = "8.8";
+  sha256 = "feed7f80b1a073ccccc86889daacf43a138c98e11e5aad979468c03ed32ba076";
+  doCheck = false;
   enableSeparateDataOutput = true;
   libraryHaskellDepends = [
-    array async base containers crackNum deepseq directory filepath
-    generic-deriving mtl pretty process QuickCheck random syb
-    template-haskell time transformers
+    array async base containers crackNum deepseq directory filepath mtl
+    pretty process QuickCheck random syb template-haskell time
+    transformers
   ];
   testHaskellDepends = [
     base bytestring containers crackNum directory doctest filepath Glob
-    hlint mtl QuickCheck random syb tasty tasty-golden tasty-hunit
-    tasty-quickcheck template-haskell
+    hlint mtl QuickCheck random tasty tasty-golden tasty-hunit
+    tasty-quickcheck
   ];
-  testSystemDepends = [ z3 ];
+  testSystemDepends = [ z3 abc-verifier ];
   benchmarkHaskellDepends = [
-    base containers crackNum deepseq directory filepath gauge mtl
-    process random silently syb
+    base bench-show containers crackNum deepseq directory filepath
+    gauge mtl process random silently syb time
   ];
   homepage = "http://leventerkok.github.com/sbv/";
   description = "SMT Based Verification: Symbolic Haskell theorem prover using SMT solving";
