@@ -1,4 +1,3 @@
-{-# LANGUAGE DerivingStrategies #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : Data.Solve
@@ -18,40 +17,40 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE ViewPatterns               #-}
-{-# LANGUAGE RecordWildCards            #-}
 
 module Data.Solve where
 
-import           Control.Monad              (forever,when)
-import           Control.Monad.Except       (MonadError)
-import           Control.Monad.IO.Class     (liftIO)
-import           Control.Monad.Logger       (LoggingT, MonadLogger (..),
-                                             NoLoggingT (runNoLoggingT),
-                                             logDebug, runStdoutLoggingT)
-import qualified Control.Monad.State.Strict as St (MonadState, StateT, get,
-                                                   gets, modify', put,
-                                                   runStateT)
-import           Control.Monad.Trans        (MonadIO, MonadTrans, lift)
-import           Control.Applicative        ((<|>))
+import           Control.Applicative           ((<|>))
+import           Control.Concurrent            (ThreadId, forkIO, killThread)
+import qualified Control.Concurrent.Chan.Unagi as U
+import           Control.Monad                 (forever, when)
+import           Control.Monad.Except          (MonadError)
+import           Control.Monad.IO.Class        (liftIO)
+import           Control.Monad.Logger          (LoggingT, MonadLogger (..),
+                                                NoLoggingT, logDebug,
+                                                runStdoutLoggingT)
+import qualified Control.Monad.State.Strict    as St (MonadState, StateT, get,
+                                                      gets, modify', put,
+                                                      runStateT)
+import           Control.Monad.Trans           (MonadIO, MonadTrans, lift)
 import           Data.Core.Pretty
 import           Data.Core.Result
 import           Data.Core.Types
-import qualified Data.HashMap.Strict        as Map
-import           Data.Maybe                 (fromJust, fromMaybe)
-import qualified Data.SBV                   as S
-import           Data.SBV.Internals         (SolverContext (..))
-import qualified Data.SBV.Trans             as T
-import qualified Data.SBV.Trans.Control     as C
-import qualified Data.Text                  as Text
-import           Prelude                    hiding (EQ, GT, LT, log)
-import qualified Control.Concurrent.Chan.Unagi as U
-import Control.Concurrent (forkIO, ThreadId, killThread)
+import qualified Data.HashMap.Strict           as Map
+import           Data.Maybe                    (fromJust, fromMaybe)
+import qualified Data.SBV                      as S
+import           Data.SBV.Internals            (SolverContext (..))
+import qualified Data.SBV.Trans                as T
+import qualified Data.SBV.Trans.Control        as C
+import qualified Data.Text                     as Text
+import           Prelude                       hiding (EQ, GT, LT, log)
 
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
@@ -106,16 +105,27 @@ solveVerbose  i (fromMaybe true -> conf) = do
     killThread tid
     return  results
 
+-- TODO runNoLogging
 solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
 solve  i (fromMaybe true -> conf) = do
-    T.runSMTWith T.z3 $
-      do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool conf
-             -- S.setTimeOut 15000 -- timeout at 15 seconds
-         (il, st) <- runSolverWith runNoLoggingT iState $ unPre $ toIL i
-         C.query $ runSolverWith runNoLoggingT st $
-           do core <- evaluate il
-              removeChoices core
-              solution
+    (toMain, fromVC)   <- U.newChan
+    (toVC,   fromMain) <- U.newChan
+
+  -- init the worker thread
+    let vcChans   = VCChannels   $ pure (fromMain, toMain)
+        mainChans = MainChannels $ pure (fromVC, toVC)
+    tid <- initVCWorker conf vcChans
+
+    -- kick off
+    results <- T.runSMTWith T.z3 $
+      do (il, st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ toIL i
+         C.query $
+           runSolverWith runStdoutLoggingT st{ vcChans = vcChans
+                                             , mainChans = mainChans
+                                             } $
+           findVCore il >>= logThenPass "Core: " >>= removeChoices >> solution
+    killThread tid
+    return  results
 
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
 solveForCoreVerbose  i (fromMaybe true -> conf) = do
