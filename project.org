@@ -95,7 +95,13 @@
 *** DONE Arithmetic smt solving
     CLOSED: [2020-09-16 Wed 12:45]
 
-*** TODO Variant Contexts can be used to limit the solver
+*** DONE Variant Contexts can be used to limit the solver
+    CLOSED: [2020-11-10 Tue 13:50]
+
+    - Note taken on [2020-11-10 Tue 13:50] \\
+      Quite easy actually, we spin up a second thread and use channels to send
+      over a dimension asking the solver to check if the dimension is true in
+      current context and then return the result
 
 *** TODO Investigate possible uses of StableName
 
