@@ -29,7 +29,7 @@ module Data.Solve where
 
 import           Control.Applicative           ((<|>))
 import           Control.Concurrent            (ThreadId, forkIO, killThread)
-import qualified Control.Concurrent.Chan.Unagi as U
+import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import           Control.Monad                 (forever, when)
 import           Control.Monad.Except          (MonadError)
 import           Control.Monad.IO.Class        (liftIO)
@@ -39,6 +39,7 @@ import           Control.Monad.Logger          (LoggingT, MonadLogger (..),
 import qualified Control.Monad.State.Strict    as St (MonadState, StateT, get,
                                                       gets, modify', put,
                                                       runStateT)
+import qualified Control.Concurrent.Async      as A
 import           Control.Monad.Trans           (MonadIO, MonadTrans, lift)
 import           Data.Core.Pretty
 import           Data.Core.Result
@@ -70,8 +71,24 @@ logPretty msg value = log $ msg <> sep <> pretty value
 logState :: Solver ()
 logState = St.get >>= logWith "State: "
 
+
+logInThread :: MonadLogger m => Int -> Text.Text -> m ()
+logInThread tid msg = log logmsg
+  where
+    logmsg :: Text.Text
+    logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+
+logInThreadWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
+logInThreadWith tid msg value = logWith logmsg value
+  where
+    logmsg :: Text.Text
+    logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
 logThenPass str a = logWith str a >> return a
+
+logThreadPass :: (MonadLogger m, Show b) => Int -> Text.Text -> b -> m b
+logThreadPass tid str a = logInThreadWith tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
 findVCore :: IL -> Solver VarCore
@@ -89,50 +106,86 @@ solution = extract <$> St.get
 -- | TODO pending on server create, create a load function to handle injection
 -- | TODO reduce redundancy after config module is written
 -- to the IL type
-solveVerbose :: Proposition -> Maybe VariantContext -> IO (Result, State)
-solveVerbose  i (fromMaybe true -> conf) = do
-  -- create vc handler and channels
-    (toMain, fromVC)   <- U.newChan -- channel end points for vc instance
-    (toVC,   fromMain) <- U.newChan -- channel end points for main solver
-
+solveVerbose :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
+solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
+  do (toMain, fromVC)             <- U.newChan numVC
+     (toVC,   fromMain)           <- U.newChan numVC
+     (wcRequest, wcResponse)      <- U.newChan (numProducers * 2)
+     (resultsIn, finishedResults) <- U.newChan (numProducers * 2)
 
   -- init the worker thread
-    let vcChans   = VCChannels   $ pure (fromMain, toMain)
-        mainChans = MainChannels $ pure (fromVC, toVC)
-    tid <- initVCWorker conf vcChans
+     let vcChans     = VCChannels     $ pure (fromMain, toMain)
+         mainChans   = MainChannels   $ pure (fromVC, toVC)
+         workChans   = WorkChannels   $ pure (wcRequest, wcResponse)
+         resultChans = ResultChannels $ pure (resultsIn, finishedResults)
+         startState  = mempty{ vcChans=vcChans, mainChans=mainChans
+                             , workChans=workChans, resultChans=resultChans
+                             }
 
-    -- kick off
-    results <- T.runSMTWith T.z3{T.verbose=True} $
-      do (il, st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ toIL i
-         C.query $
-           runSolverWith runStdoutLoggingT st{ vcChans = vcChans
-                                             , mainChans = mainChans
-                                             } $
-           findVCore il >>= logThenPass "Core: " >>= removeChoices >> solution
-    killThread tid
-    return  results
+         -- This is our "main" thread, we're going to reduce to a variational
+         -- core and spawn producers. The producers will block on a work channel
+         -- while this thread continues to solve, thereby populating the work
+         -- channel.
+         runWorkers = do
+           S.runSMTWith S.z3 $ do
+             (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+             let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
+             -- spawn producers
+             _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
+             -- now continue to solver thereby placing work on the channel
+             C.query $
+               runSolverWith runStdoutLoggingT st $
+               findVCore il >>= removeChoices >> solution
+
+         accumulateResults = mconcat <$> U.getChanContents finishedResults
+
+     tid <- initVCWorker conf vcChans
+
+     -- kick off
+     (_, results) <- runWorkers `A.concurrently` accumulateResults
+     killThread tid
+     return results
 
 -- TODO runNoLogging
-solve :: Proposition -> Maybe VariantContext -> IO (Result, State)
-solve  i (fromMaybe true -> conf) = do
-    (toMain, fromVC)   <- U.newChan
-    (toVC,   fromMain) <- U.newChan
+solve :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
+solve  i (fromMaybe true -> conf) (numProducers, numVC) =
+  do (toMain, fromVC)             <- U.newChan numVC
+     (toVC,   fromMain)           <- U.newChan numVC
+     (wcRequest, wcResponse)      <- U.newChan (numProducers * 2)
+     (resultsIn, finishedResults) <- U.newChan (numProducers * 2)
 
   -- init the worker thread
-    let vcChans   = VCChannels   $ pure (fromMain, toMain)
-        mainChans = MainChannels $ pure (fromVC, toVC)
-    tid <- initVCWorker conf vcChans
+     let vcChans     = VCChannels     $ pure (fromMain, toMain)
+         mainChans   = MainChannels   $ pure (fromVC, toVC)
+         workChans   = WorkChannels   $ pure (wcRequest, wcResponse)
+         resultChans = ResultChannels $ pure (resultsIn, finishedResults)
+         startState  = mempty{ vcChans=vcChans, mainChans=mainChans
+                             , workChans=workChans, resultChans=resultChans
+                             }
 
-    -- kick off
-    results <- T.runSMTWith T.z3 $
-      do (il, st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ toIL i
-         C.query $
-           runSolverWith runStdoutLoggingT st{ vcChans = vcChans
-                                             , mainChans = mainChans
-                                             } $
-           findVCore il >>= logThenPass "Core: " >>= removeChoices >> solution
-    killThread tid
-    return  results
+         -- This is our "main" thread, we're going to reduce to a variational
+         -- core and spawn producers. The producers will block on a work channel
+         -- while this thread continues to solve, thereby populating the work
+         -- channel.
+         runWorkers = do
+           S.runSMTWith S.z3 $ do
+             (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+             let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
+             -- spawn producers
+             _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
+             -- now continue to solver thereby placing work on the channel
+             C.query $
+               runSolverWith runStdoutLoggingT st $
+               findVCore il >>= removeChoices >> solution
+
+         accumulateResults = mconcat <$> U.getChanContents finishedResults
+
+     tid <- initVCWorker conf vcChans
+
+     -- kick off
+     (_, results) <- runWorkers `A.concurrently` accumulateResults
+     killThread tid
+     return results
 
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
 solveForCoreVerbose  i (fromMaybe true -> conf) = do
@@ -146,11 +199,32 @@ solveForCoreVerbose  i (fromMaybe true -> conf) = do
               logWith "Is Core Unit: " (isUnit core)
               return core
 
-satVerbose :: Proposition -> Maybe VariantContext -> IO Result
-satVerbose = (fmap fst .) <$> solveVerbose
+satVerbose :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
+satVerbose = solveVerbose
 
-sat :: Proposition -> Maybe VariantContext -> IO Result
-sat = (fmap fst .) <$> solve
+sat :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
+sat = solve
+
+------------------------------ Async Helpers -----------------------------------
+-- | season the solver, that is prepare it for async workloads
+type Seasoning a = T.SymbolicT IO (a, State)
+
+-- | Producers actually produce two things: 1 they produce requests to other
+-- produces when a new choice is found to solve a variant. 2 they produce
+-- asynchronous results on the result channel
+-- producer :: PreSolver (LoggingT T.Symbolic) (IL, State) -> Int -> IO Int
+producer :: Seasoning a -> Int -> IO ()
+producer seasoning tid = forever $
+  do T.runSMTWith T.z3 $
+       -- prepare the solver environment
+      do (_,st) <- seasoning
+         C.query $
+           runSolverWith runStdoutLoggingT st $
+           do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
+              C.io $ putStrLn $ "[Thread] " ++ show tid ++ " waiting for requests"
+              continue <- liftIO $ U.readChan requests
+              logInThread tid "Read a request, lets go"
+              continue
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -175,8 +249,16 @@ type ToVC   = U.InChan  (Dim, ShouldNegate) -- the reader side, a dim and flag
 type FromMain = U.OutChan (Dim, ShouldNegate)
 type ToMain   = U.InChan Bool
 
-newtype VCChannels    = VCChannels   { getVcChans :: Maybe (FromMain, ToMain)}
-newtype MainChannels  = MainChannels { getMainChans :: Maybe (FromVC, ToVC)}
+type WorkChanIn  = U.InChan  (Solver ())
+type WorkChanOut = U.OutChan (Solver ())
+
+type ToResultChan   = U.InChan  Result
+type FromResultChan = U.OutChan Result
+
+newtype VCChannels     = VCChannels     { getVcChans     :: Maybe (FromMain    , ToMain         ) }
+newtype MainChannels   = MainChannels   { getMainChans   :: Maybe (FromVC      , ToVC           ) }
+newtype WorkChannels   = WorkChannels   { getWorkChans   :: Maybe (WorkChanIn  , WorkChanOut    ) }
+newtype ResultChannels = ResultChannels { getResultChans :: Maybe (ToResultChan, FromResultChan ) }
 
 class IxStorable ix where
   type Container ix :: * -> *
@@ -252,15 +334,17 @@ instance Monoid    SVariantContext where mempty = true
 -- constant time _for every_ choice, hence we want to make that constant factor
 -- as small as possible
 data State = State
-    { result     :: Result
-    , vConfig    :: Maybe VariantContext    -- the formula representation of the config
-    , config     :: Context                 -- a map or set representation of the config
-    , ints       :: Ints
-    , doubles    :: Doubles
-    , bools      :: Bools
-    , dimensions :: Dimensions
-    , vcChans    :: VCChannels
-    , mainChans  :: MainChannels
+    { result      :: Result
+    , vConfig     :: Maybe VariantContext    -- the formula representation of the config
+    , config      :: Context                 -- a map or set representation of the config
+    , ints        :: Ints
+    , doubles     :: Doubles
+    , bools       :: Bools
+    , dimensions  :: Dimensions
+    , vcChans     :: VCChannels
+    , mainChans   :: MainChannels
+    , workChans   :: WorkChannels
+    , resultChans :: ResultChannels
     }
 
 instance Show State where
@@ -287,22 +371,31 @@ instance Semigroup State where
                  , bools      = bools   a <> bools   b
                  , dimensions = dimensions a <> dimensions b
                  , vcChans    = VCChannels $
-                                (getVcChans $ vcChans a) <|> (getVcChans $ vcChans b)
+                                getVcChans (vcChans a) <|>
+                                getVcChans (vcChans b)
                  , mainChans  = MainChannels $
-                                (getMainChans $ mainChans a) <|> (getMainChans $ mainChans b)
-
+                                getMainChans (mainChans a) <|>
+                                getMainChans (mainChans b)
+                 , workChans  = WorkChannels $
+                                getWorkChans (workChans a) <|>
+                                getWorkChans (workChans b)
+                 , resultChans = ResultChannels $
+                                 getResultChans (resultChans a) <|>
+                                 getResultChans (resultChans b)
                  }
 
 instance Monoid State where
-  mempty = State{ result     = mempty
-                , config     = mempty
-                , vConfig    = mempty
-                , ints       = mempty
-                , doubles    = mempty
-                , bools      = mempty
-                , dimensions = mempty
-                , vcChans    = VCChannels   Nothing
-                , mainChans  = MainChannels Nothing
+  mempty = State{ result      = mempty
+                , config      = mempty
+                , vConfig     = mempty
+                , ints        = mempty
+                , doubles     = mempty
+                , bools       = mempty
+                , dimensions  = mempty
+                , vcChans     = VCChannels   Nothing
+                , mainChans   = MainChannels Nothing
+                , workChans   = WorkChannels   Nothing
+                , resultChans = ResultChannels Nothing
                 }
 
 -- TODO remove the StateT dependency for ReaderT
@@ -904,10 +997,11 @@ findChoice x@(InNum Ref'{} InL{}) = error $ "An impossible case: " ++ show x
 findChoice x@(InNum Ref'{} InR{}) = error $ "An impossible case: " ++ show x
 
 
-store :: (St.MonadState State m) => Result -> m ()
+store :: (St.MonadState State io, MonadIO io) => Result -> io ()
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
-store = St.modify' . flip by . (<>)
+store r = do (results,_) <- St.gets (fromJust . getResultChans . resultChans)
+             liftIO $ U.writeChan results r
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -937,14 +1031,14 @@ resetTo s = do st <- St.get
 -- way to continue with the right alternative. Spawn two new subprocesses that
 -- process the alternatives plugging the choice hole with its respective
 -- alternatives
-alternative ::
-     ( St.MonadState State m
-     , MonadLogger m
-     , MonadIO m
-     , C.MonadQuery m
-     , Constrainable m Dim T.SBool)
-  => Dim -> m () -> m () -> m ()
-{-# SPECIALIZE alternative :: Dim -> Solver () -> Solver () -> Solver () #-}
+-- alternative ::
+--      ( St.MonadState State m
+--      , MonadLogger m
+--      , MonadIO m
+--      , C.MonadQuery m
+--      , Constrainable m Dim T.SBool)
+--   => Dim -> m () -> m () -> m ()
+alternative :: Dim -> Solver () -> Solver () -> Solver ()
 alternative dim goLeft goRight =
   do conf <- St.gets config
      case find dim conf of
@@ -961,52 +1055,56 @@ alternative dim goLeft goRight =
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
             checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
-            when checkDimTrue $
-              C.inNewAssertionStack $!
-              do log "Left Alternative"
-                 updateConfigs (bRef dim) (dim,True)
-                 goLeft
+            when checkDimTrue $ do
+              let continueLeft = C.inNewAssertionStack $
+                    do log "Left Alternative"
+                       updateConfigs (bRef dim) (dim,True)
+                       goLeft
+                  (requests,_) = fromJust . getWorkChans . workChans $ s
+              liftIO $ U.writeChan requests continueLeft
 
             -- reset for left side
             resetTo s
 
            -- right side, notice that we negate the symbolic
             checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
-            when checkDimFalse $
-              C.inNewAssertionStack $!
-              do log "Right Alternative"
-                 updateConfigs (bnot $ bRef dim) (dim,False)
-                 goRight
+            when checkDimFalse $ do
+              let continueRight = C.inNewAssertionStack $
+                    do log "Right Alternative"
+                       updateConfigs (bnot $ bRef dim) (dim,False)
+                       goRight
+                  (requests,_) = fromJust . getWorkChans . workChans $ s
+              liftIO $ U.writeChan requests continueRight
 
 
-removeChoices :: ( MonadLogger m
-                 , St.MonadState State m
-                 , SolverContext m
-                 , C.MonadQuery m
-                 , MonadIO m
-                 , T.MonadSymbolic m
-                 , Constrainable m Var IL
-                 , Constrainable m Dim T.SBool
-                 , Constrainable m (ExRefType Var) IL'
-                 ) => VarCore -> m ()
+-- removeChoices :: ( MonadLogger m
+--                  , St.MonadState State m
+--                  , SolverContext m
+--                  , C.MonadQuery m
+--                  , MonadIO m
+--                  , T.MonadSymbolic m
+--                  , Constrainable m Var IL
+--                  , Constrainable m Dim T.SBool
+--                  , Constrainable m (ExRefType Var) IL'
+--                  ) => VarCore -> m ()
   -- singleton instances
-{-# SPECIALIZE removeChoices :: VarCore -> Solver () #-}
+removeChoices :: VarCore -> Solver ()
 {-# INLINE removeChoices #-}
 removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
                                St.get >>= getResult . vConfig >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
-choose :: ( St.MonadState State m
-          , SolverContext m
-          , MonadLogger m
-          , C.MonadQuery m
-          , T.MonadSymbolic m
-          , Constrainable m (ExRefType Var) IL'
-          , Constrainable m Var IL
-          , Constrainable m Dim T.SBool) =>
-          Loc -> m ()
-{-# SPECIALIZE choose :: Loc -> Solver () #-}
+-- choose :: ( St.MonadState State m
+--           , SolverContext m
+--           , MonadLogger m
+--           , C.MonadQuery m
+--           , T.MonadSymbolic m
+--           , Constrainable m (ExRefType Var) IL'
+--           , Constrainable m Var IL
+--           , Constrainable m Dim T.SBool) =>
+--           Loc -> m ()
+choose :: Loc -> Solver ()
 choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
 choose loc =
   do
