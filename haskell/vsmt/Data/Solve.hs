@@ -80,6 +80,12 @@ findVCore = evaluate
 solution :: (St.MonadState State m, Has Result) => m Result
 solution = extract <$> St.get
 
+-- TODO make real config
+-- data SolverConfig = SolverConfig { numVC :: Int
+--                                  , numWorkers :: Int
+--                                  , numReaders :: Int
+--                                  }
+
 -- | TODO pending on server create, create a load function to handle injection
 -- | TODO reduce redundancy after config module is written
 -- to the IL type
@@ -88,6 +94,7 @@ solveVerbose  i (fromMaybe true -> conf) = do
   -- create vc handler and channels
     (toMain, fromVC)   <- U.newChan -- channel end points for vc instance
     (toVC,   fromMain) <- U.newChan -- channel end points for main solver
+
 
   -- init the worker thread
     let vcChans   = VCChannels   $ pure (fromMain, toMain)
@@ -260,14 +267,14 @@ instance Show State where
   show State{..} = mconcat $
     zipWith (\x y -> x <> "  :  " <> y <> "\n")
     ["result","vConfig","config","ints","doubles","bools","dimensions"]
-    $ [ show result -- ya hate to see it
-      , show vConfig
-      , show config
-      , show ints
-      , show doubles
-      , show bools
-      , show dimensions
-      ]
+    [ show result -- ya hate to see it
+    , show vConfig
+    , show config
+    , show ints
+    , show doubles
+    , show bools
+    , show dimensions
+    ]
 
 instance Semigroup State where
   a <> b = State { result     = let !a' = result a
@@ -596,6 +603,7 @@ toIL (RefB ref)    = cached ref
 toIL x@(OpB op (ChcB d l r)) = do logWith "Moving Op inside choice" x
                                   return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
+  -- TODO nuke these transformations
 toIL (OpBB Impl l r) = toIL (OpBB Or (OpB Not l) r)
 toIL (OpBB Eqv l r)  = toIL (OpBB And l' r')
   where l' = bnot l ||| r -- l ==> r
