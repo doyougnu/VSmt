@@ -79,7 +79,7 @@ logInThread tid msg = log logmsg
     logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
 
 logInThreadWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
-logInThreadWith tid msg value = logWith logmsg value
+logInThreadWith tid msg = logWith logmsg
   where
     logmsg :: Text.Text
     logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
@@ -199,8 +199,8 @@ solveForCoreVerbose  i (fromMaybe true -> conf) = do
               logWith "Is Core Unit: " (isUnit core)
               return core
 
-satVerbose :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
-satVerbose = solveVerbose
+satVerbose :: Proposition -> Maybe VariantContext -> IO Result
+satVerbose p v = solveVerbose p v (1,1)
 
 sat :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
 sat = solve
