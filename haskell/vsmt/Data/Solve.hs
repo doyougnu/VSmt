@@ -150,9 +150,10 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
                runSolverWith runStdoutLoggingT st $
                findVCore il >>= removeChoices
 
-         accumulateResults !acc !n = if (n :: Int) == 2
+         accumulateResults !acc !n = if (n :: Int) == 1
                                      then return acc
                                      else do r <- U.readChan finishedResults
+                                             putStrLn $ "[Accumulator] got result; n is: " ++ show n
                                              accumulateResults (r <> acc) (succ n)
 
      trace "packing second solver" $ return ()
@@ -230,18 +231,17 @@ type Seasoning = T.Symbolic (IL, State)
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
-producer :: Seasoning -> State -> Int -> IO ()
-producer seasoning _ tid = forever $
-  T.runSMTWith T.z3{T.verbose=True} $
+producer :: Seasoning -> State -> Int -> IO (a, State)
+producer seasoning _ tid = T.runSMTWith T.z3{T.verbose=True} $
   do (il, st) <- seasoning
      C.query $ runSolverWith runStdoutLoggingT st $
-       do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
-          _ <- findVCore il
-          logInThreadWith tid "State" st
-          logInThread tid "Waiting"
-          continue <- liftIO $ U.readChan requests
-          logInThread tid "Read a request, lets go"
-          continue
+       do _ <- findVCore il
+          forever $ do
+            (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
+            logInThread tid "Waiting"
+            continue <- liftIO $ U.readChan requests
+            logInThread tid "Read a request, lets go"
+            continue
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -529,20 +529,6 @@ instance (Monad m, T.MonadSymbolic m) =>
                       Nothing -> do newSym <- T.sBool (Text.unpack ref)
                                     St.modify' (`by` add ref newSym)
                                     return (Ref newSym)
-
-
-instance (MonadLogger m, Monad m, T.MonadSymbolic m) =>
-  Constrainable (PreSolver m) Dim T.SBool where
-  cached d = do
-    -- we write this one by hand
-    ds <- St.gets dimensions
-    case find d ds of
-      Just x -> return x
-      Nothing -> do
-        let ref = Text.unpack $ getDim d
-        newSym <- T.sBool  ref
-        St.modify' (`by` add d newSym)
-        return newSym
 
 
 instance (Monad m, T.MonadSymbolic m) =>
@@ -1071,7 +1057,7 @@ alternative dim goLeft goRight =
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
-            trace ("reading for dim true") $ return ()
+            log "Reading dim for true"
             checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
             when checkDimTrue $ do
               let continueLeft = C.inNewAssertionStack $
@@ -1079,14 +1065,14 @@ alternative dim goLeft goRight =
                        updateConfigs (bRef dim) (dim,True)
                        goLeft
                   (requests,_) = fromJust . getWorkChans . workChans $ s
-              trace ("writing to go left") $ return ()
+              log "Writing to go left"
               liftIO $ U.writeChan requests continueLeft
 
             -- reset for left side
             resetTo s
 
            -- right side, notice that we negate the symbolic
-            trace ("reading for dim false") $ return ()
+            log "Reading dim for false"
             checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
             when checkDimFalse $ do
               let continueRight = C.inNewAssertionStack $
@@ -1095,7 +1081,7 @@ alternative dim goLeft goRight =
                        goRight
                   (requests,_) = fromJust . getWorkChans . workChans $ s
 
-              trace ("writing to go right") $ return ()
+              log "Writing to continue right"
               liftIO $ U.writeChan requests continueRight
 
 
@@ -1163,22 +1149,35 @@ initVCWorker :: VariantContext -> VCChannels -> IO ThreadId
 initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
   forkIO $
   T.runSMT $
-  do (context,_) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool vc
+  -- TODO move this into query mode the caching is broken in symbolic mode
+  do (context,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool vc
      T.constrain context
-     C.query $
-       do forever $
-            C.inNewAssertionStack $
-            do -- catch a dimension
-              (d, shouldNegate) <- C.io $ U.readChan fromMain
+     C.query $ let loop dims = C.inNewAssertionStack $
+                     do C.io $ putStrLn "[VC] Waiting"
+                        C.io $ putStrLn $ "[VC] Context was: " ++ show vc
+                        x@(d, shouldNegate) <- C.io $ U.readChan fromMain
+                        C.io $ putStrLn $ "[VC] got a request with" ++ show x
 
-              -- constrain the symbolic dim, checksat and return a value
-              let textDim = Text.unpack . getDim $ d
-              sD <- T.label textDim <$> C.freshVar textDim
-              T.constrain $ if shouldNegate then bnot sD else sD
+                        -- make sure that we aren't sending duplicates to the solver
+                        (sD, newDims) <- case Map.lookup d dims of
+                                           Just v  -> return (v, dims)
+                                           Nothing -> do let textDim = Text.unpack . getDim $ d
+                                                         sD' <- T.label textDim <$> C.freshVar textDim
+                                                         return (sD', Map.insert d sD' dims)
 
-              C.checkSat >>= C.io . \case
-                C.Sat -> U.writeChan toMain True
-                _     -> U.writeChan toMain False
+                        T.constrain $ if shouldNegate then bnot sD else sD
+
+                        -- v <- C.getValue sD
+
+                        C.checkSat >>= C.io . \case
+                          C.Sat -> do C.io $ putStrLn "[VC] Writing True"
+                                      U.writeChan toMain True
+                          _     -> do C.io $ putStrLn "[VC] writing False"; U.writeChan toMain False
+
+                        -- recur infinitely
+                        loop newDims
+     -- get started
+               in loop (dimensions st)
 
  -- this can never happen and even if it does we want to stop
 initVCWorker _ _ = error "passed no channels to initVCWorker!"
