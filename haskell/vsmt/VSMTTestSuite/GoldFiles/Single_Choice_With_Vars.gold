@@ -1,6 +1,8 @@
 =: Model := 
-Aleft   -->   (ite AA (True :: Bool) Undefined)
-Aright   -->   (ite ~AA (True :: Bool) Undefined)
+Aleft   -->   (ite AA (False :: Bool) Undefined)
+Aright   -->   (ite ~AA (False :: Bool) Undefined)
+two   -->   (ite ~AA (False :: Bool) (ite AA (False :: Bool) Undefined))
+one   -->   (ite ~AA (True :: Bool) (ite AA (True :: Bool) Undefined))
 
 =: Sat_Model := 
 (~AA or AA)

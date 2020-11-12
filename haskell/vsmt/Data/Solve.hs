@@ -39,7 +39,6 @@ import           Control.Monad.Logger                  (LoggingT,
                                                         MonadLogger (..),
                                                         NoLoggingT, logDebug,
                                                         runStdoutLoggingT)
--- import           Control.Monad.Reader                  (local, MonadReader(..))
 import qualified Control.Monad.State.Strict            as St (MonadState,
                                                               StateT, get, gets,
                                                               modify', put,
@@ -219,7 +218,7 @@ solveForCoreVerbose  i (fromMaybe true -> conf) = do
               return core
 
 satVerbose :: Proposition -> Maybe VariantContext -> IO Result
-satVerbose p v = trace "running solve verbose" $ solveVerbose p v (10,10)
+satVerbose p v = trace "running solve verbose" $ solveVerbose p v (1,10)
 
 sat :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
 sat = solve
@@ -234,9 +233,11 @@ type Seasoning = T.Symbolic (IL, State)
 producer :: Seasoning -> Int -> IO ()
 producer seasoning tid = forever $
   T.runSMTWith T.z3{T.verbose=True} $ do
-  (_, st) <- seasoning --throw away the il, the main thread will do compute it
+  (il, st) <- seasoning --throw away the il, the main thread will do compute it
   C.query $ runSolverWith runStdoutLoggingT st $
     do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
+       C.io $ putStrLn $ "IL" ++ show il
+       C.io $ putStrLn $ "State" ++ show st
        C.io $ putStrLn $ "[Thread] " ++ show tid ++ " waiting for requests"
        trace ("[Thread] " ++ show tid ++ " waiting for requests") $ return ()
        continue <- liftIO $ U.readChan requests
