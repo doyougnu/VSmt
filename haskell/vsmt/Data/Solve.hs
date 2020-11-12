@@ -144,7 +144,7 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
              -- mapConcurrently is to wait for results. We only know that a max
              -- of 2^(# unique dimensions) is the max, but the user may only
              -- want a subset, thus we can't wait for them to finish.
-             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning) [1..numProducers]
+             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning st) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
@@ -230,19 +230,18 @@ type Seasoning = T.Symbolic (IL, State)
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
-producer :: Seasoning -> Int -> IO ()
-producer seasoning tid = forever $
-  T.runSMTWith T.z3{T.verbose=True} $ do
-  (il, st) <- seasoning --throw away the il, the main thread will do compute it
-  C.query $ runSolverWith runStdoutLoggingT st $
-    do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
-       C.io $ putStrLn $ "IL" ++ show il
-       C.io $ putStrLn $ "State" ++ show st
-       C.io $ putStrLn $ "[Thread] " ++ show tid ++ " waiting for requests"
-       trace ("[Thread] " ++ show tid ++ " waiting for requests") $ return ()
-       continue <- liftIO $ U.readChan requests
-       logInThread tid "Read a request, lets go"
-       continue
+producer :: Seasoning -> State -> Int -> IO ()
+producer seasoning _ tid = forever $
+  T.runSMTWith T.z3{T.verbose=True} $
+  do (il, st) <- seasoning
+     C.query $ runSolverWith runStdoutLoggingT st $
+       do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
+          _ <- findVCore il
+          logInThreadWith tid "State" st
+          logInThread tid "Waiting"
+          continue <- liftIO $ U.readChan requests
+          logInThread tid "Read a request, lets go"
+          continue
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -897,8 +896,8 @@ evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
 evaluate (BBOp And l Unit)      = evaluate l
 evaluate (BBOp And Unit r)      = evaluate r
-evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; evaluate l
-evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; evaluate r
+evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; logWith "evalL " x; evaluate l
+evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; logWith "eval'ing R" x; evaluate r
 evaluate x@(IBOp op l r)        =
   logWith "Found relation" x >>
   let l' = accumulate' l
