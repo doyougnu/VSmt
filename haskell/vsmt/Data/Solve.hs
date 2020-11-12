@@ -27,32 +27,38 @@
 
 module Data.Solve where
 
-import           Control.Applicative           ((<|>))
-import           Control.Concurrent            (ThreadId, forkIO, killThread)
+import           Control.Applicative                   ((<|>))
+import           Control.Concurrent                    (ThreadId, forkIO,
+                                                        killThread)
+import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
-import           Control.Monad                 (forever, when)
-import           Control.Monad.Except          (MonadError)
-import           Control.Monad.IO.Class        (liftIO)
-import           Control.Monad.Logger          (LoggingT, MonadLogger (..),
-                                                NoLoggingT, logDebug,
-                                                runStdoutLoggingT)
-import qualified Control.Monad.State.Strict    as St (MonadState, StateT, get,
-                                                      gets, modify', put,
-                                                      runStateT)
-import qualified Control.Concurrent.Async      as A
-import           Control.Monad.Trans           (MonadIO, MonadTrans, lift)
+import           Control.Monad                         (forever, when)
+import           Control.Monad.Except                  (MonadError)
+import           Control.Monad.IO.Class                (liftIO)
+import           Control.Monad.Logger                  (LoggingT,
+                                                        MonadLogger (..),
+                                                        NoLoggingT, logDebug,
+                                                        runStdoutLoggingT)
+-- import           Control.Monad.Reader                  (local, MonadReader(..))
+import qualified Control.Monad.State.Strict            as St (MonadState,
+                                                              StateT, get, gets,
+                                                              modify', put,
+                                                              runStateT)
+import           Control.Monad.Trans                   (MonadIO, MonadTrans,
+                                                        lift)
 import           Data.Core.Pretty
 import           Data.Core.Result
 import           Data.Core.Types
-import qualified Data.HashMap.Strict           as Map
-import           Data.Maybe                    (fromJust, fromMaybe)
-import qualified Data.SBV                      as S
-import           Data.SBV.Internals            (SolverContext (..))
-import qualified Data.SBV.Trans                as T
-import qualified Data.SBV.Trans.Control        as C
-import qualified Data.Text                     as Text
-import           Prelude                       hiding (EQ, GT, LT, log)
+import qualified Data.HashMap.Strict                   as Map
+import           Data.Maybe                            (fromJust, fromMaybe)
+-- import qualified Data.SBV                              as S
+import qualified Data.SBV.Internals                    as I
+import qualified Data.SBV.Trans                        as T
+import qualified Data.SBV.Trans.Control                as C
+import qualified Data.Text                             as Text
+import           Prelude                               hiding (EQ, GT, LT, log)
 
+import           Debug.Trace                           (trace)
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
@@ -112,6 +118,7 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
      (toVC,   fromMain)           <- U.newChan numVC
      (wcRequest, wcResponse)      <- U.newChan (numProducers * 2)
      (resultsIn, finishedResults) <- U.newChan (numProducers * 2)
+     trace "starting" $ return ()
 
   -- init the worker thread
      let vcChans     = VCChannels     $ pure (fromMain, toMain)
@@ -127,22 +134,34 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
          -- while this thread continues to solve, thereby populating the work
          -- channel.
          runWorkers = do
-           S.runSMTWith S.z3 $ do
+           T.runSMTWith T.z3{T.verbose=True} $ do
+             trace "preconditioning in main" $ return ()
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
-             -- spawn producers
-             _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
+             -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
+             -- seasoning <- T.symbolicEnv
+             let seasoning = runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+             -- spawn producers, we fork a thread to spawn producers here to
+             -- prevent this call from blocking. The default behavior of
+             -- mapConcurrently is to wait for results. We only know that a max
+             -- of 2^(# unique dimensions) is the max, but the user may only
+             -- want a subset, thus we can't wait for them to finish.
+             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
-               findVCore il >>= removeChoices >> solution
+               findVCore il >>= removeChoices
 
-         accumulateResults = mconcat <$> U.getChanContents finishedResults
+         accumulateResults !acc !n = if (n :: Int) == 2
+                                     then return acc
+                                     else do r <- U.readChan finishedResults
+                                             accumulateResults (r <> acc) (succ n)
 
+     trace "packing second solver" $ return ()
      tid <- initVCWorker conf vcChans
 
      -- kick off
-     (_, results) <- runWorkers `A.concurrently` accumulateResults
+     trace "kicking off" $ return ()
+     (_,results)<- runWorkers `A.concurrently` accumulateResults mempty 0
      killThread tid
      return results
 
@@ -168,11 +187,11 @@ solve  i (fromMaybe true -> conf) (numProducers, numVC) =
          -- while this thread continues to solve, thereby populating the work
          -- channel.
          runWorkers = do
-           S.runSMTWith S.z3 $ do
+           T.runSMTWith T.z3 $ do
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
+             -- let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
              -- spawn producers
-             _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
+             -- _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
@@ -200,31 +219,29 @@ solveForCoreVerbose  i (fromMaybe true -> conf) = do
               return core
 
 satVerbose :: Proposition -> Maybe VariantContext -> IO Result
-satVerbose p v = solveVerbose p v (1,1)
+satVerbose p v = trace "running solve verbose" $ solveVerbose p v (10,10)
 
 sat :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
 sat = solve
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
-type Seasoning a = T.SymbolicT IO (a, State)
+type Seasoning = T.Symbolic (IL, State)
 
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
--- producer :: PreSolver (LoggingT T.Symbolic) (IL, State) -> Int -> IO Int
-producer :: Seasoning a -> Int -> IO ()
+producer :: Seasoning -> Int -> IO ()
 producer seasoning tid = forever $
-  do T.runSMTWith T.z3 $
-       -- prepare the solver environment
-      do (_,st) <- seasoning
-         C.query $
-           runSolverWith runStdoutLoggingT st $
-           do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
-              C.io $ putStrLn $ "[Thread] " ++ show tid ++ " waiting for requests"
-              continue <- liftIO $ U.readChan requests
-              logInThread tid "Read a request, lets go"
-              continue
+  T.runSMTWith T.z3{T.verbose=True} $ do
+  (_, st) <- seasoning --throw away the il, the main thread will do compute it
+  C.query $ runSolverWith runStdoutLoggingT st $
+    do (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
+       C.io $ putStrLn $ "[Thread] " ++ show tid ++ " waiting for requests"
+       trace ("[Thread] " ++ show tid ++ " waiting for requests") $ return ()
+       continue <- liftIO $ U.readChan requests
+       logInThread tid "Read a request, lets go"
+       continue
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -319,7 +336,7 @@ instance Has (Maybe VariantContext) where extract     = vConfig
                                           wrap    d w = w{vConfig=d}
 
 
-type SVariantContext = S.SBool
+type SVariantContext = T.SBool
 instance Semigroup SVariantContext where (<>) = (&&&)
 instance Monoid    SVariantContext where mempty = true
 
@@ -410,31 +427,31 @@ newtype SolverT m a = SolverT { runSolverT :: St.StateT State m a }
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
-instance (Monad m, SolverContext m) => SolverContext (SolverT m) where
+instance (Monad m, I.SolverContext m) => I.SolverContext (SolverT m) where
   constrain       = lift . T.constrain
   softConstrain   = lift . T.softConstrain
-  setOption       = lift . S.setOption
+  setOption       = lift . T.setOption
   namedConstraint = (lift .) . T.namedConstraint
   addAxiom        = (lift .) . T.addAxiom
-  contextState    = lift contextState
+  contextState    = lift I.contextState
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
-instance (Monad m, SolverContext m) => SolverContext (LoggingT m) where
+instance (Monad m, I.SolverContext m) => I.SolverContext (LoggingT m) where
   constrain       = lift . T.constrain
   softConstrain   = lift . T.softConstrain
-  setOption       = lift . S.setOption
+  setOption       = lift . T.setOption
   namedConstraint = (lift .) . T.namedConstraint
   addAxiom        = (lift .) . T.addAxiom
-  contextState    = lift contextState
+  contextState    = lift I.contextState
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
-instance (Monad m, SolverContext m) => SolverContext (NoLoggingT m) where
+instance (Monad m, I.SolverContext m) => I.SolverContext (NoLoggingT m) where
   constrain       = lift . T.constrain
   softConstrain   = lift . T.softConstrain
-  setOption       = lift . S.setOption
+  setOption       = lift . T.setOption
   namedConstraint = (lift .) . T.namedConstraint
   addAxiom        = (lift .) . T.addAxiom
-  contextState    = lift contextState
+  contextState    = lift I.contextState
   constrainWithAttribute = (lift .) . T.constrainWithAttribute
 
 
@@ -678,7 +695,7 @@ data IL = Unit
     deriving Show
 
 data IL' = Ref' NRef
-    | IOp N_N IL'
+    | IOp  N_N IL'
     | IIOp NN_N IL' IL'
     | Chc' Dim NExpression NExpression
     deriving Show
@@ -755,12 +772,12 @@ accumulate (BOp Not (Ref r))           = Ref $! bnot r
 accumulate (BBOp And (Ref l) (Ref r))  = Ref $! l &&& r
 accumulate (BBOp Or  (Ref l) (Ref r))  = Ref $! l ||| r
   -- numerics
-accumulate (IBOp LT (Ref' l) (Ref' r))  = Ref $! l .< r
-accumulate (IBOp LTE (Ref' l) (Ref' r)) = Ref $! l .<= r
-accumulate (IBOp EQ (Ref' l) (Ref' r))  = Ref $! l .== r
-accumulate (IBOp NEQ (Ref' l) (Ref' r)) = Ref $! l ./= r
-accumulate (IBOp GT (Ref' l) (Ref' r))  = Ref $! l .>  r
-accumulate (IBOp GTE (Ref' l) (Ref' r)) = Ref $! l .>= r
+accumulate (IBOp LT (Ref' l) (Ref' r))  = Ref $! l T..< r
+accumulate (IBOp LTE (Ref' l) (Ref' r)) = Ref $! l T..<= r
+accumulate (IBOp EQ (Ref' l) (Ref' r))  = Ref $! l T..== r
+accumulate (IBOp NEQ (Ref' l) (Ref' r)) = Ref $! l T../= r
+accumulate (IBOp GT (Ref' l) (Ref' r))  = Ref $! l T..>  r
+accumulate (IBOp GTE (Ref' l) (Ref' r)) = Ref $! l T..>= r
   -- choices
 accumulate x@(BBOp _ Chc {} Chc {})    = x
 accumulate x@(BBOp _ (Ref _) Chc {})   = x
@@ -832,8 +849,8 @@ accumulate' (IIOp o l r) = let l'  = accumulate' l
                                else res
 
 -------------------------------- Evaluation -----------------------------------
-toSolver :: (Monad m, SolverContext m) => T.SBool -> m VarCore
-toSolver a = do constrain a; return $! intoCore Unit
+toSolver :: (Monad m, I.SolverContext m) => T.SBool -> m VarCore
+toSolver a = do T.constrain a; return $! intoCore Unit
 
 isValue :: IL -> Bool
 isValue Unit    = True
@@ -850,7 +867,7 @@ isValue' _        = False
 evaluate :: ( St.MonadState a m
             , MonadLogger m
             , Show a
-            , SolverContext m) =>
+            , I.SolverContext m) =>
             IL -> m VarCore
   -- computation rules
 evaluate Unit     = do s <- St.get
@@ -1054,6 +1071,7 @@ alternative dim goLeft goRight =
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
+            trace ("reading for dim true") $ return ()
             checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
             when checkDimTrue $ do
               let continueLeft = C.inNewAssertionStack $
@@ -1061,12 +1079,14 @@ alternative dim goLeft goRight =
                        updateConfigs (bRef dim) (dim,True)
                        goLeft
                   (requests,_) = fromJust . getWorkChans . workChans $ s
+              trace ("writing to go left") $ return ()
               liftIO $ U.writeChan requests continueLeft
 
             -- reset for left side
             resetTo s
 
            -- right side, notice that we negate the symbolic
+            trace ("reading for dim false") $ return ()
             checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
             when checkDimFalse $ do
               let continueRight = C.inNewAssertionStack $
@@ -1074,12 +1094,14 @@ alternative dim goLeft goRight =
                        updateConfigs (bnot $ bRef dim) (dim,False)
                        goRight
                   (requests,_) = fromJust . getWorkChans . workChans $ s
+
+              trace ("writing to go right") $ return ()
               liftIO $ U.writeChan requests continueRight
 
 
 -- removeChoices :: ( MonadLogger m
 --                  , St.MonadState State m
---                  , SolverContext m
+--                  , I.SolverContext m
 --                  , C.MonadQuery m
 --                  , MonadIO m
 --                  , T.MonadSymbolic m
@@ -1096,7 +1118,7 @@ removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
 -- choose :: ( St.MonadState State m
---           , SolverContext m
+--           , I.SolverContext m
 --           , MonadLogger m
 --           , C.MonadQuery m
 --           , T.MonadSymbolic m
@@ -1140,9 +1162,9 @@ choose loc =
 initVCWorker :: VariantContext -> VCChannels -> IO ThreadId
 initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
   forkIO $
-  S.runSMT $
+  T.runSMT $
   do (context,_) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool vc
-     S.constrain context
+     T.constrain context
      C.query $
        do forever $
             C.inNewAssertionStack $
@@ -1152,7 +1174,7 @@ initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
               -- constrain the symbolic dim, checksat and return a value
               let textDim = Text.unpack . getDim $ d
               sD <- T.label textDim <$> C.freshVar textDim
-              T.constrain $ if shouldNegate then (bnot sD) else sD
+              T.constrain $ if shouldNegate then bnot sD else sD
 
               C.checkSat >>= C.io . \case
                 C.Sat -> U.writeChan toMain True
@@ -1161,11 +1183,11 @@ initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
  -- this can never happen and even if it does we want to stop
 initVCWorker _ _ = error "passed no channels to initVCWorker!"
 
-contextToSBool :: VariantContext -> PreSolver (LoggingT S.Symbolic) T.SBool
+contextToSBool :: VariantContext -> PreSolver (LoggingT T.Symbolic) T.SBool
 contextToSBool (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
-        go (LitB True)  = return S.sTrue
-        go (LitB False) = return S.sFalse
+        go (LitB True)  = return T.sTrue
+        go (LitB False) = return T.sFalse
         go (RefB d)     = cached d
         go (OpB Not e) = bnot <$> go e
         go (OpBB op l r) = do l' <- go l
@@ -1198,6 +1220,6 @@ instance Pretty IL' where
   pretty (Ref' b)     = pretty b
   pretty (IOp o x@(Ref' _))  = pretty o <> pretty x
   pretty (IOp Abs e)  = between "|" (pretty e) "|"
-  pretty (IOp o e)  = pretty o <> parens (pretty e)
+  pretty (IOp o e)    = pretty o <> parens (pretty e)
   pretty (IIOp o l r) = parens $ mconcat [pretty l, " ", pretty o, " ", pretty r]
   pretty (Chc' d l r) = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"
