@@ -17,12 +17,31 @@
 
 ** Performance
 
-*** Store Ref (SRef SVal) in the state maps instead of the SBV a
+*** TODO Store Ref (SRef SVal) in the state maps instead of the SBV a
     the idea here is to avoid lots of pack and unpacking of these values. The
     average case has is way more lookups then generations, so when we lookup we
     don't want any extra actions
 
+*** NEXT Utilize the reader monad in sbv to season the solver
+    - Note taken on [2020-11-12 Thu 18:16] \\
+      With the parallel version of vsmt we have to season the solver with the
+      variational core. This means that we actually compute ~n~ ~IL~'s where ~n~
+      is the number of threads. This is likely a small price to pay for the
+      parallelism but could certainly be reduced. SBVs ~SymbolicT~ is a reader
+      monad over ~IO~ but sbv doesn't export the ~ReaderT~ type class instance,
+      so in the main thread we can season, then grab the state with
+      ~T.symbolicEnv~ but then there is no way for me to call ~local~ over the
+      thread instances and thus no way to replace the thread states with the
+      seasoned state. Hence, we are forced recompute the state for each thread
+      with a call with ~toIL~.
+
 *** TODO Add serialization for incremental incremental vsmt (may add this to sbv)
+
+*** TODO Use Earley to parse expressions
+
+    - Note taken on [2020-11-12 Thu 14:32] \\
+      Megaparsec is great but can have memory blow up if the parser isn't exactly right, Early only parses context free grammars but you never have backtracking so it can be much much faster
+
 
 *** DONE Remove CV's from result maps and just construct the string to represent smtlib program
     CLOSED: [2020-09-16 Wed 14:41]
@@ -37,11 +56,6 @@
     (assert (== x 2))
     #+end_example
     then do we perform propagation for x -> 2?
-
-*** Use Earley to parse expressions
-
-    - Note taken on [2020-11-12 Thu 14:32] \\
-      Megaparsec is great but can have memory blow up if the parser isn't exactly right, Early only parses context free grammars but you never have backtracking so it can be much much faster
 
 ** DONE Result module
    CLOSED: [2020-09-03 Thu 18:51]
