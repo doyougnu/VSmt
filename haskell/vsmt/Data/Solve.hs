@@ -31,7 +31,7 @@ import           Control.Applicative                   ((<|>))
 import           Control.Concurrent                    (forkIO, killThread)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
-import           Control.Monad                         (forever, when)
+import           Control.Monad                         (forever, when, void)
 import           Control.Monad.Except                  (MonadError)
 import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Logger                  (LoggingT,
@@ -1149,41 +1149,25 @@ choose loc =
 initVCWorker :: VariantContext -> VCChannels -> IO ()
 initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
   T.runSMTWith T.z3{T.verbose=True} $ do
+  -- season the solver
   (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
   T.constrain b
+  -- enter query mode
   C.query $
-     do let loop dims = do C.io $ putStrLn "[VC] Waiting"
-                           C.io $ putStrLn $ "[VC] Context was: " ++ show vc
-                           x@(d, shouldNegate) <- C.io $ U.readChan fromMain
-                           newDims <- C.inNewAssertionStack $
-                             do
-                               C.io $ putStrLn $ "[VC] got a request with" ++ show x
+  -- listen to the channel forever and check requests incrementally against the
+  -- context
+    void $
+    runSolverWith runStdoutLoggingT st $
+    forever $
+     do (d, shouldNegate) <- C.io $ U.readChan fromMain
+        C.inNewAssertionStack $
+          do sD <- cached d
+             T.constrain $ if shouldNegate then bnot sD else sD
 
-                               -- make sure that we aren't sending duplicates to the solver
-                               (sD, newDims) <- case Map.lookup d dims of
-                                                  Just v  -> C.io $ putStrLn "Seen it" >> return (v, dims)
-                                                  Nothing -> do let textDim = Text.unpack . getDim $ d
-                                                                C.io $ putStrLn "this was a new var"
-                                                                sD' <- T.label textDim <$> C.freshVar textDim
-                                                                C.io $ putStrLn $ "made the new var"  ++ show sD'
-                                                                return (sD', Map.insert d sD' dims)
+             C.checkSat >>= C.io . \case
+               C.Sat -> do U.writeChan toMain True
+               _     -> do U.writeChan toMain False
 
-                               C.io $ putStrLn $ "Got: " ++ show (sD, newDims)
-                               T.constrain $ if shouldNegate then bnot sD else sD
-
-                               C.checkSat >>= \case
-                                 C.Sat -> do C.io $ putStrLn "Getting value"
-                                             v <- C.getValue sD
-                                             C.io $ putStrLn $ "[VC] value was: " ++ show v
-                                             C.io $ putStrLn "[VC] Writing True"
-                                             C.io $ U.writeChan toMain True
-                                 _     -> do C.io $ putStrLn "[VC] writing False"; C.io $ U.writeChan toMain False
-                               return newDims
-
-                           -- recur infinitely
-                           loop newDims
-     -- get started
-        loop (dimensions st)
 
  -- this can never happen and even if it does we want to stop
 initVCWorker _ _ = error "passed no channels to initVCWorker!"

@@ -41,7 +41,7 @@ twoChoices = flip satVerbose Nothing $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 twoChoicesWithVC :: IO Result
-twoChoicesWithVC = flip satVerbose (Just $ toVariantContext $ (bRef "AA") &&& (bRef "BB")) $
+twoChoicesWithVC = flip satVerbose (Just $ toVariantContext $ (bRef "AA") &&& (bnot $ bRef "BB")) $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 -- | test to make sure the solver returns true for every variable assignment
