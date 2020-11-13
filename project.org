@@ -38,6 +38,11 @@
     #+end_example
     then do we perform propagation for x -> 2?
 
+*** Use Earley to parse expressions
+
+    - Note taken on [2020-11-12 Thu 14:32] \\
+      Megaparsec is great but can have memory blow up if the parser isn't exactly right, Early only parses context free grammars but you never have backtracking so it can be much much faster
+
 ** DONE Result module
    CLOSED: [2020-09-03 Thu 18:51]
 

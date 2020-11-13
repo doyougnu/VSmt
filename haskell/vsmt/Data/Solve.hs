@@ -28,8 +28,7 @@
 module Data.Solve where
 
 import           Control.Applicative                   ((<|>))
-import           Control.Concurrent                    (ThreadId, forkIO,
-                                                        killThread)
+import           Control.Concurrent                    (forkIO, killThread)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import           Control.Monad                         (forever, when)
@@ -57,7 +56,6 @@ import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
 import           Prelude                               hiding (EQ, GT, LT, log)
 
-import           Debug.Trace                           (trace)
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
@@ -117,7 +115,6 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
      (toVC,   fromMain)           <- U.newChan numVC
      (wcRequest, wcResponse)      <- U.newChan (numProducers * 2)
      (resultsIn, finishedResults) <- U.newChan (numProducers * 2)
-     trace "starting" $ return ()
 
   -- init the worker thread
      let vcChans     = VCChannels     $ pure (fromMain, toMain)
@@ -134,7 +131,7 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
          -- channel.
          runWorkers = do
            T.runSMTWith T.z3{T.verbose=True} $ do
-             trace "preconditioning in main" $ return ()
+             C.io $ putStrLn "preconditioning in main"
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
              -- seasoning <- T.symbolicEnv
@@ -156,13 +153,11 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
                                              putStrLn $ "[Accumulator] got result; n is: " ++ show n
                                              accumulateResults (r <> acc) (succ n)
 
-     trace "packing second solver" $ return ()
-     tid <- initVCWorker conf vcChans
+     tid <- forkIO $ initVCWorker conf vcChans
 
      -- kick off
-     trace "kicking off" $ return ()
      (_,results)<- runWorkers `A.concurrently` accumulateResults mempty 0
-     killThread tid
+     killThread tid -- if we get here we're done
      return results
 
 -- TODO runNoLogging
@@ -199,7 +194,7 @@ solve  i (fromMaybe true -> conf) (numProducers, numVC) =
 
          accumulateResults = mconcat <$> U.getChanContents finishedResults
 
-     tid <- initVCWorker conf vcChans
+     tid <- forkIO $ initVCWorker conf vcChans
 
      -- kick off
      (_, results) <- runWorkers `A.concurrently` accumulateResults
@@ -209,7 +204,7 @@ solve  i (fromMaybe true -> conf) (numProducers, numVC) =
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
 solveForCoreVerbose  i (fromMaybe true -> conf) = do
     T.runSMTWith T.z3{T.verbose=True} $
-      do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool conf
+      do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' conf
          (il, st) <- runSolverWith runStdoutLoggingT iState $ unPre $ toIL i
          C.query $ runSolverWith runStdoutLoggingT st $
            do core <- findVCore il
@@ -219,7 +214,7 @@ solveForCoreVerbose  i (fromMaybe true -> conf) = do
               return core
 
 satVerbose :: Proposition -> Maybe VariantContext -> IO Result
-satVerbose p v = trace "running solve verbose" $ solveVerbose p v (1,10)
+satVerbose p v = solveVerbose p v (1,10)
 
 sat :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
 sat = solve
@@ -549,7 +544,18 @@ instance (Monad m, T.MonadSymbolic m) =>
                        St.modify' (`by` add d newSym)
                        return $! Ref' $ SD newSym
 
-
+instance (MonadLogger m, Monad m, T.MonadSymbolic m) =>
+  Constrainable (PreSolver m) Dim T.SBool where
+  cached d = do
+    -- we write this one by hand
+    ds <- St.gets dimensions
+    case find d ds of
+      Just x -> return x
+      Nothing -> do
+        let ref = Text.unpack $ getDim d
+        newSym <- T.sBool ref
+        St.modify' (`by` add d newSym)
+        return newSym
 
 
 ----------------------------------- IL -----------------------------------------
@@ -699,18 +705,13 @@ toIL (RefB ref)    = cached ref
 toIL x@(OpB op (ChcB d l r)) = do logWith "Moving Op inside choice" x
                                   return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
-  -- TODO nuke these transformations
-toIL (OpBB Impl l r) = toIL (OpBB Or (OpB Not l) r)
-toIL (OpBB Eqv l r)  = toIL (OpBB And l' r')
-  where l' = bnot l ||| r -- l ==> r
-        r' = bnot r ||| l -- r ==> l
-toIL (OpBB XOr l r) = toIL (OpBB And l' r')
-  where l' = l ||| r
-        r' = bnot (l &&& r)
-toIL (OpBB And l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp And l' r'
-toIL (OpBB Or l r) = do l' <- toIL  l; r' <- toIL r;  return $ BBOp Or l' r'
-toIL (OpIB op l r) = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
-toIL (ChcB d l r)  = return $ Chc d l r
+toIL (OpBB Impl l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
+toIL (OpBB Eqv l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp Eqv  l' r'
+toIL (OpBB XOr l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp XOr  l' r'
+toIL (OpBB And l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp And  l' r'
+toIL (OpBB Or l r)   = do l' <- toIL l; r' <- toIL r; return $ BBOp Or   l' r'
+toIL (OpIB op l r)   = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
+toIL (ChcB d l r)    = return $ Chc d l r
 
 toIL' :: ( Constrainable m (ExRefType Var) IL'
          , MonadLogger m) =>
@@ -1145,49 +1146,79 @@ choose loc =
 
 
 --------------------------- Variant Context Helpers ----------------------------
-initVCWorker :: VariantContext -> VCChannels -> IO ThreadId
+initVCWorker :: VariantContext -> VCChannels -> IO ()
 initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
-  forkIO $
-  T.runSMT $
-  -- TODO move this into query mode the caching is broken in symbolic mode
-  do (context,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool vc
-     T.constrain context
-     C.query $ let loop dims = C.inNewAssertionStack $
-                     do C.io $ putStrLn "[VC] Waiting"
-                        C.io $ putStrLn $ "[VC] Context was: " ++ show vc
-                        x@(d, shouldNegate) <- C.io $ U.readChan fromMain
-                        C.io $ putStrLn $ "[VC] got a request with" ++ show x
+  T.runSMTWith T.z3{T.verbose=True} $ do
+  (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
+  T.constrain b
+  C.query $
+     do let loop dims = do C.io $ putStrLn "[VC] Waiting"
+                           C.io $ putStrLn $ "[VC] Context was: " ++ show vc
+                           x@(d, shouldNegate) <- C.io $ U.readChan fromMain
+                           newDims <- C.inNewAssertionStack $
+                             do
+                               C.io $ putStrLn $ "[VC] got a request with" ++ show x
 
-                        -- make sure that we aren't sending duplicates to the solver
-                        (sD, newDims) <- case Map.lookup d dims of
-                                           Just v  -> return (v, dims)
-                                           Nothing -> do let textDim = Text.unpack . getDim $ d
-                                                         sD' <- T.label textDim <$> C.freshVar textDim
-                                                         return (sD', Map.insert d sD' dims)
+                               -- make sure that we aren't sending duplicates to the solver
+                               (sD, newDims) <- case Map.lookup d dims of
+                                                  Just v  -> C.io $ putStrLn "Seen it" >> return (v, dims)
+                                                  Nothing -> do let textDim = Text.unpack . getDim $ d
+                                                                C.io $ putStrLn "this was a new var"
+                                                                sD' <- T.label textDim <$> C.freshVar textDim
+                                                                C.io $ putStrLn $ "made the new var"  ++ show sD'
+                                                                return (sD', Map.insert d sD' dims)
 
-                        T.constrain $ if shouldNegate then bnot sD else sD
+                               C.io $ putStrLn $ "Got: " ++ show (sD, newDims)
+                               T.constrain $ if shouldNegate then bnot sD else sD
 
-                        -- v <- C.getValue sD
+                               C.checkSat >>= \case
+                                 C.Sat -> do C.io $ putStrLn "Getting value"
+                                             v <- C.getValue sD
+                                             C.io $ putStrLn $ "[VC] value was: " ++ show v
+                                             C.io $ putStrLn "[VC] Writing True"
+                                             C.io $ U.writeChan toMain True
+                                 _     -> do C.io $ putStrLn "[VC] writing False"; C.io $ U.writeChan toMain False
+                               return newDims
 
-                        C.checkSat >>= C.io . \case
-                          C.Sat -> do C.io $ putStrLn "[VC] Writing True"
-                                      U.writeChan toMain True
-                          _     -> do C.io $ putStrLn "[VC] writing False"; U.writeChan toMain False
-
-                        -- recur infinitely
-                        loop newDims
+                           -- recur infinitely
+                           loop newDims
      -- get started
-               in loop (dimensions st)
+        loop (dimensions st)
 
  -- this can never happen and even if it does we want to stop
 initVCWorker _ _ = error "passed no channels to initVCWorker!"
 
-contextToSBool :: VariantContext -> PreSolver (LoggingT T.Symbolic) T.SBool
-contextToSBool (getVarFormula -> x) = go x
+contextToSBool' :: VariantContext -> PreSolver (LoggingT (T.SymbolicT IO)) T.SBool
+contextToSBool' (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
         go (LitB True)  = return T.sTrue
         go (LitB False) = return T.sFalse
         go (RefB d)     = cached d
+        go (OpB Not e) = bnot <$> go e
+        go (OpBB op l r) = do l' <- go l
+                              r' <- go r
+                              let op' = dispatch op
+                              return $ l' `op'` r'
+        go OpIB {} = error "numeric expressions are invalid in variant context"
+        go ChcB {} = error "variational expressions are invalid in variant context"
+
+        dispatch And  = (&&&)
+        dispatch Or   = (|||)
+        dispatch Impl = (==>)
+        dispatch Eqv  = (<=>)
+        dispatch XOr  = (<=>)
+
+contextToSBool :: VariantContext -> Solver T.SBool
+contextToSBool (getVarFormula -> x) = go x
+  where -- go :: Show a => Prop' a -> m T.SBool
+        go (LitB True)  = return T.sTrue
+        go (LitB False) = return T.sFalse
+        go (RefB d)     = do dims <- St.gets dimensions
+                             case Map.lookup d dims of
+                               Just b -> return b
+                               Nothing -> do newSym <- T.label (Text.unpack $ getDim d) <$> C.freshVar (Text.unpack $ getDim d)
+                                             St.modify' (`by` add d newSym)
+                                             return newSym
         go (OpB Not e) = bnot <$> go e
         go (OpBB op l r) = do l' <- go l
                               r' <- go r
