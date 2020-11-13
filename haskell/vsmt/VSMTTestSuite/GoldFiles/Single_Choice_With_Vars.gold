@@ -1,7 +1,7 @@
 =: Model := 
-Aleft   -->   (ite ~AA (False :: Bool) (ite AA (False :: Bool) Undefined))
+Aleft   -->   (ite AA (False :: Bool) Undefined)
 Aright   -->   (ite ~AA (False :: Bool) Undefined)
-two   -->   (ite ~AA (False :: Bool) (ite AA (True :: Bool) Undefined))
+two   -->   (ite ~AA (True :: Bool) (ite AA (True :: Bool) Undefined))
 one   -->   (ite ~AA (True :: Bool) (ite AA (True :: Bool) Undefined))
 
 =: Sat_Model := 

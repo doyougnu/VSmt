@@ -34,14 +34,14 @@ singletonChoiceWithVC :: IO Result
 singletonChoiceWithVC = flip satVerbose (Just $ toVariantContext (bRef "AA")) $ bChc "AA" (bRef "Aleft") (bRef "Aright")
 
 singletonChoiceWithVars :: IO Result
-singletonChoiceWithVars = flip satVerbose Nothing $ bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one" &&& bRef "two"
+singletonChoiceWithVars = flip satVerbose Nothing $ (bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one") &&& bRef "two"
 
 twoChoices :: IO Result
 twoChoices = flip satVerbose Nothing $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 twoChoicesWithVC :: IO Result
-twoChoicesWithVC = flip satVerbose (Just $ toVariantContext $ (bRef "AA") &&& (bRef "BB")) $
+twoChoicesWithVC = flip satVerbose (Just $ toVariantContext $ (bRef "AA") &&& (bnot $ bRef "BB")) $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 -- | test to make sure the solver returns true for every variable assignment
