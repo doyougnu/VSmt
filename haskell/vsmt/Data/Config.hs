@@ -19,9 +19,12 @@ import Data.Text (Text)
 import Core.Types
 
 data Settings = Settings { solver         :: Solver
-                         , optimizations  :: ![Opts]
                          , seed           :: Maybe Integer
                          , generateModels :: Bool
+                         , vcSize         :: Int
+                         , numWorkers     :: Int
+                         , numReaders     :: Int
+                         , numResults     :: Maybe Int
                          } deriving (Show,Generic)
 
 data SMTConf d a b = SMTConf { conf :: !SMTConfig
