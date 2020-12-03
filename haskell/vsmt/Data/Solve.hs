@@ -57,6 +57,8 @@ import           Data.Core.Pretty
 import           Data.Core.Result
 import           Data.Core.Types
 
+import           Data.Settings
+
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
@@ -105,11 +107,11 @@ solution = extract <$> St.get
 -- | TODO reduce redundancy after config module is written
 -- to the IL type
 solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
-  do (toMain, fromVC)             <- U.newChan numVC
-     (toVC,   fromMain)           <- U.newChan numVC
-     (wcRequest, wcResponse)      <- U.newChan (numProducers * 2)
-     (resultsIn, finishedResults) <- U.newChan (numProducers * 2)
+solveVerbose  i (fromMaybe true -> conf) Settings{..} =
+  do (toMain, fromVC)             <- U.newChan vcBufSize
+     (toVC,   fromMain)           <- U.newChan vcBufSize
+     (wcRequest, wcResponse)      <- U.newChan producerBufSize
+     (resultsIn, finishedResults) <- U.newChan producerBufSize
 
   -- init the worker thread
      let vcChans     = VCChannels     $ pure (fromMain, toMain)

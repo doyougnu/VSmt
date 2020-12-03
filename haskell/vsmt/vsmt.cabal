@@ -21,7 +21,7 @@ Extra-Source-Files: INSTALL, README.md, COPYRIGHT, CHANGES.md
 common common-settings
    default-language: Haskell2010
    ghc-options     : -Wall -O2
-   build-depends   : base >= 4.11 && < 5
+   build-depends   : base >= 4.14 && < 5
 
    if impl(ghc >= 8.10.1)
       ghc-options  : -Wunused-packages
@@ -34,7 +34,7 @@ library
                  , Data.Core.Pretty
                  , Data.Parser.Result
                  , Data.Solve
-                 , Data.Config
+                 , Data.Settings
   build-depends: base
                , bifunctors
                , containers >= 0.6.0.1
