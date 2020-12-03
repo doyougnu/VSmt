@@ -23,6 +23,7 @@
     don't want any extra actions
 
 *** NEXT Utilize the reader monad in sbv to season the solver
+    Issue: #7
     - Note taken on [2020-11-12 Thu 18:16] \\
       With the parallel version of vsmt we have to season the solver with the
       variational core. This means that we actually compute ~n~ ~IL~'s where ~n~
@@ -40,7 +41,9 @@
 *** TODO Use Earley to parse expressions
 
     - Note taken on [2020-11-12 Thu 14:32] \\
-      Megaparsec is great but can have memory blow up if the parser isn't exactly right, Early only parses context free grammars but you never have backtracking so it can be much much faster
+      Megaparsec is great but can have memory blow up if the parser isn't
+      exactly right, Early only parses context free grammars but you never have
+      backtracking so it can be much much faster
 
 
 *** DONE Remove CV's from result maps and just construct the string to represent smtlib program
