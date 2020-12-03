@@ -1,0 +1,10 @@
+-----------------------------------------------------------------------------
+-- |
+-- Module    : Data.Api
+-- Copyright : (c) Jeffrey Young
+-- License   : BSD3
+-- Maintainer: youngjef@oregonstate.edu
+-- Stability : experimental
+--
+-- Module for Api to interact with the solver
+-----------------------------------------------------------------------------

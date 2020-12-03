@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Solve
+-- Module    : Data.Config
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -14,7 +14,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE DeriveGeneric #-}
 
-module Config where
+module Data.Config where
 
 import Data.SBV.Control (SMTOption(..))
 import Data.SBV (SMTConfig(..),z3,yices,mathSAT,boolector,abc,cvc4)
@@ -37,8 +37,6 @@ data Settings = Settings { solver           :: Solver
 data SMTConf = SMTConf { conf :: !SMTConfig
                        , settings :: Settings
                        }
-
-type ReadableSMTConf = SMTConf
 
 data Solver = Z3
             | Yices

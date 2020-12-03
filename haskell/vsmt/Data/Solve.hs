@@ -31,7 +31,7 @@ import           Control.Applicative                   ((<|>))
 import           Control.Concurrent                    (forkIO, killThread)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
-import           Control.Monad                         (forever, when, void)
+import           Control.Monad                         (forever, void, when)
 import           Control.Monad.Except                  (MonadError)
 import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Logger                  (LoggingT,
@@ -44,17 +44,18 @@ import qualified Control.Monad.State.Strict            as St (MonadState,
                                                               runStateT)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
-import           Data.Core.Pretty
-import           Data.Core.Result
-import           Data.Core.Types
 import qualified Data.HashMap.Strict                   as Map
 import           Data.Maybe                            (fromJust, fromMaybe)
--- import qualified Data.SBV                              as S
 import qualified Data.SBV.Internals                    as I
 import qualified Data.SBV.Trans                        as T
 import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
 import           Prelude                               hiding (EQ, GT, LT, log)
+
+
+import           Data.Core.Pretty
+import           Data.Core.Result
+import           Data.Core.Types
 
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
@@ -103,7 +104,7 @@ solution = extract <$> St.get
 -- | TODO pending on server create, create a load function to handle injection
 -- | TODO reduce redundancy after config module is written
 -- to the IL type
-solveVerbose :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
+solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
   do (toMain, fromVC)             <- U.newChan numVC
      (toVC,   fromMain)           <- U.newChan numVC
@@ -177,22 +178,33 @@ solve  i (fromMaybe true -> conf) (numProducers, numVC) =
          -- channel.
          runProducers =
            T.runSMTWith T.z3 $ do
+             C.io $ putStrLn "preconditioning in main"
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
-             -- spawn producers
-             _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
+             -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
+             -- seasoning <- T.symbolicEnv
+             let seasoning = runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+             -- spawn producers, we fork a thread to spawn producers here to
+             -- prevent this call from blocking. The default behavior of
+             -- mapConcurrently is to wait for results. We only know that a max
+             -- of 2^(# unique dimensions) is the max, but the user may only
+             -- want a subset, thus we can't wait for them to finish.
+             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning st) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
-               findVCore il >>= removeChoices >> solution
+               findVCore il >>= removeChoices
 
-         accumulateResults = mconcat <$> U.getChanContents finishedResults
+         accumulateResults !acc !n = if (n :: Int) == 1
+                                     then return acc
+                                     else do r <- U.readChan finishedResults
+                                             putStrLn $ "[Accumulator] got result; n is: " ++ show n
+                                             accumulateResults (r <> acc) (succ n)
 
      tid <- forkIO $ initVCWorker conf vcChans
 
      -- kick off
-     (_, results) <- runProducers `A.concurrently` accumulateResults
-     killThread tid
+     (_,results)<- runProducers `A.concurrently` accumulateResults mempty 0
+     killThread tid -- if we get here we're done
      return results
 
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
@@ -341,8 +353,10 @@ instance Monoid    SVariantContext where mempty = true
 -- as small as possible
 data State = State
     { result      :: Result
-    , vConfig     :: Maybe VariantContext    -- the formula representation of the config
-    , config      :: Context                 -- a map or set representation of the config
+    -- the formula representation of the config
+    , vConfig     :: Maybe VariantContext -- the formula representation of the config
+    -- a map or set representation of the config
+    , config      :: Context -- a map or set representation of the config
     , ints        :: Ints
     , doubles     :: Doubles
     , bools       :: Bools
@@ -681,7 +695,7 @@ data IL = Unit
     deriving Show
 
 data IL' = Ref' NRef
-    | IOp  N_N IL'
+    | IOp N_N IL'
     | IIOp NN_N IL' IL'
     | Chc' Dim NExpression NExpression
     deriving Show
@@ -922,21 +936,20 @@ evaluate x@(BBOp op l r)  = logWith "Eval General Recurring " x >>
 -- removes the need to perform tree rotations. We make this as strict as
 -- possible because we know we will be consuming the entire structure so there
 -- is not need to build thunks
-data Ctx = InL Ctx BB_B IL          -- ^ In lhs of boolean Ctx' is parent
-                                      -- node, by op, with right
-         | InR T.SBool BB_B Ctx     -- ^ in rhs of boolean operator
-         | InLB Ctx  NN_B IL'       -- ^ lhs of numeric -> bool operator
-         | InRB NRef NN_B Ctx       -- ^ rhs of numeric -> bool operator
-         | InL' Ctx  NN_N IL'       -- ^ lhs of numeric -> numeric op
-         | InR' NRef NN_N Ctx       -- ^ rhs of numeric -> numeric op
-         | InU  B_B Ctx              -- ^ unary boolean ctx
-         | InU' N_N Ctx              -- ^ unary numeric ctx
-         | Top
-         deriving Show
+data Ctx = InL Ctx BB_B IL
+    | InR T.SBool BB_B Ctx
+    | InLB Ctx NN_B IL'
+    | InRB NRef NN_B Ctx
+    | InL' Ctx NN_N IL'
+    | InR' NRef NN_N Ctx
+    | InU B_B Ctx
+    | InU' N_N Ctx
+    | Top
+    deriving Show
 
-data Loc = InBool !IL  !Ctx
-         | InNum  !IL' !Ctx
-         deriving Show
+data Loc = InBool !IL !Ctx
+    | InNum !IL' !Ctx
+    deriving Show
 
 toLoc :: IL -> Loc
 toLoc = toLocWith Top

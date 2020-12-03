@@ -5,8 +5,8 @@
 }:
 mkDerivation {
   pname = "unordered-containers";
-  version = "0.2.12.0";
-  sha256 = "481dab4ea59f10feaa7d65ecb8ae5d136d130bdbacf2356d414b3926d638bd20";
+  version = "0.2.13.0";
+  sha256 = "86b01369ab8eb311383a052d389337e2cd71a63088323f02932754df4aa37b55";
   libraryHaskellDepends = [ base deepseq hashable ];
   testHaskellDepends = [
     base ChasingBottoms containers hashable HUnit QuickCheck random
