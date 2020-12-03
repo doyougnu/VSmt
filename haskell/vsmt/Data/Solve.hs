@@ -100,12 +100,6 @@ findVCore = evaluate
 solution :: (St.MonadState State m, Has Result) => m Result
 solution = extract <$> St.get
 
--- TODO make real config
--- data SolverConfig = SolverConfig { numVC :: Int
---                                  , numWorkers :: Int
---                                  , numReaders :: Int
---                                  }
-
 -- | TODO pending on server create, create a load function to handle injection
 -- | TODO reduce redundancy after config module is written
 -- to the IL type
@@ -129,7 +123,7 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
          -- channel.
-         runWorkers = do
+         runProducers =
            T.runSMTWith T.z3{T.verbose=True} $ do
              C.io $ putStrLn "preconditioning in main"
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
@@ -156,7 +150,7 @@ solveVerbose  i (fromMaybe true -> conf) (numProducers, numVC) =
      tid <- forkIO $ initVCWorker conf vcChans
 
      -- kick off
-     (_,results)<- runWorkers `A.concurrently` accumulateResults mempty 0
+     (_,results)<- runProducers `A.concurrently` accumulateResults mempty 0
      killThread tid -- if we get here we're done
      return results
 
@@ -181,12 +175,12 @@ solve  i (fromMaybe true -> conf) (numProducers, numVC) =
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
          -- channel.
-         runWorkers = do
+         runProducers =
            T.runSMTWith T.z3 $ do
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             -- let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
+             let seasoning = runSolverWith runStdoutLoggingT st $ unPre $ toIL i
              -- spawn producers
-             -- _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
+             _ <- liftIO $ A.mapConcurrently (producer seasoning) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
@@ -197,12 +191,12 @@ solve  i (fromMaybe true -> conf) (numProducers, numVC) =
      tid <- forkIO $ initVCWorker conf vcChans
 
      -- kick off
-     (_, results) <- runWorkers `A.concurrently` accumulateResults
+     (_, results) <- runProducers `A.concurrently` accumulateResults
      killThread tid
      return results
 
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
-solveForCoreVerbose  i (fromMaybe true -> conf) = do
+solveForCoreVerbose  i (fromMaybe true -> conf) =
     T.runSMTWith T.z3{T.verbose=True} $
       do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' conf
          (il, st) <- runSolverWith runStdoutLoggingT iState $ unPre $ toIL i
@@ -1165,8 +1159,8 @@ initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
              T.constrain $ if shouldNegate then bnot sD else sD
 
              C.checkSat >>= C.io . \case
-               C.Sat -> do U.writeChan toMain True
-               _     -> do U.writeChan toMain False
+               C.Sat -> U.writeChan toMain True
+               _     -> U.writeChan toMain False
 
 
  -- this can never happen and even if it does we want to stop

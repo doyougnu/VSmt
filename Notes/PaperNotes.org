@@ -1,0 +1,36 @@
+* Notes
+Look into incremental sat solver API, we formalized VSAT for SAT but then used
+SMT Solvers for evaluation. What is the reason for this mismatch?
+** Next Papers
+*** 8 + 1: Product-Line Analysis with Variational Satisfiability Solving
+     Paper on Type Chef and benchmarking VSAT.
+**** Structure
+     1. Abstract 0.5 Page
+     2. Intro 0.5 Page
+     3. Motivating Example (1.5-2 pages)
+        1. #ifdef code + Feature Models (Just becomes a logical formula)
+        2. Sets of SAT problems (FM-Analysis, Parsing, How is it currently
+           solved)
+     4. Variational Solving (0.5 - 1 page)
+        1. Input/Output from user perspective
+     5. Reducing Product Line analyses to variational propositional formulas
+        (0.5 - 1 page)
+        1. construction of variational propositional formula
+     6. Evaluation
+        1. Design
+        2. Results
+        3. Discussion
+        4. Threats to Validity
+     7. Related Work (0.5 - 1)
+     8. Conclusion + Future Work (at most 0.5)
+     Range: 4.5 - 6.5
+
+*** 9
+    Paper on incremental variational core
+*** 7 + 6 + 10
+    VSAT -> VSMT
+*** 5 + 4 + 3
+    NanoPass compiler optimizations in VSMT and using compiler techniques on
+    VSMT
+** Likely Order
+   (8+1) -> 9 -> (7+6+10) -> (5+4+3)
