@@ -23,7 +23,7 @@ import           Prelude hiding (LT, EQ, GT)
 import           Control.Monad (void)
 import           Data.Functor ((<$))
 
-import           Data.Core.Types
+import           Data.Core.Types (Prop'(..),BB_B(..),B_B(..))
 
 type Parser = Parsec Void T.Text
 

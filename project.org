@@ -86,6 +86,13 @@
 
 ** IN PROG Solver
 
+   - Note taken on [2020-12-03 Thu 21:47] \\
+     I tried to toggle debugging in the type system. It didn't work because the
+     channels are hard coded over the solver monad. If you try to paramterize it then
+     we have problems with the has typeclass which now must be parameterized over the
+     input to state. This looks like living with the redundancy is the easiest win
+     for the remainder of the phd
+
    - Note taken on [2020-09-19 Sat 04:47] \\
      Massive changes to the internal model of the solver today. Most importantly I
      was liberated of several assumptions I had made from vsat. In vsat I moved all

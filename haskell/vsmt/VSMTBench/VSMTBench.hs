@@ -39,6 +39,7 @@ import Data.Char (intToDigit)
 import BusyBox.Parser (langParser)
 import Data.Core.Types
 import Data.Solve
+import Data.Settings
 
 dataFile :: FilePath
 dataFile = "VSMTBench/BusyBox/SAT_uniq_sorted.txt"
@@ -96,7 +97,7 @@ main = do
   -- satWith z3DefConf (propOpts problems)
   -- res <- sat (prop problems) Nothing
   -- print (length $ show res)
-  sat (prop problems) Nothing
+  sat (prop problems) Nothing defSettings
 
   -- print $ pivotList . prop $ ts
   -- print $ dimensions $ prop ts
