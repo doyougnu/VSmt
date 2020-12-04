@@ -151,7 +151,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
          accumulateResults !acc !n = if n == fromMaybe posVariants numResults
                                      then return acc
                                      else do r <- U.readChan finishedResults
-                                             putStrLn $ "[Accumulator] got result; n is: " ++ show n
+                                             when verboseMode . putStrLn $ "[Accumulator] got result; n is: " ++ show n
                                              accumulateResults (r <> acc) (succ n)
 
      tid <- forkIO $ initVCWorker conf vcChans
@@ -170,7 +170,7 @@ solveForCoreVerbose  i (fromMaybe true -> conf) =
     T.runSMTWith T.z3{T.verbose=True} $
       do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' conf
          (il, st) <- runSolverWith runStdoutLoggingT iState $ unPre $ toIL i
-         C.query $ runSolverWith runStdoutLoggingT st $
+         C.query $ runSolverLog st $
            do core <- findVCore il
               logWith "Proposition: "  i
               logWith "Core: "         core
@@ -193,7 +193,7 @@ type Seasoning = T.Symbolic (IL, State)
 producer :: Seasoning -> T.SMTConfig -> State -> Int -> IO (a, State)
 producer seasoning c _ tid = T.runSMTWith c $
   do (il, st) <- seasoning
-     C.query $ runSolverWith runStdoutLoggingT st $
+     C.query $ runSolverLog st $
        do _ <- findVCore il
           forever $ do
             (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
@@ -426,7 +426,8 @@ instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
   symbolicEnv = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
-type Solver = SolverT (LoggingT C.Query)
+type Solver      = SolverT (LoggingT C.Query)
+type SolverNoLog = SolverT (NoLoggingT C.Query)
 newtype PreSolver m a = PreSolver { unPre :: SolverT m a }
   deriving (Functor, Applicative, Monad, St.MonadState State
            , MonadLogger, MonadIO, T.MonadSymbolic, C.MonadQuery)
@@ -434,7 +435,8 @@ newtype PreSolver m a = PreSolver { unPre :: SolverT m a }
 runSolverWith :: (m (a, State) -> c) -> State -> SolverT m a -> c
 runSolverWith f s = f . flip St.runStateT s . runSolverT
 
--- runSolverLog = runSolverWith runStdoutLoggingT
+runSolverLog :: State -> Solver a -> C.Query (a, State)
+runSolverLog = runSolverWith runStdoutLoggingT
 
 -- runSolver = runSolverWith runNoLoggingT
 
