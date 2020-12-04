@@ -14,6 +14,7 @@
 
 module Data.Settings
   ( Settings(..)
+  , getConfig
   , defSettings
   , defSettingsOnlySat
   , minSettings

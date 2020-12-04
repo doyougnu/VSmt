@@ -18,6 +18,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RecordWildCards            #-}
+{-# LANGUAGE NamedFieldPuns             #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TemplateHaskell            #-}
@@ -52,7 +53,7 @@ import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
 import           Prelude                               hiding (EQ, GT, LT, log)
 
-
+import           Data.Core.Core                        (posVariantCnt)
 import           Data.Core.Pretty
 import           Data.Core.Result
 import           Data.Core.Types
@@ -113,21 +114,24 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
      (wcRequest, wcResponse)      <- U.newChan producerBufSize
      (resultsIn, finishedResults) <- U.newChan producerBufSize
 
-  -- init the worker thread
+  -- init the channels
      let vcChans     = VCChannels     $ pure (fromMain, toMain)
          mainChans   = MainChannels   $ pure (fromVC, toVC)
          workChans   = WorkChannels   $ pure (wcRequest, wcResponse)
          resultChans = ResultChannels $ pure (resultsIn, finishedResults)
          startState  = mempty{ vcChans=vcChans, mainChans=mainChans
-                             , workChans=workChans, resultChans=resultChans
-                             }
+                             , workChans=workChans, resultChans=resultChans}
+
+         -- solver settings
+         posVariants  = posVariantCnt i
+         solverConfig = getConfig solver
 
          -- This is our "main" thread, we're going to reduce to a variational
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
          -- channel.
          runProducers =
-           T.runSMTWith T.z3{T.verbose=True} $ do
+           T.runSMTWith solverConfig $ do
              C.io $ putStrLn "preconditioning in main"
              (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
@@ -138,13 +142,13 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
              -- mapConcurrently is to wait for results. We only know that a max
              -- of 2^(# unique dimensions) is the max, but the user may only
              -- want a subset, thus we can't wait for them to finish.
-             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning st) [1..numProducers]
+             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning solverConfig st) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
                findVCore il >>= removeChoices
 
-         accumulateResults !acc !n = if (n :: Int) == 1
+         accumulateResults !acc !n = if n == fromMaybe posVariants numResults
                                      then return acc
                                      else do r <- U.readChan finishedResults
                                              putStrLn $ "[Accumulator] got result; n is: " ++ show n
@@ -158,56 +162,8 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
      return results
 
 -- TODO runNoLogging
-solve :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
-solve  i (fromMaybe true -> conf) (numProducers, numVC) =
-  do (toMain, fromVC)             <- U.newChan numVC
-     (toVC,   fromMain)           <- U.newChan numVC
-     (wcRequest, wcResponse)      <- U.newChan (numProducers * 2)
-     (resultsIn, finishedResults) <- U.newChan (numProducers * 2)
-
-  -- init the worker thread
-     let vcChans     = VCChannels     $ pure (fromMain, toMain)
-         mainChans   = MainChannels   $ pure (fromVC, toVC)
-         workChans   = WorkChannels   $ pure (wcRequest, wcResponse)
-         resultChans = ResultChannels $ pure (resultsIn, finishedResults)
-         startState  = mempty{ vcChans=vcChans, mainChans=mainChans
-                             , workChans=workChans, resultChans=resultChans
-                             }
-
-         -- This is our "main" thread, we're going to reduce to a variational
-         -- core and spawn producers. The producers will block on a work channel
-         -- while this thread continues to solve, thereby populating the work
-         -- channel.
-         runProducers =
-           T.runSMTWith T.z3 $ do
-             C.io $ putStrLn "preconditioning in main"
-             (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-             -- seasoning <- T.symbolicEnv
-             let seasoning = runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             -- spawn producers, we fork a thread to spawn producers here to
-             -- prevent this call from blocking. The default behavior of
-             -- mapConcurrently is to wait for results. We only know that a max
-             -- of 2^(# unique dimensions) is the max, but the user may only
-             -- want a subset, thus we can't wait for them to finish.
-             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning st) [1..numProducers]
-             -- now continue to solver thereby placing work on the channel
-             C.query $
-               runSolverWith runStdoutLoggingT st $
-               findVCore il >>= removeChoices
-
-         accumulateResults !acc !n = if (n :: Int) == 1
-                                     then return acc
-                                     else do r <- U.readChan finishedResults
-                                             putStrLn $ "[Accumulator] got result; n is: " ++ show n
-                                             accumulateResults (r <> acc) (succ n)
-
-     tid <- forkIO $ initVCWorker conf vcChans
-
-     -- kick off
-     (_,results)<- runProducers `A.concurrently` accumulateResults mempty 0
-     killThread tid -- if we get here we're done
-     return results
+solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
+solve  = undefined
 
 solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
 solveForCoreVerbose  i (fromMaybe true -> conf) =
@@ -221,10 +177,10 @@ solveForCoreVerbose  i (fromMaybe true -> conf) =
               logWith "Is Core Unit: " (isUnit core)
               return core
 
-satVerbose :: Proposition -> Maybe VariantContext -> IO Result
-satVerbose p v = solveVerbose p v (1,10)
+satVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
+satVerbose = solveVerbose
 
-sat :: Proposition -> Maybe VariantContext -> (Int,Int) -> IO Result
+sat :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 sat = solve
 
 ------------------------------ Async Helpers -----------------------------------
@@ -234,8 +190,8 @@ type Seasoning = T.Symbolic (IL, State)
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
-producer :: Seasoning -> State -> Int -> IO (a, State)
-producer seasoning _ tid = T.runSMTWith T.z3{T.verbose=True} $
+producer :: Seasoning -> T.SMTConfig -> State -> Int -> IO (a, State)
+producer seasoning c _ tid = T.runSMTWith c $
   do (il, st) <- seasoning
      C.query $ runSolverWith runStdoutLoggingT st $
        do _ <- findVCore il

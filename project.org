@@ -45,6 +45,19 @@
       exactly right, Early only parses context free grammars but you never have
       backtracking so it can be much much faster
 
+*** Generate data during the parsing pass [0%]
+
+    - Note taken on [2020-12-03 Thu 20:01] \\
+      Right now I have an additional O(n) pass before generating the variational core
+    - Note taken on [2020-12-03 Thu 20:00] \\
+      We need to know the number of unique dimensions to know the maximum
+      possible variants, this allows the solver to shut down
+
+**** TODO Number of choices
+
+**** TODO Number of variables
+
+**** TODO Number of unique dimensions
 
 *** DONE Remove CV's from result maps and just construct the string to represent smtlib program
     CLOSED: [2020-09-16 Wed 14:41]
@@ -65,9 +78,9 @@
 
 ** TODO shallow embedded for ease of creating data on the fly
 
-** TODO Server setup
+** HOLD Server setup
 
-** TODO REPL setup
+** HOLD REPL setup
 
 ** TODO Hackage documentation
 
