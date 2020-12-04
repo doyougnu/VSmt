@@ -35,7 +35,7 @@ class Configurable conf p where
 
 instance Configurable Config (Prop' a) where
   configure conf (ChcB d l r) | conf d  = configure conf l
-                                | otherwise = configure conf r
+                              | otherwise = configure conf r
 
   configure conf (OpB op a)    = OpB  op $ configure conf a
   configure conf (OpBB op l r) = OpBB op (configure conf l) (configure conf r)
@@ -44,7 +44,7 @@ instance Configurable Config (Prop' a) where
 
 instance Configurable Config (NExpr' a) where
   configure conf (ChcI d l r) | conf d  = configure conf l
-                                | otherwise = configure conf r
+                              | otherwise = configure conf r
 
   configure conf (OpI op a)    = OpI  op $ configure conf a
   configure conf (OpII op l r) = OpII op (configure conf l) (configure conf r)
@@ -101,6 +101,7 @@ numerics' (OpII _ l r)          = numerics' l `Set.union` numerics' r
 numerics' (ChcI _ l r)          = numerics' l `Set.union` numerics' r
 numerics' _                     = Set.empty
 
+-- | Get the set of unique dimensions
 dimensions :: Prop' a -> Set.Set Dim
 dimensions (ChcB d l r) = Set.singleton d `Set.union`
                           dimensions l    `Set.union`
@@ -118,7 +119,11 @@ dimensions' (OpI _ e)             = dimensions' e
 dimensions' (OpII _ l r)          = dimensions' l `Set.union` dimensions' r
 dimensions' _                     = Set.empty
 
+-- | given a proposition return how many possible variants the prop represents
+posVariantCnt :: Prop' a -> Int
+posVariantCnt = (2^) . Set.size . dimensions
 
+-- | return the set of numeric variables with their type
 numericsWithType :: Ord a => Prop' a -> Set.Set (ExRefType a)
 numericsWithType (LitB _)     = Set.empty
 numericsWithType (RefB _)     = Set.empty
@@ -134,6 +139,7 @@ numericsWithType' (OpII _ l r) = numericsWithType' l `Set.union` numericsWithTyp
 numericsWithType' (ChcI _ l r) = numericsWithType' l `Set.union` numericsWithType' r
 numericsWithType' (RefI i)     = Set.singleton i
 
+-- | return the set of integer variables
 integers :: Ord a => Prop' a -> Set.Set a
 integers = Set.map unbox . Set.filter isInt . numericsWithType
   where isInt (ExRefTypeI _) = True
@@ -142,6 +148,7 @@ integers = Set.map unbox . Set.filter isInt . numericsWithType
         unbox (ExRefTypeI i) = i
         unbox (ExRefTypeD d) = d
 
+-- | return the set of double variables
 doubles :: Ord a => Prop' a -> Set.Set a
 doubles p = (Set.\\) (numerics p) (integers p)
 
