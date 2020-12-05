@@ -49,7 +49,7 @@ dataFile = "VSMTBench/BusyBox/SAT_uniq_sorted.txt"
 main = do
   txtProblems <- T.lines <$> TIO.readFile dataFile
   let problems' = parse langParser "" <$> txtProblems
-      !problems = take 2000 $ rights problems'
+      !problems = rights problems'
 
       base :: Integer -> Integer -> Integer
       base b = ceiling . logBase (fromInteger b) . fromInteger
@@ -97,7 +97,8 @@ main = do
   -- satWith z3DefConf (propOpts problems)
   -- res <- sat (prop problems) Nothing
   -- print (length $ show res)
-  sat (prop problems) Nothing defSettings
+  -- sat (prop problems) Nothing defSettingsNoVerbose
+  sat (prop problems) Nothing defSettingsNoVerbose
 
   -- print $ pivotList . prop $ ts
   -- print $ dimensions $ prop ts

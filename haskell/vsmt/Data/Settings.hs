@@ -19,6 +19,7 @@ module Data.Settings
   , defSettingsOnlySat
   , minSettings
   , debugSettings
+  , defSettingsNoVerbose
   ) where
 
 import GHC.Generics (Generic)
@@ -57,6 +58,9 @@ defSettings = Settings{ solver          = Solver S.z3
 
 defSettingsOnlySat :: Settings
 defSettingsOnlySat = defSettings{generateModels = False}
+
+defSettingsNoVerbose :: Settings
+defSettingsNoVerbose = defSettings{solver=Solver $ S.z3{S.verbose=False}}
 
 minSettings :: Settings
 minSettings = Settings{ solver          = Solver S.z3

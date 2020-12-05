@@ -181,7 +181,7 @@ satVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 satVerbose = solveVerbose
 
 sat :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-sat = solve
+sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
