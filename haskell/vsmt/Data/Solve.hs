@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Solve
+-- Module    : Solve
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -26,7 +26,7 @@
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE ViewPatterns               #-}
 
-module Data.Solve where
+module Solve where
 
 import           Control.Applicative                   ((<|>))
 import           Control.Concurrent                    (forkIO, killThread)
@@ -53,12 +53,12 @@ import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
 import           Prelude                               hiding (EQ, GT, LT, log)
 
-import           Data.Core.Core                        (posVariantCnt)
-import           Data.Core.Pretty
-import           Data.Core.Result
-import           Data.Core.Types
+import           Core.Core                        (posVariantCnt)
+import           Core.Pretty
+import           Core.Result
+import           Core.Types
 
-import           Data.Settings
+import           Settings
 
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()

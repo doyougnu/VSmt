@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Core.Types
+-- Module    : Core.Types
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -18,7 +18,7 @@
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE ViewPatterns               #-}
 
-module Data.Core.Types where
+module Core.Types where
 
 import           Control.DeepSeq     (NFData)
 import           Control.Monad       (liftM2)
