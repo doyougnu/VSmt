@@ -11,19 +11,22 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
+{-# LANGUAGE AllowAmbiguousTypes   #-}
+{-# LANGUAGE DerivingVia           #-}
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE ViewPatterns          #-}
 
 module Core.Core where
 
 
 import           Prelude                    hiding (EQ, GT, LT, log)
+import           Data.Foldable (toList)
 import qualified Data.Set as Set
+import qualified Data.Map as Map
 
 import Core.Types
 
@@ -111,6 +114,7 @@ dimensions (OpB _ e)    = dimensions e
 dimensions (OpBB _ l r) = dimensions l `Set.union` dimensions r
 dimensions _            = Set.empty
 
+-- | Retrieve the set of unique dimensions from numeric expressions
 dimensions' :: NExpr' a -> Set.Set Dim
 dimensions' (ChcI d l r)          = Set.singleton d `Set.union`
                                     dimensions' l   `Set.union`
@@ -152,12 +156,67 @@ integers = Set.map unbox . Set.filter isInt . numericsWithType
 doubles :: Ord a => Prop' a -> Set.Set a
 doubles p = (Set.\\) (numerics p) (integers p)
 
+-- we use the list of lists format to allow counting as opposed to the function
+-- type Config which does not allow counting
+genConfigs :: Prop' a -> [Config]
+genConfigs (toList . dimensions -> ds) = (Map.!) . Map.fromList <$> booleanCombinations ds
+  where
+    -- | given a list of stuff, generate a list of those things tagged with every
+    -- possible boolean combination. i.e. booleanCombinations [1..3] = [[(1, True),
+    -- (2, True) (3, True)], [(1, True), (2, True), (3, False)] ...]
+    booleanCombinations :: [a] -> [[(a, Bool)]]
+    booleanCombinations [] = []
+    -- this singleton case is super important, if missed the fmap will only ever
+    -- return empty list and the recursion won't consider the values
+    booleanCombinations [x] = [[(x, True)], [(x, False)]]
+    booleanCombinations (d:dims) =
+      fmap ((d, True) :) cs ++ fmap ((d, False) :) cs
+      where cs = booleanCombinations dims
+
+-------------------------- Diagnostics ------------------------------------------
+compressionRatio :: (Configurable Config p, p ~ (Prop' a)) => p -> Float
+compressionRatio prop
+  | total == 0 = 0
+  | otherwise = fromIntegral numerator / fromIntegral total
+  where numerator = length $ toList prop
+        configs = genConfigs prop
+        total = sum $ length . toList . flip configure prop <$> configs
+
+-- | Count all the choiceCount in a proposition
+choiceCount :: Prop' a -> Int
+choiceCount (ChcB _ l r) = 1 + choiceCount l + choiceCount r
+choiceCount (OpIB _ l r) = choiceCount' l + choiceCount' r
+choiceCount (OpB _ e)    = choiceCount e
+choiceCount (OpBB _ l r) = choiceCount l + choiceCount r
+choiceCount _            = 0
+
+choiceCount' :: NExpr' a -> Int
+choiceCount' (ChcI _ l r) = 1 + choiceCount' l + choiceCount' r
+choiceCount' (OpII _ l r) = choiceCount' l + choiceCount' r
+choiceCount' (OpI _ e)    = choiceCount' e
+choiceCount' _            = 0
+
+-- | Count all the choiceCount in a proposition
+plainCount :: Prop' a -> Int
+plainCount (ChcB _ l r) = choiceCount l + choiceCount r
+plainCount (OpIB _ l r) = choiceCount' l + choiceCount' r
+plainCount (OpB _ e)    = choiceCount e
+plainCount (OpBB _ l r) = choiceCount l + choiceCount r
+plainCount _            = 1
+
+plainCount' :: NExpr' a -> Int
+plainCount' (ChcI _ l r) = choiceCount' l + choiceCount' r
+plainCount' (OpII _ l r) = choiceCount' l + choiceCount' r
+plainCount' (OpI _ e)    = choiceCount' e
+plainCount' _            = 1
+
+
 -------------------------- Predicates ------------------------------------------
 -- | False if there is a numeric variable with the same name as a boolean variable
 refsAreDisjoint :: Proposition -> Bool
 refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop
 
--- | True if the proposition lacks choices
+-- | True if the proposition lacks choiceCount
 isPlain :: Proposition -> Bool
 isPlain ChcB {}      = False
 isPlain (OpB _ e)    = isPlain e
