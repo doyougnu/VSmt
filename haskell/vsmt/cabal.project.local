@@ -1,0 +1,6 @@
+-- packages: ~/programming/sbv/sbv.cabal
+
+profiling: True
+library-profiling: True
+-- profiling-detail: all-functions
+-- library-profiling-detail: all-functions
