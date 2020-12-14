@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Settings
+-- Module    : Settings
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -12,7 +12,7 @@
 {-# OPTIONS_GHC -Wall -Werror   #-}
 {-# LANGUAGE DeriveGeneric      #-}
 
-module Data.Settings
+module Settings
   ( Settings(..)
   , getConfig
   , defSettings

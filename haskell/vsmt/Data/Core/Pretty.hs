@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Core.Pretty
+-- Module    : Core.Pretty
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -14,7 +14,7 @@
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE OverloadedStrings    #-}
 
-module Data.Core.Pretty where
+module Core.Pretty where
 
 import qualified Data.Text       as Text
 import           Prelude         hiding (EQ, GT, LT, log)
@@ -22,7 +22,7 @@ import qualified Data.HashMap.Strict as M
 import qualified Data.SBV.Internals     as I
 import qualified Data.SBV.Trans         as S
 
-import           Data.Core.Types
+import           Core.Types
 
 class Pretty a where pretty :: a -> Text.Text
 

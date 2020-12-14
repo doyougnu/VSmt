@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Core.Core
+-- Module    : Core.Core
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -19,13 +19,13 @@
 {-# LANGUAGE DerivingVia #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Data.Core.Core where
+module Core.Core where
 
 
 import           Prelude                    hiding (EQ, GT, LT, log)
 import qualified Data.Set as Set
 
-import Data.Core.Types
+import Core.Types
 
 ----------------------------- Choice Manipulation ------------------------------
 -- | Type class that dispatches the appropriate way to configure based on the

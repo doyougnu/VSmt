@@ -28,13 +28,15 @@ common common-settings
 
 
 library
-  exposed-modules: Data.Core.Core
-                 , Data.Core.Types
-                 , Data.Core.Result
-                 , Data.Core.Pretty
-                 , Data.Parser.Result
-                 , Data.Solve
-                 , Data.Settings
+  exposed-modules: Core.Core
+                 , Core.Types
+                 , Core.Result
+                 , Core.Pretty
+                 , Parser.Result
+                 , Solve
+                 , Settings
+  other-modules: Paths_vsmt
+  hs-source-dirs:  Data
   build-depends: base
                , bifunctors
                , containers >= 0.6.0.1
@@ -107,20 +109,19 @@ Test-Suite VSMTTest
                     TupleSections
                     TypeApplications
   Build-depends : base >= 4.11
-                  , vsmt
+                  , bytestring
+                  , containers
+                  , filepath
+                  , hashable
                   , tasty
                   , tasty-golden
                   , tasty-quickcheck
-                  , QuickCheck
                   , tasty-hspec
                   , tasty-hunit
-                  , filepath
-                  , bytestring
-
-                  , unordered-containers
-                  , sbv
                   , text
-                  , containers
+                  , QuickCheck
+                  , sbv
+                  , unordered-containers
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework
@@ -132,12 +133,48 @@ Test-Suite VSMTTest
                   , TestSuite.Solve.Sound
                   , TestSuite.Core.Parser.Result
 
-Benchmark VSMTBench
+-- Benchmark VSMTBench
+--   type            : exitcode-stdio-1.0
+--   default-language: Haskell2010
+--   ghc-options     : -O2 -threaded "-with-rtsopts=-qg"
+--   other-extensions: DataKinds
+--                     DeriveAnyClass
+--                     DeriveDataTypeable
+--                     FlexibleContexts
+--                     GeneralizedNewtypeDeriving
+--                     OverloadedLists
+--                     OverloadedStrings
+--                     Rank2Types
+--                     RankNTypes
+--                     ScopedTypeVariables
+--                     StandaloneDeriving
+--                     TemplateHaskell
+--                     TupleSections
+--                     TypeApplications
+--   build-depends: base >= 4.11
+--                , containers
+--                , deepseq
+--                , directory
+--                , gauge
+--                , hashable
+--                , megaparsec
+--                , parser-combinators
+--                , text
+--                , sbv
+--                , unordered-containers
+--   hs-source-dirs: VSMTBench
+--   main-is: VSMTBench.hs
+--   other-modules: Utils.VSMTBenchFramework
+--                , Core.Types
+--                , Core.Result
+--                , Core.Core
+--                , Core.Pretty
+
+
+benchmark busybox
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
   ghc-options     : -O2 -threaded "-with-rtsopts=-qg"
-  -- ghc-options     : -O2 "-with-rtsopts=-p -s -hm -L800 "
-  -- ghc-options     : -Wall -O2 -threaded
   other-extensions: DataKinds
                     DeriveAnyClass
                     DeriveDataTypeable
@@ -152,17 +189,60 @@ Benchmark VSMTBench
                     TemplateHaskell
                     TupleSections
                     TypeApplications
-  Build-depends : base >= 4.11
-                  , vsmt
-                  , gauge
-                  , deepseq
-                  , megaparsec
-                  , parser-combinators
-                  , text
-                  , sbv
-                  , containers
-  Hs-Source-Dirs  : VSMTBench
-  main-is         : VSMTBench.hs
-  Other-modules   : BusyBox.Parser
--- Utils.SBVBenchFramework
---                   , BenchSuite.Bench.Bench
+  build-depends: base >= 4.11
+               , containers
+               , deepseq
+               , directory
+               , gauge
+               , hashable
+               , megaparsec
+               , parser-combinators
+               , text
+               , sbv
+               , vsmt
+  hs-source-dirs: VSMTBench
+                , VSMTBench/Bench
+                , VSMTBench/BusyBox
+  main-is:       Main.hs
+  Other-modules: Utils.VSMTBenchFramework
+               , Parser
+               , BruteForce
+               , Incremental
+               , BusyBox
+
+
+benchmark financial
+  type            : exitcode-stdio-1.0
+  default-language: Haskell2010
+  ghc-options     : -O2 -threaded "-with-rtsopts=-qg"
+  other-extensions: BangPatterns
+                    DataKinds
+                    DeriveAnyClass
+                    DeriveDataTypeable
+                    FlexibleContexts
+                    GeneralizedNewtypeDeriving
+                    OverloadedLists
+                    OverloadedStrings
+                    Rank2Types
+                    RankNTypes
+                    ScopedTypeVariables
+                    StandaloneDeriving
+                    TemplateHaskell
+                    TupleSections
+                    TypeApplications
+  build-depends: base >= 4.11
+               , containers
+               , deepseq
+               , directory
+               , gauge
+               , hashable
+               , megaparsec
+               , parser-combinators
+               , text
+               , sbv
+               , vsmt
+  hs-source-dirs: VSMTBench
+                , VSMTBench/Bench
+                , VSMTBench/Financial
+  main-is:       Main.hs
+  Other-modules: Utils.VSMTBenchFramework

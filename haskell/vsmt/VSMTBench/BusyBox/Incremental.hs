@@ -3,26 +3,14 @@ module Incremental where
 import qualified Data.Map.Strict         as M
 import qualified Control.Monad.State.Strict as St
 
-import           Gauge
-import           Data.Foldable           (foldr')
-import qualified Data.List               as L
 import           Data.Map                (size, Map, toList)
 import qualified Data.SBV                as S
-import qualified Data.SBV.Control        as SC
-import qualified Data.SBV.Internals      as SI
-import qualified Data.Set                as Set
 import qualified Data.Text               as T
-import qualified Data.Text.IO            as TIO
-import Numeric
-import Data.Char (intToDigit)
-
-
-import           CaseStudy.BusyBox.Parser (langParser)
-import           Data.Core.Types
 
 import BusyBox
+import Utils.VSMTBenchFramework
 
-eval :: VProp T.Text (S.SBool, a) b -> S.SBool
+eval :: Prop' (S.SBool, a) -> S.SBool
 eval (LitB True)     = S.sTrue
 eval (LitB False)    = S.sFalse
 eval (RefB (b,_))    = b
@@ -35,11 +23,11 @@ eval (ChcB {}) = error "no choices here!"
 eval (OpIB {}) = error "Type Chef throws smt problems?"
 
   -- S.Symbolic (VProp d (S.SBool, Name) SNum) ->
-constructIncremental :: [Analysis Readable Readable] -> IO [[S.SatResult]]
+constructIncremental :: [Analysis] -> IO [[S.SatResult]]
 constructIncremental xs = S.runSMT $ do
   let analysisToIncremental (getAnalysis -> a) = Analysis <$> mapM (mapM propToSBool) a
 
-      symbolicAnalyses :: S.Symbolic [Analysis (S.SBool, Name) SNum]
+      symbolicAnalyses :: S.Symbolic [Analysis (S.SBool, T.Text)]
       symbolicAnalyses = St.evalStateT (mapM analysisToIncremental xs) (mempty,mempty)
 
       doAnalysis analysis = do

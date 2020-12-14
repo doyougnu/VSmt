@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Parser.Result
+-- Module    : Parser.Result
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -14,7 +14,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections     #-}
 
-module Data.Parser.Result where
+module Parser.Result where
 
 
 import           Control.Monad.Combinators.Expr
@@ -31,7 +31,7 @@ import qualified Text.Megaparsec.Char           as C
 import qualified Text.Megaparsec.Char.Lexer     as L
 
 
-import           Data.Core.Types
+import           Core.Types
 
 type Parser = Parsec Void T.Text
 

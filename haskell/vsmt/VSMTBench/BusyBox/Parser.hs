@@ -11,7 +11,7 @@
 
 {-# LANGUAGE OverloadedStrings          #-}
 
-module BusyBox.Parser where
+module Parser where
 
 import qualified Data.Text                  as T
 import           Data.Void
@@ -23,7 +23,7 @@ import           Prelude hiding (LT, EQ, GT)
 import           Control.Monad (void)
 import           Data.Functor ((<$))
 
-import           Data.Core.Types (Prop'(..),BB_B(..),B_B(..))
+import           Utils.VSMTBenchFramework
 
 type Parser = Parsec Void T.Text
 

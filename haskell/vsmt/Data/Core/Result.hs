@@ -1,6 +1,6 @@
 -----------------------------------------------------------------------------
 -- |
--- Module    : Data.Core.Result
+-- Module    : Core.Result
 -- Copyright : (c) Jeffrey Young
 -- License   : BSD3
 -- Maintainer: youngjef@oregonstate.edu
@@ -22,7 +22,7 @@
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE BangPatterns               #-}
 
-module Data.Core.Result where
+module Core.Result where
 
 import           Control.Monad.IO.Class (MonadIO)
 
@@ -40,9 +40,9 @@ import           Data.String            (IsString, fromString)
 import           GHC.Generics           (Generic)
 import qualified Data.Sequence          as Seq
 
-import           Data.Core.Types
+import           Core.Types
 
-import           Data.Core.Pretty
+import           Core.Pretty
 
 -- | An SMT Result formula, spine strict, we leave values lazy because they may
 -- not be needed. We will be incrementally building these formulas through

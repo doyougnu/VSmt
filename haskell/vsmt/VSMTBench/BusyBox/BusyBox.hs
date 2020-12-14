@@ -1,43 +1,22 @@
+{-# LANGUAGE ViewPatterns #-}
+
 module BusyBox where
 
 
-import           Control.Arrow           (first, second)
-import           Gauge
-import           Data.Aeson              (decodeStrict, encodeFile)
-import           Control.Monad           (replicateM, foldM, liftM2)
-import           Data.Bifunctor          (bimap)
-import           Data.Bitraversable      (bimapM)
-import           Data.Either             (lefts, rights)
-import           Data.Foldable           (foldr')
-import qualified Data.List               as L
-import qualified Data.Map.Strict         as M
-import qualified Data.SBV                as S
-import qualified Data.SBV.Control        as SC
-import qualified Data.SBV.Internals      as SI
-import qualified Data.Set                as Set
-import qualified Data.Text               as T
-import qualified Data.Text.IO            as TIO
+import           Data.Char         (intToDigit)
+import           Data.Either       (rights)
+import qualified Data.Map.Strict   as M
+import           Numeric
 import           System.IO
-import           Text.Megaparsec         (parse)
-import Numeric
-import Data.Char (intToDigit)
-import qualified System.Directory        as D
-import qualified Control.Exception       as E
+import           Text.Megaparsec   (parse)
 
-import           Api
-import           CaseStudy.Auto.Auto
-import           CaseStudy.BusyBox.Parser (langParser)
-import           Config
-import           Opts
-import           Json
-import           Run                     (runAD, runBF)
-import           Result
-import           Utils
-import           VProp.Core
-import           VProp.SBV               (toPredicate)
-import           VProp.Types
+import qualified Control.Exception as E
+import qualified Data.Text         as T
+import qualified Data.Text.IO      as TIO
+import qualified System.Directory  as D
 
-import           Core
+import           Utils.VSMTBenchFramework
+import           Parser (langParser)
 
 
 newtype Directory = Directory { unDir :: FilePath }
@@ -55,17 +34,18 @@ prefix = "SAT_problems_"
 suffix = ".txt"
 mkFileConst a = prefix <> a <> suffix
 
-featureModelLbl   = mkFileConst "FEATURE_MODEL"
-parseProblems  = mkFileConst "PARSING"
-lexingProblems = mkFileConst "LEXING"
-tcProblems     = mkFileConst "TYPE_CHECKING"
-noModeProblems     = mkFileConst "NO_MODE"
+featureModelLbl = mkFileConst "FEATURE_MODEL"
+parseProblems   = mkFileConst "PARSING"
+lexingProblems  = mkFileConst "LEXING"
+tcProblems      = mkFileConst "TYPE_CHECKING"
+noModeProblems  = mkFileConst "NO_MODE"
 
-newtype Analysis a b = Analysis { getAnalysis :: M.Map QueryMode [VProp T.Text a b] }
+newtype Analysis a = Analysis { getAnalysis :: M.Map QueryMode [Prop' a] }
   deriving (Eq,Ord,Show)
 
-instance Semigroup (Analysis a b) where (getAnalysis -> a) <> (getAnalysis -> b) = Analysis $! M.unionWith (<>) a b
-instance Monoid (Analysis a b) where mempty = Analysis M.empty
+instance Semigroup (Analysis a) where
+  (getAnalysis -> a) <> (getAnalysis -> b) = Analysis $! M.unionWith (<>) a b
+instance Monoid (Analysis a) where mempty = Analysis M.empty
 
 data QueryMode = NoMode
                | FeatureModel
@@ -76,39 +56,39 @@ data QueryMode = NoMode
 
 -- | don't feel like making the correct semigorup and monoid instances for maybe
 -- here
-get :: QueryMode -> Analysis a b -> [VProp T.Text a b]
-get m ( getAnalysis -> a) = case m `M.lookup` a of
+get :: QueryMode -> Analysis a -> [Prop' a]
+get m (getAnalysis -> a) = case m `M.lookup` a of
                               Nothing -> mempty
                               Just xs -> xs
 
 
-featureModel :: Analysis a b -> VProp T.Text a b
+featureModel :: Analysis T.Text -> Proposition
 featureModel a = case get FeatureModel a of
                    [] -> true
                    xs -> head xs
 
-lexing :: Analysis a b -> [VProp T.Text a b]
+lexing :: Analysis T.Text -> [Proposition]
 lexing = get Lexing
 
-parsing :: Analysis a b -> [VProp T.Text a b]
+parsing :: Analysis T.Text -> [Proposition]
 parsing = get Parsing
 
-typeChecking :: Analysis a b -> [VProp T.Text a b]
+typeChecking :: Analysis T.Text -> [Proposition]
 typeChecking = get TypeChecking
 
-noMode :: Analysis a b -> [VProp T.Text a b]
+noMode :: Analysis T.Text -> [Proposition]
 noMode = get NoMode
 
 dataFiles :: IO [Directory]
 dataFiles = fmap (Directory . (home </>)) <$> D.listDirectory home
   where home = "bench/BusyBox/sat_queries"
 
-readPropFile :: FilePath -> IO [ReadableProp T.Text]
+readPropFile :: FilePath -> IO [Proposition]
 readPropFile f = do txtProblems <- T.lines <$> TIO.readFile f
                     let problems' = parse langParser "" <$> txtProblems
                     return $ rights problems'
 
-readFM :: Directory -> IO (ReadableProp T.Text)
+readFM :: Directory -> IO Proposition
 readFM (unDir -> d) = go `E.catch` \e -> print (e :: E.IOException) >> return true
   where go = readPropFile (d </> featureModelLbl) >>= \c ->
           return $
@@ -116,19 +96,19 @@ readFM (unDir -> d) = go `E.catch` \e -> print (e :: E.IOException) >> return tr
             [] -> true     -- then we were in the plain directory
             xs -> head xs  -- then we found the feature model
 
-readParseProblems :: Directory -> IO [ReadableProp T.Text]
+readParseProblems :: Directory -> IO [Proposition]
 readParseProblems (unDir -> d) = readPropFile (d </> parseProblems)
                     `E.catch` \e -> print (e :: E.IOException) >> return []
 
-readLexingProblems :: Directory -> IO [ReadableProp T.Text]
+readLexingProblems :: Directory -> IO [Proposition]
 readLexingProblems (unDir -> d) = readPropFile (d </> lexingProblems)
                     `E.catch` \e -> print (e :: E.IOException) >> return []
 
-readTcProblems :: Directory -> IO [ReadableProp T.Text]
+readTcProblems :: Directory -> IO [Proposition]
 readTcProblems (unDir -> d) = readPropFile (d </> tcProblems)
                     `E.catch` \e -> print (e :: E.IOException) >> return []
 
-readNoModeProblems :: Directory -> IO [ReadableProp T.Text]
+readNoModeProblems :: Directory -> IO [Proposition]
 readNoModeProblems (unDir -> d) = readPropFile (d </> noModeProblems)
                      `E.catch` \e -> print (e :: E.IOException) >> return []
 
@@ -136,7 +116,7 @@ readNoModeProblems (unDir -> d) = readPropFile (d </> noModeProblems)
 -- captured as a feature model if no feature model exists. We combine this with
 -- the no mode queries which is the only other mode that plain queries will be
 -- found in.
-handlePlain :: Directory -> IO [ReadableProp T.Text]
+handlePlain :: Directory -> IO [Proposition]
 handlePlain dir = do fs <- fm
                      ns <- nm
                      (return (fs ++ ns)) `E.catch`
@@ -146,7 +126,7 @@ handlePlain dir = do fs <- fm
     fm = readPropFile (d </> featureModelLbl)
     nm = readNoModeProblems dir
 
-findPlain :: [Analysis a b] -> Analysis a b
+findPlain :: [Analysis a] -> Analysis a
 findPlain xs = go
   where isAnaPlain (getAnalysis -> a) = M.member FeatureModel a &&
                                         M.member NoMode a &&
@@ -155,7 +135,7 @@ findPlain xs = go
                                         M.notMember Parsing a
         go = head $ filter isAnaPlain xs
 
-mkAnalysis :: Directory -> IO (Analysis Readable Readable)
+mkAnalysis :: Directory -> IO (Analysis Var)
 mkAnalysis d = do putStrLn $ "Reading: " ++ (unDir d)
                   if (isDirPlain d)
 
@@ -170,5 +150,5 @@ mkAnalysis d = do putStrLn $ "Reading: " ++ (unDir d)
                             return $ Analysis $ mconcat [pp,lp,tp,np]
 
 
-getProblems :: IO [Analysis Readable Readable]
+getProblems :: IO [Analysis Var]
 getProblems = dataFiles >>= mapM mkAnalysis
