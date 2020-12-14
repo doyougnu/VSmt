@@ -15,6 +15,7 @@
 {-# LANGUAGE DerivingVia           #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE TypeFamilies          #-}
@@ -25,6 +26,7 @@ module Core.Core where
 
 import           Prelude                    hiding (EQ, GT, LT, log)
 import           Data.Foldable (toList)
+import           Data.Function ((&))
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 
@@ -216,22 +218,14 @@ plainCount' _            = 1
 refsAreDisjoint :: Proposition -> Bool
 refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop
 
--- | True if the proposition lacks choiceCount
-isPlain :: Proposition -> Bool
-isPlain ChcB {}      = False
-isPlain (OpB _ e)    = isPlain e
-isPlain (OpBB _ l r) = isPlain l && isPlain r
-isPlain (OpIB _ l r) = isPlain' l && isPlain' r
-isPlain _            = True
-
-isPlain' :: NExpression -> Bool
-isPlain' ChcI {}      = False
-isPlain' (OpI _ e)    = isPlain' e
-isPlain' (OpII _ l r) = isPlain' l && isPlain' r
-isPlain' _            = True
+-- | True if the proposition lacks choices
+isPlain :: Proposition -> Maybe (Plain Proposition)
+isPlain p | choiceCount p /= 0 = Just $ Plain p
+          | otherwise          = Nothing
 
 isVariational :: Proposition -> Bool
-isVariational = not . isPlain
+isVariational p = isPlain p & \case Nothing -> True
+                                    _       -> False
 
 -- | Propositions which only consist of mathematical relations
 onlyRelations :: Proposition -> Bool

@@ -38,6 +38,8 @@ type Var = Text
 newtype Dim = Dim { getDim :: Text} deriving (Eq,Ord,NFData,Hashable,IsString)
 
 type Config  = Dim -> Bool
+
+--unfortunately we need the maybe, see the Configurable class in Core
 type PartialConfig = Dim -> Maybe Bool
 
 -- | empty type to represent when an 'a' is total
