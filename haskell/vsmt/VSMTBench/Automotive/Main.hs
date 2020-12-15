@@ -18,7 +18,7 @@ import           Settings
 import           Core.Types
 import           Core.Core
 import           Utils
-import           Solve (solveVerbose)
+import           Solve (solveVerbose,solveForCoreVerbose)
 
 import           Lang
 import           Auto
@@ -96,7 +96,7 @@ main = do
 
       bProp :: Proposition
       -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
-      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin (bPs)
+      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin (take 6 bPs)
 
   -- Convert the fmf's to actual configurations
   -- [ppV1]   <- genConfigPool d0Conf
@@ -210,5 +210,10 @@ main = do
   --   -- , bgroup "Boolector" (benches boolectorDefConf)
   --   ]
 
+  -- let t = bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
+  let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   putStrLn $ show $ length failed
-  solveVerbose bProp Nothing minSettings
+  putStrLn $ show $ dimensions bProp
+  putStrLn $ show $ bProp
+  solveVerbose bProp Nothing defSettings
+  -- solveForCoreVerbose bProp Nothing

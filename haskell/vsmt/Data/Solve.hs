@@ -114,6 +114,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
      (wcRequest, wcResponse)      <- U.newChan producerBufSize
      (resultsIn, finishedResults) <- U.newChan producerBufSize
 
+
   -- init the channels
      let vcChans     = VCChannels     $ pure (fromMain, toMain)
          mainChans   = MainChannels   $ pure (fromVC, toVC)
@@ -142,17 +143,20 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
              -- mapConcurrently is to wait for results. We only know that a max
              -- of 2^(# unique dimensions) is the max, but the user may only
              -- want a subset, thus we can't wait for them to finish.
-             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning solverConfig st) [1..numProducers]
+             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning solverConfig st) [0..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
                findVCore il >>= removeChoices
 
-         accumulateResults !acc !n = if n == fromMaybe posVariants numResults
-                                     then return acc
-                                     else do r <- U.readChan finishedResults
-                                             when verboseMode . putStrLn $ "[Accumulator] got result; n is: " ++ show n
-                                             accumulateResults (r <> acc) (succ n)
+         accumulateResults !acc !n = do
+           when verboseMode . putStrLn $ "[Accumulator] with n == " ++ show n
+           if n == fromMaybe posVariants numResults
+             then return acc
+             else do when verboseMode . putStrLn $ "[Accumulator] waiting"
+                     r <- U.readChan finishedResults
+                     when verboseMode . putStrLn $ "[Accumulator] got result; n is: " ++ show n ++ "and should get to: " ++ show posVariants
+                     accumulateResults (r <> acc) (succ n)
 
      tid <- forkIO $ initVCWorker conf vcChans
 
@@ -670,10 +674,9 @@ toIL :: ( MonadLogger m
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = cached ref
-toIL x@(OpB op (ChcB d l r)) = do logWith "Moving Op inside choice" x
-                                  return $ Chc d (OpB op l) (OpB op r)
+toIL (OpB op (ChcB d l r)) = return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
-toIL (OpBB Impl l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
+toIL (OpBB Impl l r) = log "Impl" >> do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
 toIL (OpBB Eqv l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp Eqv  l' r'
 toIL (OpBB XOr l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp XOr  l' r'
 toIL (OpBB And l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp And  l' r'
@@ -723,9 +726,12 @@ accumulate Unit                        = Unit
 accumulate x@Ref{} = x
 accumulate x@Chc{} = x
   -- bools
-accumulate (BOp Not (Ref r))           = Ref $! bnot r
-accumulate (BBOp And (Ref l) (Ref r))  = Ref $! l &&& r
-accumulate (BBOp Or  (Ref l) (Ref r))  = Ref $! l ||| r
+accumulate (BOp Not (Ref r))            = Ref $! bnot r
+accumulate (BBOp And (Ref l) (Ref r))   = Ref $! l &&& r
+accumulate (BBOp Or  (Ref l) (Ref r))   = Ref $! l ||| r
+accumulate (BBOp Impl  (Ref l) (Ref r)) = Ref $! l ==> r
+accumulate (BBOp Eqv (Ref l) (Ref r))   = Ref $! l <=> r
+accumulate (BBOp XOr (Ref l) (Ref r))   = Ref $! l <+> r
   -- numerics
 accumulate (IBOp LT (Ref' l) (Ref' r))  = Ref $! l T..< r
 accumulate (IBOp LTE (Ref' l) (Ref' r)) = Ref $! l T..<= r
@@ -825,15 +831,16 @@ evaluate :: ( St.MonadState a m
             , I.SolverContext m) =>
             IL -> m VarCore
   -- computation rules
-evaluate Unit     = do s <- St.get
-                       logWith "Received Unit with State: " s
-                       return $! intoCore Unit
-evaluate (Ref b)  = toSolver b
+evaluate Unit     = return $! intoCore Unit
+evaluate (Ref b)  = logWith "Ref" b >> toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
 evaluate (BBOp And  (Ref l) (Ref r)) = toSolver $! l &&& r
 evaluate (BBOp Or   (Ref l) (Ref r)) = toSolver $! l ||| r
+evaluate (BBOp Impl (Ref l) (Ref r)) = toSolver $! l ==> r
+evaluate (BBOp Eqv  (Ref l) (Ref r)) = toSolver $! l <=> r
+evaluate (BBOp XOr  (Ref l) (Ref r)) = toSolver $! l <+> r
   -- numerics
 evaluate (IBOp LT  (Ref' l) (Ref' r)) = toSolver $! l .< r
 evaluate (IBOp LTE (Ref' l) (Ref' r)) = toSolver $! l .<= r
@@ -849,9 +856,9 @@ evaluate x@(IBOp _ Chc' {} Chc' {})  = return $! intoCore x
 evaluate x@(IBOp _ (Ref' _) Chc' {}) = return $! intoCore x
 evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
-evaluate (BBOp And l Unit)      = evaluate l
-evaluate (BBOp And Unit r)      = evaluate r
-evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; logWith "evalL " x; evaluate l
+evaluate (BBOp And l Unit)      = log "Unit in R" >> evaluate l
+evaluate (BBOp And Unit r)      = log "Unit in L" >> evaluate r
+evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; logWith "eval'ing L" x; evaluate l
 evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; logWith "eval'ing R" x; evaluate r
 evaluate x@(IBOp op l r)        =
   logWith "Found relation" x >>
@@ -864,10 +871,9 @@ evaluate x@(IBOp op l r)        =
 
 
   -- accumulation cases
-evaluate x@(BOp Not _)  =  logWith "Unary Boolean Op in Eval" x >>
-  do let x'  = accumulate x
-     if isValue x' then evaluate x' else return $ intoCore x'
-evaluate x@(BBOp And l r) = logWith "Eval And Recurring: " x >>
+evaluate x@(BOp Not _)  = do let x'  = accumulate x
+                             if isValue x' then evaluate x' else return $ intoCore x'
+evaluate (BBOp And l r) = log "[Eval] And case" >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
      let res = BBOp And l' r'
@@ -879,12 +885,13 @@ evaluate x@(BBOp And l r) = logWith "Eval And Recurring: " x >>
      if isValue l' || isValue r'
        then evaluate res
        else return $! intoCore res
-evaluate x@(BBOp op l r)  = logWith "Eval General Recurring " x >>
+evaluate x@(BBOp op l r) = logWith "General Case" x >>
   let l' = accumulate l
       r' = accumulate r
       res = BBOp op l' r' in
     if isValue l' && isValue r'
-       then logWith "Reducing more" res >> evaluate res
+       then logWith "Reducing more" res >>
+            evaluate res
     else do logWith "couldn't reduce" res
             logWith "Left " l'
             logWith "Right " r'
@@ -971,8 +978,9 @@ findChoice x@(InNum Ref'{} InR{}) = error $ "An impossible case: " ++ show x
 store :: (St.MonadState State io, MonadIO io) => Result -> io ()
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
-store r = do (results,_) <- St.gets (fromJust . getResultChans . resultChans)
-             liftIO $ U.writeChan results r
+store !r = do (results,_) <- St.gets (fromJust . getResultChans . resultChans)
+              liftIO $ putStrLn "writing to results"
+              liftIO $ U.writeChan results r
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1086,8 +1094,8 @@ choose loc =
   do
     let !loc' = findChoice loc
     case loc' of
-      x@(InBool (Chc d cl cr) ctx) -> do
-        logWith "Got choice in context: " x
+      (InBool (Chc d cl cr) ctx) -> do
+        log "Got choice in context InBool"
         conf <- St.gets config
         let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
             goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
@@ -1097,8 +1105,8 @@ choose loc =
           Just False -> goRight
           Nothing    -> alternative d goLeft goRight
 
-      x@(InNum (Chc' d cl cr) ctx) -> do
-        logWith "Got choice in context: " x
+      (InNum (Chc' d cl cr) ctx) -> do
+        log "Got choice in context InNum"
         conf <- St.gets config
         let goLeft  = toIL' cl >>= choose . findChoice . toLocWith' ctx . accumulate'
             goRight = toIL' cr >>= choose . findChoice . toLocWith' ctx . accumulate'
