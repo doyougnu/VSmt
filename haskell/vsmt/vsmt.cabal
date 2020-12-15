@@ -35,6 +35,7 @@ library
                  , Parser.Result
                  , Solve
                  , Settings
+                 , Utils
   other-modules: Paths_vsmt
   hs-source-dirs:  Data
   build-depends: base
@@ -230,7 +231,8 @@ benchmark financial
                     TemplateHaskell
                     TupleSections
                     TypeApplications
-  build-depends: base >= 4.11
+  build-depends: aeson
+               , base >= 4.11
                , containers
                , deepseq
                , directory
@@ -246,3 +248,43 @@ benchmark financial
                 , VSMTBench/Financial
   main-is:       Main.hs
   Other-modules: Utils.VSMTBenchFramework
+
+benchmark auto
+  type            : exitcode-stdio-1.0
+  default-language: Haskell2010
+  ghc-options     : -O2 -threaded "-with-rtsopts=-qg"
+  other-extensions: BangPatterns
+                    DataKinds
+                    DeriveAnyClass
+                    DeriveDataTypeable
+                    FlexibleContexts
+                    GeneralizedNewtypeDeriving
+                    OverloadedLists
+                    OverloadedStrings
+                    Rank2Types
+                    RankNTypes
+                    ScopedTypeVariables
+                    StandaloneDeriving
+                    TemplateHaskell
+                    TupleSections
+                    TypeApplications
+  build-depends: aeson
+               , base >= 4.11
+               , containers
+               , deepseq
+               , directory
+               , gauge
+               , hashable
+               , megaparsec
+               , parser-combinators
+               , text
+               , sbv
+               , vsmt
+  hs-source-dirs: VSMTBench
+                , VSMTBench/Bench
+                , VSMTBench/Automotive
+  main-is:       Main.hs
+  Other-modules: Utils.VSMTBenchFramework
+                 , Auto
+                 , Parser
+                 , Lang

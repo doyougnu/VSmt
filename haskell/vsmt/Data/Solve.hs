@@ -53,7 +53,7 @@ import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
 import           Prelude                               hiding (EQ, GT, LT, log)
 
-import           Core.Core                        (posVariantCnt)
+import           Core.Core                        (maxVariantCount)
 import           Core.Pretty
 import           Core.Result
 import           Core.Types
@@ -123,7 +123,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
                              , workChans=workChans, resultChans=resultChans}
 
          -- solver settings
-         posVariants  = posVariantCnt i
+         posVariants  = maxVariantCount i
          solverConfig = getConfig solver
 
          -- This is our "main" thread, we're going to reduce to a variational

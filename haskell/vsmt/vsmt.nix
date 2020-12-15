@@ -3,7 +3,7 @@
 , parser-combinators, QuickCheck, sbv, silently, stdenv, tasty
 , tasty-golden, tasty-hspec, tasty-hunit, tasty-quickcheck, text
 , transformers, unordered-containers, z3, zlib, unagi-chan
-, async, directory
+, async, directory, aeson
 }:
 mkDerivation {
   pname = "vsmt";
@@ -24,6 +24,7 @@ mkDerivation {
 
   benchmarkHaskellDepends = [ base deepseq gauge silently megaparsec text
                               parser-combinators sbv containers directory
+                              aeson
                             ];
   homepage = "https://github.com/doyougnu/VSmt";
   description = "SMT Based Verification with first class variational programming capabilities";

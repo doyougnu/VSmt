@@ -27,10 +27,12 @@ module Core.Core where
 import           Prelude                    hiding (EQ, GT, LT, log)
 import           Data.Foldable (toList)
 import           Data.Function ((&))
+import           Data.List     (foldl1')
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 
 import Core.Types
+
 
 ----------------------------- Choice Manipulation ------------------------------
 -- | Type class that dispatches the appropriate way to configure based on the
@@ -126,8 +128,8 @@ dimensions' (OpII _ l r)          = dimensions' l `Set.union` dimensions' r
 dimensions' _                     = Set.empty
 
 -- | given a proposition return how many possible variants the prop represents
-posVariantCnt :: Prop' a -> Int
-posVariantCnt = (2^) . Set.size . dimensions
+maxVariantCount :: Prop' a -> Int
+maxVariantCount = (2^) . Set.size . dimensions
 
 -- | return the set of numeric variables with their type
 numericsWithType :: Ord a => Prop' a -> Set.Set (ExRefType a)
@@ -174,6 +176,7 @@ genConfigs (toList . dimensions -> ds) = (Map.!) . Map.fromList <$> booleanCombi
     booleanCombinations (d:dims) =
       fmap ((d, True) :) cs ++ fmap ((d, False) :) cs
       where cs = booleanCombinations dims
+
 
 -------------------------- Diagnostics ------------------------------------------
 compressionRatio :: (Configurable Config p, p ~ (Prop' a)) => p -> Float
@@ -240,3 +243,15 @@ hasVariables p = (not . Set.null $ booleans p) || (not . Set.null $ numerics p)
 
 onlyBools :: Proposition -> Bool
 onlyBools = Set.null . numerics
+
+
+-------------------------- Construction -----------------------------------------
+fromList :: Foldable f => (a -> a -> a) -> f a -> a
+fromList _ (null -> True) = error "Empty Foldable in fromList'"
+fromList f (toList -> xs) = foldl1' f xs
+
+conjoin :: Foldable f => f (Prop' a) -> Prop' a
+conjoin = fromList $ OpBB And
+
+disjoin :: Foldable f => f (Prop' a) -> Prop' a
+disjoin = fromList $ OpBB Or
