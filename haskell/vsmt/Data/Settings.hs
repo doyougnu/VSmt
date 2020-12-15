@@ -35,7 +35,8 @@ data Settings = Settings { solver           :: Solver
                          , producerBufSize  :: Int
                          , readerBufSize    :: Int
                          , numProducers     :: Int
-                         , numReaders       :: Int
+                         , numConsumers     :: Int
+                         , numVCWorkers     :: Int
                          } deriving (Show, Generic)
 
 newtype Solver = Solver { getConfig :: S.SMTConfig }
@@ -53,7 +54,8 @@ defSettings = Settings{ solver          = Solver S.z3
                       , readerBufSize   = 250
                       , numResults      = Nothing
                       , numProducers    = 250
-                      , numReaders      = 50
+                      , numConsumers    = 50
+                      , numVCWorkers    = 10
                       }
 
 defSettingsOnlySat :: Settings
@@ -72,7 +74,8 @@ minSettings = Settings{ solver          = Solver S.z3
                       , readerBufSize   = 10
                       , numResults      = Nothing
                       , numProducers    = 2
-                      , numReaders      = 2
+                      , numConsumers    = 2
+                      , numVCWorkers    = 1
                       }
 
 debugSettings :: Settings

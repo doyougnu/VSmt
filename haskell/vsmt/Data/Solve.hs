@@ -29,9 +29,11 @@
 module Solve where
 
 import           Control.Applicative                   ((<|>))
-import           Control.Concurrent                    (forkIO, killThread)
+import           Control.Concurrent                    (forkIO)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
+import qualified Control.Concurrent.STM                as STM
+import           Control.Monad.STM                     (atomically)
 import           Control.Monad                         (forever, void, when)
 import           Control.Monad.Except                  (MonadError)
 import           Control.Monad.IO.Class                (liftIO)
@@ -51,7 +53,9 @@ import qualified Data.SBV.Internals                    as I
 import qualified Data.SBV.Trans                        as T
 import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
-import           Prelude                               hiding (EQ, GT, LT, log)
+import           Data.Text.IO                          (putStrLn)
+import           Prelude                               hiding (EQ, GT, LT, log,putStrLn)
+import           System.Exit                           (exitSuccess)
 
 import           Core.Core                        (maxVariantCount)
 import           Core.Pretty
@@ -70,6 +74,11 @@ logWith msg value = log $ msg <> sep <> Text.pack (show value)
   where sep :: Text.Text
         sep = " : "
 
+logIOWith :: Show a => Text.Text -> a -> IO ()
+logIOWith msg value = putStrLn $ msg <> sep <> Text.pack (show value)
+  where sep :: Text.Text
+        sep = " : "
+
 logPretty :: (Pretty a, MonadLogger m, Show a) => Text.Text -> a -> m ()
 logPretty msg value = log $ msg <> sep <> pretty value
   where sep :: Text.Text
@@ -85,11 +94,26 @@ logInThread tid msg = log logmsg
     logmsg :: Text.Text
     logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
 
+logInThreadIO :: Int -> Text.Text -> IO ()
+logInThreadIO tid msg = putStrLn logmsg
+  where
+    logmsg :: Text.Text
+    logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+
 logInThreadWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
 logInThreadWith tid msg = logWith logmsg
   where
     logmsg :: Text.Text
     logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+
+logInThreadIOWith :: Show a => Int -> Text.Text -> a -> IO ()
+logInThreadIOWith tid msg value = putStrLn logmsg
+  where logmsg :: Text.Text
+        logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> "
+                 <> msg <> sep <> Text.pack (show value)
+
+        sep :: Text.Text
+        sep = " : "
 
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
 logThenPass str a = logWith str a >> return a
@@ -109,23 +133,28 @@ solution = extract <$> St.get
 -- to the IL type
 solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 solveVerbose  i (fromMaybe true -> conf) Settings{..} =
-  do (toMain, fromVC)             <- U.newChan vcBufSize
-     (toVC,   fromMain)           <- U.newChan vcBufSize
-     (wcRequest, wcResponse)      <- U.newChan producerBufSize
-     (resultsIn, finishedResults) <- U.newChan producerBufSize
+  do (toMain, fromVC)          <- U.newChan vcBufSize
+     (toVC,   fromMain)        <- U.newChan vcBufSize
+     (prdRequest, prdResponse) <- U.newChan producerBufSize
+     (resultsIn, resultsOut)   <- U.newChan producerBufSize
 
+     resultCounter             <- STM.newTVarIO 0
+     results                   <- STM.newTVarIO mempty
 
   -- init the channels
      let vcChans     = VCChannels     $ pure (fromMain, toMain)
          mainChans   = MainChannels   $ pure (fromVC, toVC)
-         workChans   = WorkChannels   $ pure (wcRequest, wcResponse)
-         resultChans = ResultChannels $ pure (resultsIn, finishedResults)
+         workChans   = WorkChannels   $ pure (prdRequest, prdResponse)
+         resultChans = ResultChannels $ pure (resultsIn, resultsOut)
          startState  = mempty{ vcChans=vcChans, mainChans=mainChans
                              , workChans=workChans, resultChans=resultChans}
 
          -- solver settings
-         posVariants  = maxVariantCount i
-         solverConfig = getConfig solver
+         posVariants     = maxVariantCount i
+         expectedResults = fromMaybe posVariants numResults
+         consSettings    = (verboseMode, expectedResults)
+         consComms       = (resultCounter, results)
+         solverConfig    = getConfig solver
 
          -- This is our "main" thread, we're going to reduce to a variational
          -- core and spawn producers. The producers will block on a work channel
@@ -143,27 +172,32 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
              -- mapConcurrently is to wait for results. We only know that a max
              -- of 2^(# unique dimensions) is the max, but the user may only
              -- want a subset, thus we can't wait for them to finish.
-             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning solverConfig st) [0..numProducers]
+             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning solverConfig st) [1..numProducers]
              -- now continue to solver thereby placing work on the channel
              C.query $
                runSolverWith runStdoutLoggingT st $
                findVCore il >>= removeChoices
 
-         accumulateResults !acc !n = do
-           when verboseMode . putStrLn $ "[Accumulator] with n == " ++ show n
-           if n == fromMaybe posVariants numResults
-             then return acc
-             else do when verboseMode . putStrLn $ "[Accumulator] waiting"
-                     r <- U.readChan finishedResults
-                     when verboseMode . putStrLn $ "[Accumulator] got result; n is: " ++ show n ++ " and should get to: " ++ show posVariants
-                     accumulateResults (r <> acc) (succ n)
+         runConsumers =
+           void $ liftIO $ forkIO $
+           A.mapConcurrently_ (consumer consComms consSettings resultsOut)
+           [1..numConsumers]
 
-     tid <- forkIO $ initVCWorker conf vcChans
+         runVCWorkers =
+           void $ liftIO $
+           A.mapConcurrently_ (vcWorker conf vcChans)
+           [1..numVCWorkers]
 
      -- kick off
-     (_,results)<- runProducers `A.concurrently` accumulateResults mempty 0
-     killThread tid -- if we get here we're done
-     return results
+     void $ runProducers `A.concurrently_`
+            runConsumers `A.concurrently_`
+             runVCWorkers
+
+     -- if we get here then we are done so we can just read our result TVar
+     finalResults <- STM.readTVarIO results
+     finalCounter <- STM.readTVarIO resultCounter
+     when verboseMode $ logIOWith "finished with result count: " finalCounter
+     return finalResults
 
 -- TODO runNoLogging
 solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
@@ -189,7 +223,10 @@ sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
-type Seasoning = T.Symbolic (IL, State)
+type Seasoning     = T.Symbolic (IL, State)
+type ThreadID      = Int
+type MaxVariantCnt = Int
+type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
@@ -205,6 +242,59 @@ producer seasoning c _ tid = T.runSMTWith c $
             continue <- liftIO $ U.readChan requests
             logInThread tid "Read a request, lets go"
             continue
+
+-- | A consumer is a thread that waits for results on the result channel, when
+-- it picks up a result it increases the result counter to broadcast to other
+-- threads and atomically modifies the result TVar for main. The thread exits
+-- when the result counter hits the expected result number determined either by
+-- the possible variants or the user.
+consumer :: ConsumerComms -> (Bool, MaxVariantCnt) -> FromResultChan -> ThreadID -> IO ()
+consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
+  do n <- STM.readTVarIO counter
+     when verboseMode $ logInThreadIOWith tid "[Consumer] with n == " n
+     if n == expectedResults
+       then exitSuccess
+       else do when verboseMode $ logInThreadIO tid "[Consumer] waiting"
+               r <- U.readChan resultsOut
+               when verboseMode $ logInThreadIO tid "[Consumer] got result"
+               atomically $ do STM.modifyTVar' counter succ
+                               STM.modifyTVar' acc (r <>)
+
+-- | A variant context (vc) work is a thread which serves to issue is sat or is not
+-- sat calls for the variant context. The producers will issue commands requests
+-- on the vc channel and the vc threads will check sat and issue the response.
+-- This solver two problems: first it avoids calling allSat at the beginning of
+-- the run, such as in VSAT, and secondly it maintains a clear and clean
+-- separation between the variant context and the query formula. Or in other
+-- words the producer instances don't know about the variant context variables
+-- and thus the query formula variables are actually disjoint from dimensions
+-- just as we would expect.
+vcWorker :: VariantContext -> VCChannels -> Int -> IO ()
+vcWorker vc (getVcChans -> Just (fromMain, toMain)) _ =
+  T.runSMTWith T.z3{T.verbose=True} $ do
+  -- season the solver
+  (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
+  T.constrain b
+  -- enter query mode
+  C.query $
+  -- listen to the channel forever and check requests incrementally against the
+  -- context
+    void $
+    runSolverWith runStdoutLoggingT st $
+    forever $
+     do (d, shouldNegate) <- C.io $ U.readChan fromMain
+        C.inNewAssertionStack $
+          do sD <- cached d
+             T.constrain $ if shouldNegate then bnot sD else sD
+
+             C.checkSat >>= C.io . \case
+               C.Sat -> U.writeChan toMain True
+               _     -> U.writeChan toMain False
+
+
+ -- this can never happen and even if it does we want to stop
+vcWorker _ _ _ = error "passed no channels to vcWorker!"
+
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -1121,32 +1211,6 @@ choose loc =
 
 
 --------------------------- Variant Context Helpers ----------------------------
-initVCWorker :: VariantContext -> VCChannels -> IO ()
-initVCWorker vc (getVcChans -> Just (fromMain, toMain)) =
-  T.runSMTWith T.z3{T.verbose=True} $ do
-  -- season the solver
-  (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
-  T.constrain b
-  -- enter query mode
-  C.query $
-  -- listen to the channel forever and check requests incrementally against the
-  -- context
-    void $
-    runSolverWith runStdoutLoggingT st $
-    forever $
-     do (d, shouldNegate) <- C.io $ U.readChan fromMain
-        C.inNewAssertionStack $
-          do sD <- cached d
-             T.constrain $ if shouldNegate then bnot sD else sD
-
-             C.checkSat >>= C.io . \case
-               C.Sat -> U.writeChan toMain True
-               _     -> U.writeChan toMain False
-
-
- -- this can never happen and even if it does we want to stop
-initVCWorker _ _ = error "passed no channels to initVCWorker!"
-
 contextToSBool' :: VariantContext -> PreSolver (LoggingT (T.SymbolicT IO)) T.SBool
 contextToSBool' (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
