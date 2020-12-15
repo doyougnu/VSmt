@@ -47,12 +47,12 @@ defSettings :: Settings
 defSettings = Settings{ solver          = Solver S.z3
                       , seed            = Nothing
                       , generateModels  = True
-                      , verboseMode     = False
+                      , verboseMode     = True
                       , vcBufSize       = 250
                       , producerBufSize = 250
                       , readerBufSize   = 250
                       , numResults      = Nothing
-                      , numProducers    = 100
+                      , numProducers    = 250
                       , numReaders      = 50
                       }
 
@@ -66,13 +66,13 @@ minSettings :: Settings
 minSettings = Settings{ solver          = Solver S.z3
                       , seed            = Nothing
                       , generateModels  = False
-                      , verboseMode     = False
-                      , vcBufSize       = 1
-                      , producerBufSize = 1
-                      , readerBufSize   = 1
+                      , verboseMode     = True
+                      , vcBufSize       = 10
+                      , producerBufSize = 10
+                      , readerBufSize   = 10
                       , numResults      = Nothing
-                      , numProducers    = 1
-                      , numReaders      = 1
+                      , numProducers    = 2
+                      , numReaders      = 2
                       }
 
 debugSettings :: Settings

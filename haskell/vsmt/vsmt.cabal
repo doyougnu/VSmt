@@ -38,7 +38,8 @@ library
                  , Utils
   other-modules: Paths_vsmt
   hs-source-dirs:  Data
-  build-depends: base
+  build-depends: async
+               , base
                , bifunctors
                , containers >= 0.6.0.1
                , deepseq
@@ -48,11 +49,11 @@ library
                , mtl
                , parser-combinators
                , sbv >= 8.8
+               , stm
                , text
                , transformers >= 0.5.6.2
                , unordered-containers >= 0.2.13
                , unagi-chan
-               , async
   default-language: Haskell2010
   other-extensions: BangPatterns
                     CPP
@@ -215,7 +216,7 @@ benchmark busybox
 benchmark financial
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -O2 -threaded "-with-rtsopts=-qg"
+  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -N16"
   other-extensions: BangPatterns
                     DataKinds
                     DeriveAnyClass
@@ -233,6 +234,7 @@ benchmark financial
                     TypeApplications
   build-depends: aeson
                , base >= 4.11
+               , bytestring
                , containers
                , deepseq
                , directory
@@ -248,12 +250,15 @@ benchmark financial
                 , VSMTBench/Financial
   main-is:       Main.hs
   Other-modules: Utils.VSMTBenchFramework
-               , Core
+               , Bench.Core
+               , Lang
+               , Parser
+               , Financial
 
 benchmark auto
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -O2 -threaded "-with-rtsopts=-qg"
+  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -N16"
   other-extensions: BangPatterns
                     DataKinds
                     DeriveAnyClass

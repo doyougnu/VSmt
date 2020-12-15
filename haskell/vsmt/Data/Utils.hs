@@ -22,7 +22,7 @@ module Utils where
 
 -- import           Core.Core          (maxVariantCount)
 -- import           SAT
--- import           Core.Types
+import           Core.Types
 
 -- genConfigPool :: Maybe VariantContext -> IO [Config]
 genConfigPool :: a
@@ -43,3 +43,6 @@ selectVariant = error "select variant"
 
 selectVariantTotal :: a
 selectVariantTotal = error "select variant total"
+
+renameDims :: (a -> b) -> Prop' a -> Prop' b
+renameDims = fmap

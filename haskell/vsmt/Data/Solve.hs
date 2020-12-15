@@ -155,7 +155,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
              then return acc
              else do when verboseMode . putStrLn $ "[Accumulator] waiting"
                      r <- U.readChan finishedResults
-                     when verboseMode . putStrLn $ "[Accumulator] got result; n is: " ++ show n ++ "and should get to: " ++ show posVariants
+                     when verboseMode . putStrLn $ "[Accumulator] got result; n is: " ++ show n ++ " and should get to: " ++ show posVariants
                      accumulateResults (r <> acc) (succ n)
 
      tid <- forkIO $ initVCWorker conf vcChans
