@@ -19,8 +19,8 @@ import Prelude hiding (LT,GT,EQ)
 import Data.Text (Text,singleton,toUpper,pack)
 import Control.Monad (liftM2,liftM3)
 
-import Data.Core.Types
-import Data.Core.Core
+import Core.Types
+import Core.Core
 
 -------------------------- Helpers ---------------------------------------------
 -- | Generate only alphabetical characters

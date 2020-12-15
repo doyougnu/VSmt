@@ -13,12 +13,12 @@
 
 module TestSuite.Solve.Arithmetic.Plain where
 
-import Data.Solve
 import Data.Text
 import Utils.VSMTTestFramework
 import qualified Test.Tasty.QuickCheck as QC
 import qualified Test.QuickCheck.Monadic as QCM
 
+import Solve
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree
 tests = testGroup "Plain formulas"
@@ -51,7 +51,7 @@ sub = do
 plainBecomesUnit :: TestTree
 plainBecomesUnit = QC.testProperty
   "For all plain formulas the found variational core is Unit"
-  $ \p -> isPlain p QC.==> QCM.monadicIO $
+  $ \p -> not (isVariational p) QC.==> QCM.monadicIO $
           do (core, _) <- liftIO $ solveForCoreVerbose p Nothing
              QCM.assert $ isUnit core
 

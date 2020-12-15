@@ -22,10 +22,10 @@ import qualified Data.Set as Set
 import Prelude hiding (EQ, LT, GT)
 import qualified Data.List as L
 
-import Data.Parser.Result
-import Data.Core.Pretty
-import Data.Core.Types
-import Data.Core.Core
+import Parser.Result
+import Core.Pretty
+import Core.Types
+import Core.Core
 
 import qualified Test.Tasty.QuickCheck as QC
 import qualified Test.QuickCheck.Monadic as QCM

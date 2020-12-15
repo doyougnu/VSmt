@@ -13,10 +13,10 @@
 
 module TestSuite.Solve.Arithmetic.Choices where
 
-import Data.Solve
-import Utils.VSMTTestFramework
 import Prelude hiding (EQ, LT, GT)
 
+import Utils.VSMTTestFramework
+import Solve
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree
 tests = testGroup "Variational formulas"

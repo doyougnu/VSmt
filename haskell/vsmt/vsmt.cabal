@@ -124,6 +124,7 @@ Test-Suite VSMTTest
                   , QuickCheck
                   , sbv
                   , unordered-containers
+                  , vsmt
   Hs-Source-Dirs  : VSMTTestSuite
   main-is         : VSMTTest.hs
   Other-modules   : Utils.VSMTTestFramework

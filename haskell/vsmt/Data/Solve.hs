@@ -191,7 +191,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
      -- kick off
      void $ runProducers `A.concurrently_`
             runConsumers `A.concurrently_`
-             runVCWorkers
+            runVCWorkers
 
      -- if we get here then we are done so we can just read our result TVar
      finalResults <- STM.readTVarIO results
@@ -215,8 +215,8 @@ solveForCoreVerbose  i (fromMaybe true -> conf) =
               logWith "Is Core Unit: " (isUnit core)
               return core
 
-satVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-satVerbose = solveVerbose
+satVerbose :: Proposition -> Maybe VariantContext -> IO Result
+satVerbose p vc = solveVerbose p vc defSettings
 
 sat :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 sat = solveVerbose

@@ -15,9 +15,9 @@ module Utils.VSMTTestFramework
   ( module Test.Tasty
   , module Test.Tasty.Hspec
   , module Test.Tasty.HUnit
-  , module Data.Core.Types
-  , module Data.Core.Result
-  , module Data.Core.Core
+  , module Core.Types
+  , module Core.Result
+  , module Core.Core
   , module Utils.VSMTGen
   , goldenVsStringShow
   , goldFile
@@ -33,14 +33,14 @@ import Test.Tasty.Hspec
 import Test.Tasty.HUnit
 import Data.Text (Text)
 import Control.Monad.IO.Class (liftIO)
-import Data.Solve (satVerbose, solveForCoreVerbose)
 import System.FilePath ((</>), (<.>))
 import qualified Data.ByteString.Lazy.Char8 as LBC
 import Utils.VSMTGen
 
-import Data.Core.Types
-import Data.Core.Result
-import Data.Core.Core
+import Solve (satVerbose, solveForCoreVerbose)
+import Core.Types
+import Core.Result
+import Core.Core
 
 goldFile :: FilePath -> FilePath
 goldFile name = "VSMTTestSuite" </> "GoldFiles" </> name <.> "gold"

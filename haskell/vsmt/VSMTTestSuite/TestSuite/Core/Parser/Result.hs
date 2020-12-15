@@ -13,11 +13,11 @@
 
 module TestSuite.Core.Parser.Result where
 
-import Data.Parser.Result
+import Parser.Result
 import Utils.VSMTTestFramework
 import qualified Data.Text.IO as T
 
-import Data.Core.Pretty
+import Core.Pretty
 
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree

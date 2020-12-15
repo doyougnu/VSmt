@@ -13,7 +13,7 @@
 
 module TestSuite.Solve.Boolean.Choices where
 
-import Data.Solve
+import Solve
 import Utils.VSMTTestFramework
 
 ------------------------------- Bool Equivalences ------------------------------
