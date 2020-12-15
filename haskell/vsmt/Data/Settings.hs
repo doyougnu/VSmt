@@ -20,6 +20,7 @@ module Settings
   , minSettings
   , debugSettings
   , defSettingsNoVerbose
+  , debugSettingsNoVerbose
   ) where
 
 import GHC.Generics (Generic)
@@ -69,14 +70,17 @@ minSettings = Settings{ solver          = Solver S.z3
                       , seed            = Nothing
                       , generateModels  = False
                       , verboseMode     = True
-                      , vcBufSize       = 10
-                      , producerBufSize = 10
-                      , readerBufSize   = 10
+                      , vcBufSize       = 1
+                      , producerBufSize = 1
+                      , readerBufSize   = 1
                       , numResults      = Nothing
-                      , numProducers    = 2
-                      , numConsumers    = 2
+                      , numProducers    = 1
+                      , numConsumers    = 1
                       , numVCWorkers    = 1
                       }
 
 debugSettings :: Settings
-debugSettings = minSettings{verboseMode=True}
+debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}
+
+debugSettingsNoVerbose :: Settings
+debugSettingsNoVerbose = minSettings{verboseMode=True}

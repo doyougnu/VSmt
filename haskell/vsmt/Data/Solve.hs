@@ -79,6 +79,9 @@ logIOWith msg value = putStrLn $ msg <> sep <> Text.pack (show value)
   where sep :: Text.Text
         sep = " : "
 
+logIO :: Text.Text -> IO ()
+logIO = putStrLn
+
 logPretty :: (Pretty a, MonadLogger m, Show a) => Text.Text -> a -> m ()
 logPretty msg value = log $ msg <> sep <> pretty value
   where sep :: Text.Text
@@ -87,39 +90,68 @@ logPretty msg value = log $ msg <> sep <> pretty value
 logState :: Solver ()
 logState = St.get >>= logWith "State: "
 
-
-logInThread :: MonadLogger m => Int -> Text.Text -> m ()
-logInThread tid msg = log logmsg
+logInThread :: MonadLogger m => Text.Text -> Int -> Text.Text -> m ()
+logInThread kind tid msg = log logmsg
   where
     logmsg :: Text.Text
-    logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+    logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
 
-logInThreadIO :: Int -> Text.Text -> IO ()
-logInThreadIO tid msg = putStrLn logmsg
+logInProducer' :: MonadLogger m => Int -> Text.Text -> m ()
+logInProducer' = logInThread "Producer"
+
+logInConsumer' :: MonadLogger m => Int -> Text.Text -> m ()
+logInConsumer' = logInThread "Consumer"
+
+logInThreadIO :: Text.Text -> Int -> Text.Text -> IO ()
+logInThreadIO kind tid msg = putStrLn logmsg
   where
     logmsg :: Text.Text
-    logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+    logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
 
-logInThreadWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
-logInThreadWith tid msg = logWith logmsg
+logInThreadWith :: (MonadLogger m, Show a) => Text.Text -> Int -> Text.Text -> a -> m ()
+logInThreadWith kind tid msg = logWith logmsg
   where
     logmsg :: Text.Text
-    logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> " <> msg
+    logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
 
-logInThreadIOWith :: Show a => Int -> Text.Text -> a -> IO ()
-logInThreadIOWith tid msg value = putStrLn logmsg
+logInProducerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
+logInProducerWith = logInThreadWith "Producer"
+
+logInConsumerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
+logInConsumerWith = logInThreadWith "Consumer"
+
+logInThreadIOWith :: Show a => Text.Text -> Int -> Text.Text -> a -> IO ()
+logInThreadIOWith kind tid msg value = putStrLn logmsg
   where logmsg :: Text.Text
-        logmsg = "[Thread: " <> Text.pack (show tid) <> "] " <> "==> "
+        logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> "
                  <> msg <> sep <> Text.pack (show value)
 
         sep :: Text.Text
         sep = " : "
 
+logInIOProducerWith :: Show a => Int -> Text.Text -> a -> IO ()
+logInIOProducerWith = logInThreadIOWith "Producer"
+
+logInIOConsumerWith :: Show a => Int -> Text.Text -> a -> IO ()
+logInIOConsumerWith = logInThreadIOWith "Consumer"
+
+logInIOProducer :: Int -> Text.Text -> IO ()
+logInIOProducer = logInThreadIO "Producer"
+
+logInIOConsumer :: Int -> Text.Text -> IO ()
+logInIOConsumer = logInThreadIO "Consumer"
+
+logInProducer :: (St.MonadState State m, MonadLogger m) => Text.Text -> m ()
+logInProducer msg = St.gets threadId >>= flip logInProducer' msg
+
+logInConsumer :: (St.MonadState State m, MonadLogger m) => Text.Text -> m ()
+logInConsumer msg = St.gets threadId >>= flip logInConsumer' msg
+
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
 logThenPass str a = logWith str a >> return a
 
 logThreadPass :: (MonadLogger m, Show b) => Int -> Text.Text -> b -> m b
-logThreadPass tid str a = logInThreadWith tid str a >> return a
+logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
 findVCore :: IL -> Solver VarCore
@@ -163,7 +195,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
          runProducers =
            T.runSMTWith solverConfig $ do
              C.io $ putStrLn "preconditioning in main"
-             (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+             (_, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
              -- seasoning <- T.symbolicEnv
              let seasoning = runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
@@ -172,21 +204,33 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
              -- mapConcurrently is to wait for results. We only know that a max
              -- of 2^(# unique dimensions) is the max, but the user may only
              -- want a subset, thus we can't wait for them to finish.
-             _ <- liftIO $ forkIO $ A.mapConcurrently_ (producer seasoning solverConfig st) [1..numProducers]
-             -- now continue to solver thereby placing work on the channel
-             C.query $
-               runSolverWith runStdoutLoggingT st $
-               findVCore il >>= removeChoices
+             void $ liftIO $ forkIO $
+               A.mapConcurrently_ (producer seasoning solverConfig st)
+               [1..numProducers]
 
-         runConsumers =
-           void $ liftIO $ forkIO $
+         runConsumers = void $ liftIO $ forkIO $
            A.mapConcurrently_ (consumer consComms consSettings resultsOut)
            [1..numConsumers]
 
-         runVCWorkers =
-           void $ liftIO $
+         runVCWorkers = void $ liftIO $
            A.mapConcurrently_ (vcWorker conf vcChans)
            [1..numVCWorkers]
+
+         populateChans = void $ liftIO $ forkIO $
+           void $ T.runSMTWith solverConfig $ do
+           (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+           -- now generate the first core thereby placing work on the channels
+           -- this thread will exit once it places requests on the producer
+           -- chans. If the IL is a unit then it'll be caught by evaluate and
+           -- placed on a result chan anyway
+           void $ C.query $
+             runSolverWith runStdoutLoggingT st $
+             findVCore il >>= removeChoices
+
+           C.io $ logIO "[Populator] We out"
+
+     -- this thread will die once it finds a choice or a unit in the plain case
+     populateChans
 
      -- kick off
      void $ runProducers `A.concurrently_`
@@ -234,13 +278,13 @@ type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 producer :: Seasoning -> T.SMTConfig -> State -> Int -> IO (a, State)
 producer seasoning c _ tid = T.runSMTWith c $
   do (il, st) <- seasoning
-     C.query $ runSolverLog st $
+     C.query $ runSolverLog st{threadId=tid} $
        do _ <- findVCore il
           forever $ do
             (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
-            logInThread tid "Waiting"
+            logInProducer' tid "Waiting"
             continue <- liftIO $ U.readChan requests
-            logInThread tid "Read a request, lets go"
+            logInProducer' tid "Read a request, lets go"
             continue
 
 -- | A consumer is a thread that waits for results on the result channel, when
@@ -251,12 +295,13 @@ producer seasoning c _ tid = T.runSMTWith c $
 consumer :: ConsumerComms -> (Bool, MaxVariantCnt) -> FromResultChan -> ThreadID -> IO ()
 consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
   do n <- STM.readTVarIO counter
-     when verboseMode $ logInThreadIOWith tid "[Consumer] with n == " n
+     when verboseMode $ logInIOConsumerWith tid "n == " n
+     when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
      if n == expectedResults
        then exitSuccess
-       else do when verboseMode $ logInThreadIO tid "[Consumer] waiting"
+       else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
-               when verboseMode $ logInThreadIO tid "[Consumer] got result"
+               when verboseMode $ logInIOConsumer tid "got result"
                atomically $ do STM.modifyTVar' counter succ
                                STM.modifyTVar' acc (r <>)
 
@@ -290,8 +335,6 @@ vcWorker vc (getVcChans -> Just (fromMain, toMain)) _ =
              C.checkSat >>= C.io . \case
                C.Sat -> U.writeChan toMain True
                _     -> U.writeChan toMain False
-
-
  -- this can never happen and even if it does we want to stop
 vcWorker _ _ _ = error "passed no channels to vcWorker!"
 
@@ -417,6 +460,7 @@ data State = State
     , mainChans   :: MainChannels
     , workChans   :: WorkChannels
     , resultChans :: ResultChannels
+    , threadId    :: ThreadID
     }
 
 instance Show State where
@@ -430,6 +474,7 @@ instance Show State where
     , show doubles
     , show bools
     , show dimensions
+    , show threadId
     ]
 
 instance Semigroup State where
@@ -454,6 +499,7 @@ instance Semigroup State where
                  , resultChans = ResultChannels $
                                  getResultChans (resultChans a) <|>
                                  getResultChans (resultChans b)
+                 , threadId    = threadId a
                  }
 
 instance Monoid State where
@@ -468,6 +514,7 @@ instance Monoid State where
                 , mainChans   = MainChannels Nothing
                 , workChans   = WorkChannels   Nothing
                 , resultChans = ResultChannels Nothing
+                , threadId    = 0
                 }
 
 -- TODO remove the StateT dependency for ReaderT
@@ -1123,22 +1170,22 @@ alternative dim goLeft goRight =
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
-            log "Reading dim for true"
+            logInProducer "Reading dim for true"
             checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
             when checkDimTrue $ do
               let continueLeft = C.inNewAssertionStack $
-                    do log "Left Alternative"
+                    do logInProducer "Left Alternative"
                        updateConfigs (bRef dim) (dim,True)
                        goLeft
                   (requests,_) = fromJust . getWorkChans . workChans $ s
-              log "Writing to go left"
+              logInProducer "Writing to go left"
               liftIO $ U.writeChan requests continueLeft
 
             -- reset for left side
             resetTo s
 
            -- right side, notice that we negate the symbolic
-            log "Reading dim for false"
+            logInProducer "Reading dim for false"
             checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
             when checkDimFalse $ do
               let continueRight = C.inNewAssertionStack $
@@ -1147,7 +1194,7 @@ alternative dim goLeft goRight =
                        goRight
                   (requests,_) = fromJust . getWorkChans . workChans $ s
 
-              log "Writing to continue right"
+              logInProducer "Writing to continue right"
               liftIO $ U.writeChan requests continueRight
 
 
