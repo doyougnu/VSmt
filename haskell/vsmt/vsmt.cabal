@@ -239,15 +239,16 @@ benchmark financial
                , gauge
                , hashable
                , megaparsec
+               , mtl
                , parser-combinators
                , text
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
-                , VSMTBench/Bench
                 , VSMTBench/Financial
   main-is:       Main.hs
   Other-modules: Utils.VSMTBenchFramework
+               , Core
 
 benchmark auto
   type            : exitcode-stdio-1.0
@@ -270,21 +271,23 @@ benchmark auto
                     TypeApplications
   build-depends: aeson
                , base >= 4.11
+               , bytestring
                , containers
                , deepseq
                , directory
                , gauge
                , hashable
                , megaparsec
+               , mtl
                , parser-combinators
                , text
                , sbv
                , vsmt
-  hs-source-dirs: VSMTBench
-                , VSMTBench/Bench
-                , VSMTBench/Automotive
+  hs-source-dirs: VSMTBench/
+                  , VSMTBench/Automotive
   main-is:       Main.hs
   Other-modules: Utils.VSMTBenchFramework
                  , Auto
                  , Parser
                  , Lang
+                 , Bench.Core

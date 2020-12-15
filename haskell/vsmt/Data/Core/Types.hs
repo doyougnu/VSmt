@@ -539,7 +539,6 @@ instance Boolean Bool where
   {-# INLINE (&&&) #-}
   {-# INLINE (|||) #-}
 
-
 instance Boolean b => Boolean (S.Symbolic b) where
   true  = return true
   false = return false

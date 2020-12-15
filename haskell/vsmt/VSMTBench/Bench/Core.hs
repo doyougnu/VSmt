@@ -1,17 +1,22 @@
 {-# LANGUAGE BangPatterns #-}
 
-module Core where
+module Bench.Core where
 
 import           Data.List
-import qualified Data.Set   as Set
 import           Gauge
+
+import qualified Data.Set   as Set
+
 import           System.IO.Unsafe  (unsafePerformIO)
+import           Data.Function (on)
+import           Control.DeepSeq (NFData)
 
 import           Core.Core
 import           Core.Types
+import           Utils
 
 
-run :: String -> (t -> IO a) -> t -> Benchmark
+run :: NFData a => String -> (t -> IO a) -> t -> Benchmark
 run !desc !f prop = bench desc $! nfIO (f prop)
 
 average :: (Real a, Fractional b) => [a] -> b
@@ -28,16 +33,16 @@ mkDescription alg confDesc [prop] = desc
     !desc' = [ "Chc"        , show nChc
              , "numPlain"   , show nPln
              , "Compression", show ratio
-             , "VCore_Total", show vCoreTotal
-             , "VCorePlain" , show vCorePlain
-             , "VCoreVar"   , show vCoreVar
+             -- , "VCore_Total", show vCoreTotal
+             -- , "VCorePlain" , show vCorePlain
+             -- , "VCoreVar"   , show vCoreVar
              , "Variants"   , show variants
              ]
     !desc = mconcat $ intersperse "/" $ pure alg ++ pure confDesc ++ desc'
     !nPln = plainCount prop
     !nChc = choiceCount prop
-    ratio :: Double
-    !ratio = fromRational $ compressionRatio prop
+    ratio :: Float
+    !ratio = compressionRatio prop
     !(vCoreTotal, vCorePlain, vCoreVar) = unsafePerformIO $ vCoreMetrics prop
     !variants = 2 ^ (Set.size $ dimensions prop)
 -- copying code, the greatest of all possible sins. This just isn't important
@@ -55,8 +60,8 @@ mkDescription alg confDesc props = desc
     !desc = mconcat $ intersperse "/" $ pure alg ++ pure confDesc ++ desc'
     !nPln = average $ plainCount <$> props
     !nChc = average $ choiceCount <$> props
-    ratio :: Double
-    !ratio = average $ (fromRational . compressionRatio) <$> props
+    ratio :: Float
+    !ratio = average $ compressionRatio <$> props
     vCoreTotalSum, vCorePlainSum, vCoreVarSum :: Int
     !(vCoreTotalSum, vCorePlainSum, vCoreVarSum) =
       (foldr (\(x,y,z) (xAcc, yAcc, zAcc) -> (x + xAcc, y + yAcc, z + zAcc)) (0,0,0)
@@ -74,11 +79,11 @@ mkDescription alg confDesc props = desc
 -- configuration prop, the rest is just pass through parameters to run
 -- ex: mkBench "v-->v" "V1"   d0Conf (satWithConf (toDimProp d0Conf) solverConf) bProp
 -- ex: mkBench "v-->p" "V1*V2*V3" justD012Conf (bfWith solverConf) justbPropV123
-mkBench
-  :: String
+mkBench :: NFData a =>
+     String
      -> String
      -> Proposition
-     -> (Proposition -> IO a1)
+     -> (Proposition -> IO a)
      -> Proposition
      -> Benchmark
 mkBench alg confDesc conf !f prop = run desc f prop
@@ -105,10 +110,10 @@ mkCompBench alg confDesc !f prop = run desc f prop
 -- evolution aware solution. That is, a variational prop will be fully selected
 -- to a plain prop which means that the compression ratio statistics will be
 -- meaningless because they only make sense with variational terms.
-mkBench'
-  :: String
+mkBench' :: NFData a =>
+            String
      -> String
-     -> (Proposition -> IO a1)
+     -> (Proposition -> IO a)
      -> Proposition
      -> Benchmark
 mkBench' alg confDesc !f prop = run desc f prop

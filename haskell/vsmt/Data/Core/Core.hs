@@ -13,8 +13,8 @@
 
 {-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE DerivingVia           #-}
-{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings     #-}
@@ -24,14 +24,15 @@
 module Core.Core where
 
 
-import           Prelude                    hiding (EQ, GT, LT, log)
 import           Data.Foldable (toList)
 import           Data.Function ((&))
 import           Data.List     (foldl1')
-import qualified Data.Set as Set
-import qualified Data.Map as Map
+import qualified Data.Map      as Map
+import           Data.Maybe    (fromJust)
+import qualified Data.Set      as Set
+import           Prelude       hiding (EQ, GT, LT, log)
 
-import Core.Types
+import           Core.Types
 
 
 ----------------------------- Choice Manipulation ------------------------------
@@ -225,6 +226,11 @@ refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop
 isPlain :: Proposition -> Maybe (Plain Proposition)
 isPlain p | choiceCount p /= 0 = Just $ Plain p
           | otherwise          = Nothing
+
+validateTotal :: PartialConfig -> Prop' a -> Maybe (Total Config)
+validateTotal c (toList . dimensions -> ds) =
+  sequence (c <$> ds) & \case Just _ -> Just $ Total $! fromJust <$> c
+                              _      -> Nothing
 
 isVariational :: Proposition -> Bool
 isVariational p = isPlain p & \case Nothing -> True
