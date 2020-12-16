@@ -256,8 +256,6 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
      finalCounter <- STM.readTVarIO resultCounter
 
      when verboseMode $ logIOWith "finished with result count: " finalCounter
-     putStrLn $ Text.pack $ show finalResults
-
 
      return finalResults
 
@@ -1013,8 +1011,8 @@ evaluate x@(IBOp _ Chc' {} Chc' {})  = return $! intoCore x
 evaluate x@(IBOp _ (Ref' _) Chc' {}) = return $! intoCore x
 evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
-evaluate (BBOp And l Unit)      = log "Unit in R" >> evaluate l
-evaluate (BBOp And Unit r)      = log "Unit in L" >> evaluate r
+evaluate (BBOp And l Unit)      = evaluate l
+evaluate (BBOp And Unit r)      = evaluate r
 evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; logWith "eval'ing L" x; evaluate l
 evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; logWith "eval'ing R" x; evaluate r
 evaluate x@(IBOp op l r)        =
@@ -1042,14 +1040,14 @@ evaluate (BBOp And l r) = log "[Eval] And case" >>
      if isValue l' || isValue r'
        then evaluate res
        else return $! intoCore res
-evaluate x@(BBOp op l r) = logWith "General Case" x >>
+evaluate (BBOp op l r) = log "[Eval] General Case" >>
   let l' = accumulate l
       r' = accumulate r
       res = BBOp op l' r' in
     if isValue l' && isValue r'
-       then logWith "Reducing more" res >>
+       then log "[Eval] Reducing more" >>
             evaluate res
-    else do logWith "couldn't reduce" res
+    else do log "[Eval] couldn't reduce"
             logWith "Left " l'
             logWith "Right " r'
             return $! intoCore res
