@@ -29,7 +29,6 @@
 module Solve where
 
 import           Control.Applicative                   ((<|>))
-import           Control.Concurrent                    (forkIO)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import qualified Control.Concurrent.STM                as STM
@@ -68,7 +67,6 @@ import           Settings
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
 
--- TODO custom loggers for each function, i.e., [DEBUG:EVAL]: ...
 logWith :: (MonadLogger m, Show a) => Text.Text -> a -> m ()
 logWith msg value = log $ msg <> sep <> Text.pack (show value)
   where sep :: Text.Text
@@ -120,6 +118,12 @@ logInProducerWith = logInThreadWith "Producer"
 logInConsumerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
 logInConsumerWith = logInThreadWith "Consumer"
 
+logInVCWith  :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
+logInVCWith = logInThreadWith "VC Worker"
+
+logInVC' :: MonadLogger m => Int -> Text.Text -> m ()
+logInVC' = logInThread "VCWorker"
+
 logInThreadIOWith :: Show a => Text.Text -> Int -> Text.Text -> a -> IO ()
 logInThreadIOWith kind tid msg value = putStrLn logmsg
   where logmsg :: Text.Text
@@ -168,7 +172,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
   do (toMain, fromVC)          <- U.newChan vcBufSize
      (toVC,   fromMain)        <- U.newChan vcBufSize
      (prdRequest, prdResponse) <- U.newChan producerBufSize
-     (resultsIn, resultsOut)   <- U.newChan producerBufSize
+     (resultsIn, resultsOut)   <- U.newChan consumerBufSize
 
      resultCounter             <- STM.newTVarIO 0
      results                   <- STM.newTVarIO mempty
@@ -192,32 +196,30 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
          -- channel.
-         runProducers =
-           T.runSMTWith solverConfig $ do
-             C.io $ putStrLn "preconditioning in main"
-             (_, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-             -- seasoning <- T.symbolicEnv
-             let seasoning = runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
-             -- spawn producers, we fork a thread to spawn producers here to
-             -- prevent this call from blocking. The default behavior of
-             -- mapConcurrently is to wait for results. We only know that a max
-             -- of 2^(# unique dimensions) is the max, but the user may only
-             -- want a subset, thus we can't wait for them to finish.
-             void $ liftIO $ forkIO $
-               A.mapConcurrently_ (producer seasoning solverConfig st)
-               [1..numProducers]
+         runProducers = T.runSMTWith solverConfig $
+           do C.io $ putStrLn "preconditioning in main"
+              (_, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
+              -- seasoning <- T.symbolicEnv
+              let seasoning = runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
+              -- spawn producers, we fork a thread to spawn producers here to
+              -- prevent this call from blocking. The default behavior of
+              -- mapConcurrently is to wait for results. We only know that a max
+              -- of 2^(# unique dimensions) is the max, but the user may only
+              -- want a subset, thus we can't wait for them to finish.
+              C.io $
+                A.mapConcurrently_ (producer seasoning solverConfig st)
+                [1..numProducers]
 
-         runConsumers = void $ liftIO $ forkIO $
+         runConsumers =
            A.mapConcurrently_ (consumer consComms consSettings resultsOut)
            [1..numConsumers]
 
-         runVCWorkers = void $ liftIO $
+         runVCWorkers =
            A.mapConcurrently_ (vcWorker conf vcChans)
            [1..numVCWorkers]
 
-         populateChans = void $ liftIO $ forkIO $
-           void $ T.runSMTWith solverConfig $ do
+         populateChans = T.runSMTWith solverConfig $ do
            (il, st) <- runSolverWith runStdoutLoggingT startState $ unPre $ toIL i
            -- now generate the first core thereby placing work on the channels
            -- this thread will exit once it places requests on the producer
@@ -230,17 +232,33 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
            C.io $ logIO "[Populator] We out"
 
      -- this thread will die once it finds a choice or a unit in the plain case
-     populateChans
+     aPopulate <- A.async populateChans
 
      -- kick off
-     void $ runProducers `A.concurrently_`
-            runConsumers `A.concurrently_`
-            runVCWorkers
+     aProds   <- A.async runProducers
+     aCons    <- A.async runConsumers
+     aWorkers <- A.async runVCWorkers
 
-     -- if we get here then we are done so we can just read our result TVar
+     -- wait until consumers exit, when they do we are done, we could choose to
+     -- catch the exception here but because we exit with ExitSuccess there it
+     -- would be rare if something other was thrown and the whole system would
+     -- likely stall on an MVar so thereno reason
+     _ <- A.waitCatch aCons
+
+     -- cleanup
+     A.cancel aProds
+     A.cancel aWorkers
+     A.cancel aCons
+     A.cancel aPopulate -- make sure this thread did indeed die
+
+     -- grab the results
      finalResults <- STM.readTVarIO results
      finalCounter <- STM.readTVarIO resultCounter
+
      when verboseMode $ logIOWith "finished with result count: " finalCounter
+     putStrLn $ Text.pack $ show finalResults
+
+
      return finalResults
 
 -- TODO runNoLogging
@@ -298,12 +316,12 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
      when verboseMode $ logInIOConsumerWith tid "n == " n
      when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
      if n == expectedResults
-       then exitSuccess
+       then when verboseMode (logInIOConsumer tid "All done") >> exitSuccess
        else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
                when verboseMode $ logInIOConsumer tid "got result"
                atomically $ do STM.modifyTVar' counter succ
-                               STM.modifyTVar' acc (r <>)
+                               STM.modifyTVar' acc (<> r)
 
 -- | A variant context (vc) work is a thread which serves to issue is sat or is not
 -- sat calls for the variant context. The producers will issue commands requests
@@ -315,7 +333,7 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
 -- and thus the query formula variables are actually disjoint from dimensions
 -- just as we would expect.
 vcWorker :: VariantContext -> VCChannels -> Int -> IO ()
-vcWorker vc (getVcChans -> Just (fromMain, toMain)) _ =
+vcWorker vc (getVcChans -> Just (fromMain, toMain)) tid =
   T.runSMTWith T.z3{T.verbose=True} $ do
   -- season the solver
   (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
@@ -327,7 +345,9 @@ vcWorker vc (getVcChans -> Just (fromMain, toMain)) _ =
     void $
     runSolverWith runStdoutLoggingT st $
     forever $
-     do (d, shouldNegate) <- C.io $ U.readChan fromMain
+     do logInVC' tid "waiting"
+        (d, shouldNegate) <- C.io $ U.readChan fromMain
+        logInVC' tid "got request"
         C.inNewAssertionStack $
           do sD <- cached d
              T.constrain $ if shouldNegate then bnot sD else sD
@@ -1116,7 +1136,7 @@ store :: (St.MonadState State io, MonadIO io) => Result -> io ()
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
 store !r = do (results,_) <- St.gets (fromJust . getResultChans . resultChans)
-              liftIO $ putStrLn "writing to results"
+              liftIO $ putStrLn $ "writing to results: "
               liftIO $ U.writeChan results r
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
@@ -1170,7 +1190,7 @@ alternative dim goLeft goRight =
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
-            logInProducer "Reading dim for true"
+            logInProducer "Querying VC for dim true"
             checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
             when checkDimTrue $ do
               let continueLeft = C.inNewAssertionStack $
@@ -1185,7 +1205,7 @@ alternative dim goLeft goRight =
             resetTo s
 
            -- right side, notice that we negate the symbolic
-            logInProducer "Reading dim for false"
+            logInProducer "Querying VC for dim false"
             checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
             when checkDimFalse $ do
               let continueRight = C.inNewAssertionStack $

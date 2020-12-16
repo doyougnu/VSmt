@@ -34,7 +34,7 @@ data Settings = Settings { solver           :: Solver
                          , verboseMode      :: Bool
                          , vcBufSize        :: Int
                          , producerBufSize  :: Int
-                         , readerBufSize    :: Int
+                         , consumerBufSize  :: Int
                          , numProducers     :: Int
                          , numConsumers     :: Int
                          , numVCWorkers     :: Int
@@ -52,7 +52,7 @@ defSettings = Settings{ solver          = Solver S.z3
                       , verboseMode     = True
                       , vcBufSize       = 250
                       , producerBufSize = 250
-                      , readerBufSize   = 250
+                      , consumerBufSize = 250
                       , numResults      = Nothing
                       , numProducers    = 250
                       , numConsumers    = 50
@@ -70,9 +70,9 @@ minSettings = Settings{ solver          = Solver S.z3
                       , seed            = Nothing
                       , generateModels  = False
                       , verboseMode     = True
-                      , vcBufSize       = 1
-                      , producerBufSize = 1
-                      , readerBufSize   = 1
+                      , vcBufSize       = 200
+                      , producerBufSize = 200
+                      , consumerBufSize = 200
                       , numResults      = Nothing
                       , numProducers    = 1
                       , numConsumers    = 1
