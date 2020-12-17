@@ -112,9 +112,6 @@ logInThreadWith kind tid msg = logWith logmsg
     logmsg :: Text.Text
     logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
 
-logInProducerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
-logInProducerWith = logInThreadWith "Producer"
-
 logInConsumerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
 logInConsumerWith = logInThreadWith "Consumer"
 
@@ -145,8 +142,16 @@ logInIOProducer = logInThreadIO "Producer"
 logInIOConsumer :: Int -> Text.Text -> IO ()
 logInIOConsumer = logInThreadIO "Consumer"
 
+logInIOVC :: Int -> Text.Text -> IO ()
+logInIOVC = logInThreadIO "VCWorker"
+
 logInProducer :: (St.MonadState State m, MonadLogger m) => Text.Text -> m ()
 logInProducer msg = St.gets threadId >>= flip logInProducer' msg
+
+logInProducerWith :: (St.MonadState State m, MonadLogger m, Show a) =>
+  Text.Text -> a -> m ()
+logInProducerWith msg value = do tid <- St.gets threadId
+                                 logInThreadWith "Producer" tid msg value
 
 logInConsumer :: (St.MonadState State m, MonadLogger m) => Text.Text -> m ()
 logInConsumer msg = St.gets threadId >>= flip logInConsumer' msg
@@ -168,7 +173,7 @@ solution = extract <$> St.get
 -- | TODO reduce redundancy after config module is written
 -- to the IL type
 solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-solveVerbose  i (fromMaybe true -> conf) Settings{..} =
+solveVerbose  i conf Settings{..} =
   do (toMain, fromVC)          <- U.newChan vcBufSize
      (toVC,   fromMain)        <- U.newChan vcBufSize
      (prdRequest, prdResponse) <- U.newChan producerBufSize
@@ -243,7 +248,7 @@ solveVerbose  i (fromMaybe true -> conf) Settings{..} =
      -- catch the exception here but because we exit with ExitSuccess there it
      -- would be rare if something other was thrown and the whole system would
      -- likely stall on an MVar so thereno reason
-     _ <- A.waitCatch aCons
+     void $ A.waitCatch aCons
 
      -- cleanup
      A.cancel aProds
@@ -330,32 +335,40 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
 -- words the producer instances don't know about the variant context variables
 -- and thus the query formula variables are actually disjoint from dimensions
 -- just as we would expect.
-vcWorker :: VariantContext -> VCChannels -> Int -> IO ()
-vcWorker vc (getVcChans -> Just (fromMain, toMain)) tid =
+vcWorker :: Maybe VariantContext -> VCChannels -> Int -> IO ()
+vcWorker Nothing (getVcChans -> Just (fromMain, toMain)) tid =
+  T.runSMTWith T.z3{T.verbose=True} $ vcHelper fromMain toMain mempty tid
+
+vcWorker (Just vc) (getVcChans -> Just (fromMain, toMain)) tid =
   T.runSMTWith T.z3{T.verbose=True} $ do
   -- season the solver
   (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
   T.constrain b
-  -- enter query mode
+  -- now run the helper
+  vcHelper fromMain toMain st tid
+
+vcWorker _ _ _ = error "passed no channels to vcWorker!"
+
+vcHelper :: FromMain -> ToMain -> State -> ThreadID -> T.Symbolic ()
+vcHelper fromMain toMain st tid =
   C.query $
   -- listen to the channel forever and check requests incrementally against the
-  -- context
+  -- context if there is one
     void $
     runSolverWith runStdoutLoggingT st $
     forever $
      do logInVC' tid "waiting"
-        (d, shouldNegate) <- C.io $ U.readChan fromMain
+        (d, shouldNegate, vc') <- C.io $ U.readChan fromMain
         logInVC' tid "got request"
         C.inNewAssertionStack $
           do sD <- cached d
-             T.constrain $ if shouldNegate then bnot sD else sD
+             let !new = if shouldNegate then bnot sD else sD &&& vc'
+             T.constrain new
 
              C.checkSat >>= C.io . \case
-               C.Sat -> U.writeChan toMain True
-               _     -> U.writeChan toMain False
- -- this can never happen and even if it does we want to stop
-vcWorker _ _ _ = error "passed no channels to vcWorker!"
-
+               C.Sat -> U.writeChan toMain (True, new)
+               _     -> U.writeChan toMain (False, new)
+             logInVC' tid "leaving stack"
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -374,11 +387,13 @@ type Context      = Store Dim Bool
 type ShouldNegate = Bool
 
 -- channel synonyms for nice types
-type FromVC = U.OutChan Bool                -- the writer side, the bool value of a sat check
-type ToVC   = U.InChan  (Dim, ShouldNegate) -- the reader side, a dim and flag
+-- the writer side, the bool value of a sat check
+type FromVC = U.OutChan (Bool, SVariantContext)
+-- the reader side, a dim, a flag, and the vc
+type ToVC   = U.InChan  (Dim, ShouldNegate, SVariantContext)
 
-type FromMain = U.OutChan (Dim, ShouldNegate)
-type ToMain   = U.InChan Bool
+type FromMain = U.OutChan (Dim, ShouldNegate, SVariantContext)
+type ToMain   = U.InChan (Bool, SVariantContext)
 
 type WorkChanIn  = U.InChan  (Solver ())
 type WorkChanOut = U.OutChan (Solver ())
@@ -444,11 +459,13 @@ instance Has Dimensions where extract   = dimensions
                               wrap    d w = w{dimensions=d}
 
 instance Has Context where extract     = config
-                           wrap    d w = w{config=d}
+                           wrap c w    = w{config=c}
 
 instance Has (Maybe VariantContext) where extract     = vConfig
-                                          wrap    d w = w{vConfig=d}
+                                          wrap vc w   = w{vConfig=vc}
 
+instance Has SVariantContext where extract  = sConfig
+                                   wrap s w = w{sConfig=s}
 
 type SVariantContext = T.SBool
 instance Semigroup SVariantContext where (<>) = (&&&)
@@ -466,10 +483,9 @@ instance Monoid    SVariantContext where mempty = true
 -- as small as possible
 data State = State
     { result      :: Result
-    -- the formula representation of the config
     , vConfig     :: Maybe VariantContext -- the formula representation of the config
-    -- a map or set representation of the config
-    , config      :: Context -- a map or set representation of the config
+    , sConfig     :: SVariantContext      -- symbolic representation of a config
+    , config      :: Context              -- a map or set representation of the config
     , ints        :: Ints
     , doubles     :: Doubles
     , bools       :: Bools
@@ -487,6 +503,7 @@ instance Show State where
     ["result","vConfig","config","ints","doubles","bools","dimensions"]
     [ show result -- ya hate to see it
     , show vConfig
+    , show sConfig
     , show config
     , show ints
     , show doubles
@@ -501,6 +518,7 @@ instance Semigroup State where
                                     in (a' <> b')
                  , config     = config  a <> config  b
                  , vConfig    = vConfig a <> vConfig b
+                 , sConfig    = sConfig a <> sConfig b
                  , ints       = ints    a <> ints    b
                  , doubles    = doubles a <> doubles b
                  , bools      = bools   a <> bools   b
@@ -524,6 +542,7 @@ instance Monoid State where
   mempty = State{ result      = mempty
                 , config      = mempty
                 , vConfig     = mempty
+                , sConfig     = mempty
                 , ints        = mempty
                 , doubles     = mempty
                 , bools       = mempty
@@ -1111,23 +1130,23 @@ findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l 
   -- recur
 findChoice (InBool (BBOp op l r) ctx) = findChoice (InBool l $ InL ctx op r)
 findChoice (InBool (IBOp op l r) ctx) = findChoice (InNum  l $ InLB ctx op r)
-findChoice (InBool (BOp o e) ctx) = findChoice (InBool e $ InU o ctx)
-findChoice (InNum (IOp o e) ctx) = findChoice (InNum e $ InU' o ctx)
-findChoice (InNum (IIOp op l r) ctx) = findChoice (InNum  l $ InL' ctx op r)
+findChoice (InBool (BOp o e) ctx)     = findChoice (InBool e $ InU o ctx)
+findChoice (InNum (IOp o e) ctx)      = findChoice (InNum e $ InU' o ctx)
+findChoice (InNum (IIOp op l r) ctx)  = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
-findChoice (InBool Unit (InL parent And r)) = findChoice (InBool r $ InR true And parent)
+findChoice (InBool Unit (InL parent And r))   = findChoice (InBool r $ InR true And parent)
 findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
   -- TODO Not sure if unit can ever exist with a context
 findChoice x@(InBool Ref{} InU'{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
-findChoice x@(InNum Ref'{} InU{}) = error $ "Boolean unary operator applied to numeric: " ++ show x
-findChoice (InBool Unit ctx) = error $ "Unit with a context" ++ show ctx
+findChoice x@(InNum Ref'{} InU{})  = error $ "Boolean unary operator applied to numeric: " ++ show x
+findChoice (InBool Unit ctx)       = error $ "Unit with a context" ++ show ctx
 findChoice x@(InNum Ref'{} Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
 findChoice x@(InBool Ref{} InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
 findChoice x@(InBool Ref{} InRB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
 findChoice x@(InBool Ref{} InL'{}) = error $ "An impossible case bool reference in arithmetic: " ++ show x
 findChoice x@(InBool Ref{} InR'{}) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
-findChoice x@(InNum Ref'{} InL{}) = error $ "An impossible case: " ++ show x
-findChoice x@(InNum Ref'{} InR{}) = error $ "An impossible case: " ++ show x
+findChoice x@(InNum Ref'{} InL{})  = error $ "An impossible case: " ++ show x
+findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 
 
 store :: (St.MonadState State io, MonadIO io) => Result -> io ()
@@ -1145,11 +1164,15 @@ mergeVC Nothing b@(Just _) = b
 mergeVC (Just l) (Just r)  = Just $ l &&& r
 
 -- | A function that enforces each configuration is updated in sync
-updateConfigs :: (St.MonadState State m) => Prop' Dim -> (Dim, Bool) -> m ()
+updateConfigs :: (St.MonadState State m) => Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
 {-# INLINE updateConfigs #-}
-updateConfigs context (d,val) = do
+updateConfigs context (d,val) sConf = do
+  -- update the variant context
   St.modify' (`by` (`mergeVC` (Just $ VariantContext context)))
+  -- update the dimension cache
   St.modify' (`by` add d val)
+  -- update the symbolic config
+  St.modify' (`by` const sConf)
 
 -- | Reset the state but maintain the cache's
 resetTo :: (St.MonadState State m) => State -> m ()
@@ -1159,6 +1182,8 @@ resetTo s = do st <- St.get
                        , ints=ints st
                        , doubles=doubles st
                        , dimensions=dimensions st
+                       , vConfig=vConfig st
+                       , sConfig=sConfig st
                        }
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
@@ -1183,17 +1208,22 @@ alternative dim goLeft goRight =
             let Just (fromVC, toVC) = getMainChans . mainChans $ s
                 dontNegate          = False
                 pleaseNegate        = True
+                !symbolicContext    = sConfig s
 
             -- When we see a new dimension we check if both of its possible
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
             logInProducer "Querying VC for dim true"
-            checkDimTrue <- liftIO $ U.writeChan toVC (dim, dontNegate) >> U.readChan fromVC
+            (checkDimTrue,!newSConfigL) <- liftIO $
+                            U.writeChan toVC (dim, dontNegate, symbolicContext) >>
+                            U.readChan fromVC
             when checkDimTrue $ do
               let continueLeft = C.inNewAssertionStack $
                     do logInProducer "Left Alternative"
-                       updateConfigs (bRef dim) (dim,True)
+                       updateConfigs (bRef dim) (dim,True) newSConfigL
+                       logInProducerWith "VConfigL" $ vConfig s
+                       logInProducerWith "configL" $ config s
                        goLeft
                   (requests,_) = fromJust . getWorkChans . workChans $ s
               logInProducer "Writing to go left"
@@ -1204,11 +1234,15 @@ alternative dim goLeft goRight =
 
            -- right side, notice that we negate the symbolic
             logInProducer "Querying VC for dim false"
-            checkDimFalse <- liftIO $ U.writeChan toVC (dim, pleaseNegate) >> U.readChan fromVC
+            (checkDimFalse,!newSConfigR) <- liftIO $
+                             U.writeChan toVC (dim, pleaseNegate, symbolicContext) >>
+                             U.readChan fromVC
             when checkDimFalse $ do
               let continueRight = C.inNewAssertionStack $
                     do log "Right Alternative"
-                       updateConfigs (bnot $ bRef dim) (dim,False)
+                       updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
+                       logInProducerWith "VConfigR" $ vConfig s
+                       logInProducerWith "configR" $ config s
                        goRight
                   (requests,_) = fromJust . getWorkChans . workChans $ s
 

@@ -83,4 +83,4 @@ debugSettings :: Settings
 debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}
 
 debugSettingsNoVerbose :: Settings
-debugSettingsNoVerbose = minSettings{verboseMode=True}
+debugSettingsNoVerbose = minSettings{verboseMode=False}
