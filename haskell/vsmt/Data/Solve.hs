@@ -1213,11 +1213,15 @@ alternative dim goLeft goRight =
      when checkDimTrue $ do
        let continueLeft = C.inNewAssertionStack $
              do logInProducer "Left Alternative"
+                -- have to refresh the state which could have changed when
+                -- another producer picked up the request
+                resetTo s
                 updateConfigs (bRef dim) (dim,True) newSConfigL
                 goLeft
            (requests,_) = fromJust . getWorkChans . workChans $ s
        logInProducer "Writing to go left"
        liftIO $ U.writeChan requests continueLeft
+
 
      -- right side, notice that we negate the symbolic, and reset the state
      (checkDimFalse,!newSConfigR) <- liftIO $
@@ -1225,7 +1229,7 @@ alternative dim goLeft goRight =
      when checkDimFalse $ do
        let continueRight = C.inNewAssertionStack $
              do log "Right Alternative"
-                resetTo s -- reset any stateful mutations to before the left alternative
+                resetTo s
                 updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
                 goRight
            (requests,_) = fromJust . getWorkChans . workChans $ s
