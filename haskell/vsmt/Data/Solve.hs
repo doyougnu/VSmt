@@ -1175,7 +1175,7 @@ updateConfigs context (d,val) sConf = do
   St.modify' (`by` const sConf)
 
 -- | Reset the state but maintain the cache's. Notice that we only identify the
--- items which _should not_ reset
+-- items which _should not_ reset and force those to be maintained
 resetTo :: (St.MonadState State m) => State -> m ()
 resetTo s = do st <- St.get
                St.put s{ result=result st
@@ -1198,49 +1198,40 @@ resetTo s = do st <- St.get
 --   => Dim -> m () -> m () -> m ()
 alternative :: Dim -> Solver () -> Solver () -> Solver ()
 alternative dim goLeft goRight =
-  do conf <- St.gets config
-     case find dim conf of
-       Just True  -> log "Left Selected"  >> goLeft
-       Just False -> log "Right Selected" >> goRight
-       Nothing -> -- then this is a new dimension
-         do s <- St.get -- cache the state
-            let Just (fromVC, toVC) = getMainChans . mainChans $ s
-                dontNegate          = False
-                pleaseNegate        = True
-                !symbolicContext    = sConfig s
+  do s <- St.get -- cache the state
+     let Just (fromVC, toVC) = getMainChans . mainChans $ s
+         dontNegate          = False
+         pleaseNegate        = True
+         !symbolicContext    = sConfig s
 
-            -- When we see a new dimension we check if both of its possible
-            -- bindings is satisfiable, if so then we proceed to compute the
-            -- variant, if not then we skip. This happens twice because
-            -- dimensions and variant contexts can only be booleans.
-            (checkDimTrue,!newSConfigL) <- liftIO $
-                            U.writeChan toVC (dim, dontNegate, symbolicContext) >>
-                            U.readChan fromVC
-            when checkDimTrue $ do
-              let continueLeft = C.inNewAssertionStack $
-                    do logInProducer "Left Alternative"
-                       updateConfigs (bRef dim) (dim,True) newSConfigL
-                       goLeft
-                  (requests,_) = fromJust . getWorkChans . workChans $ s
-              logInProducer "Writing to go left"
-              liftIO $ U.writeChan requests continueLeft
+     -- When we see a new dimension we check if both of its possible
+     -- bindings is satisfiable, if so then we proceed to compute the
+     -- variant, if not then we skip. This happens twice because
+     -- dimensions and variant contexts can only be booleans.
+     (checkDimTrue,!newSConfigL) <- liftIO $
+       U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
+     when checkDimTrue $ do
+       let continueLeft = C.inNewAssertionStack $
+             do logInProducer "Left Alternative"
+                updateConfigs (bRef dim) (dim,True) newSConfigL
+                goLeft
+           (requests,_) = fromJust . getWorkChans . workChans $ s
+       logInProducer "Writing to go left"
+       liftIO $ U.writeChan requests continueLeft
 
-            -- reset for right side
+     -- right side, notice that we negate the symbolic, and reset the state
+     (checkDimFalse,!newSConfigR) <- liftIO $
+       U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
+     when checkDimFalse $ do
+       let continueRight = C.inNewAssertionStack $
+             do log "Right Alternative"
+                resetTo s -- reset any stateful mutations to before the left alternative
+                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
+                goRight
+           (requests,_) = fromJust . getWorkChans . workChans $ s
 
-           -- right side, notice that we negate the symbolic
-            (checkDimFalse,!newSConfigR) <- liftIO $
-                             U.writeChan toVC (dim, pleaseNegate, symbolicContext) >>
-                             U.readChan fromVC
-            when checkDimFalse $ do
-              let continueRight = C.inNewAssertionStack $
-                    do log "Right Alternative"
-                       resetTo s -- reset any stateful mutations to before the left alternative
-                       updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                       goRight
-                  (requests,_) = fromJust . getWorkChans . workChans $ s
-
-              logInProducer "Writing to continue right"
-              liftIO $ U.writeChan requests continueRight
+       logInProducer "Writing to continue right"
+       liftIO $ U.writeChan requests continueRight
 
 
 -- removeChoices :: ( MonadLogger m
@@ -1283,8 +1274,8 @@ choose loc =
             goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
         case find d conf of
-          Just True  -> goLeft
-          Just False -> goRight
+          Just True  -> log "Cache hit --- Left Selected"  >> goLeft
+          Just False -> log "Cache hit --- Right Selected" >> goRight
           Nothing    -> alternative d goLeft goRight
 
       (InNum (Chc' d cl cr) ctx) -> do
@@ -1294,8 +1285,8 @@ choose loc =
             goRight = toIL' cr >>= choose . findChoice . toLocWith' ctx . accumulate'
 
         case find d conf of
-          Just True  -> goLeft
-          Just False -> goRight
+          Just True  -> log "Cache hit --- Left Selected"  >> goLeft
+          Just False -> log "Cache hit --- Right Selected" >> goRight
           Nothing    -> alternative d goLeft goRight
 
       (InBool Unit Top) -> removeChoices $ intoCore Unit
