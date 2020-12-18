@@ -145,15 +145,15 @@ logInIOConsumer = logInThreadIO "Consumer"
 logInIOVC :: Int -> Text.Text -> IO ()
 logInIOVC = logInThreadIO "VCWorker"
 
-logInProducer :: (St.MonadState State m, MonadLogger m) => Text.Text -> m ()
+logInProducer :: (St.MonadState Stores m, MonadLogger m) => Text.Text -> m ()
 logInProducer msg = St.gets threadId >>= flip logInProducer' msg
 
-logInProducerWith :: (St.MonadState State m, MonadLogger m, Show a) =>
+logInProducerWith :: (St.MonadState Stores m, MonadLogger m, Show a) =>
   Text.Text -> a -> m ()
 logInProducerWith msg value = do tid <- St.gets threadId
                                  logInThreadWith "Producer" tid msg value
 
-logInConsumer :: (St.MonadState State m, MonadLogger m) => Text.Text -> m ()
+logInConsumer :: (St.MonadState Stores m, MonadLogger m) => Text.Text -> m ()
 logInConsumer msg = St.gets threadId >>= flip logInConsumer' msg
 
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
@@ -165,9 +165,6 @@ logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 ------------------------------ Internal Api -------------------------------------
 findVCore :: IL -> Solver VarCore
 findVCore = evaluate
-
-solution :: (St.MonadState State m, Has Result) => m Result
-solution = extract <$> St.get
 
 -- | TODO pending on server create, create a load function to handle injection
 -- | TODO reduce redundancy after config module is written
@@ -183,12 +180,13 @@ solveVerbose  i conf Settings{..} =
      results                   <- STM.newTVarIO mempty
 
   -- init the channels
-     let vcChans     = VCChannels     $ pure (fromMain, toMain)
-         mainChans   = MainChannels   $ pure (fromVC, toVC)
-         workChans   = WorkChannels   $ pure (prdRequest, prdResponse)
-         resultChans = ResultChannels $ pure (resultsIn, resultsOut)
-         startState  = mempty{ vcChans=vcChans, mainChans=mainChans
+     let vcChans     = VCChannels     $ (fromMain, toMain)
+         mainChans   = MainChannels   $ (fromVC, toVC)
+         workChans   = WorkChannels   $ (prdRequest, prdResponse)
+         resultChans = ResultChannels $ (resultsIn, resultsOut)
+         channels    = mempty{ vcChans=vcChans, mainChans=mainChans
                              , workChans=workChans, resultChans=resultChans}
+         startState  = mempty{channels=channels}
 
          -- solver settings
          posVariants     = maxVariantCount i
@@ -268,7 +266,7 @@ solveVerbose  i conf Settings{..} =
 solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 solve  = undefined
 
-solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State)
+solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State s)
 solveForCoreVerbose  i (fromMaybe true -> conf) =
     T.runSMTWith T.z3{T.verbose=True} $
       do (_,iState) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' conf
@@ -288,7 +286,7 @@ sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
-type Seasoning     = T.Symbolic (IL, State)
+type Seasoning     solver = T.Symbolic (IL, State solver)
 type ThreadID      = Int
 type MaxVariantCnt = Int
 type ConsumerComms = (STM.TVar Int, STM.TVar Result)
@@ -296,13 +294,14 @@ type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
-producer :: Seasoning -> T.SMTConfig -> State -> Int -> IO (a, State)
+producer :: Seasoning s -> T.SMTConfig -> State s -> Int -> IO (a, State s)
 producer seasoning c _ tid = T.runSMTWith c $
   do (il, st) <- seasoning
-     C.query $ runSolverLog st{threadId=tid} $
+     let stores' = stores st
+     C.query $ runSolverLog st{stores=stores'{threadId=tid}} $
        do _ <- findVCore il
           forever $ do
-            (_, requests) <- St.gets (fromJust . getWorkChans . workChans)
+            (_, requests) <- St.gets (getWorkChans . workChans . channels)
             logInProducer' tid "Waiting"
             continue <- liftIO $ U.readChan requests
             logInProducer' tid "Read a request, lets go"
@@ -336,10 +335,10 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
 -- and thus the query formula variables are actually disjoint from dimensions
 -- just as we would expect.
 vcWorker :: Maybe VariantContext -> VCChannels -> Int -> IO ()
-vcWorker Nothing (getVcChans -> Just (fromMain, toMain)) tid =
+vcWorker Nothing (getVcChans -> (fromMain, toMain)) tid =
   T.runSMTWith T.z3{T.verbose=True} $ vcHelper fromMain toMain mempty tid
 
-vcWorker (Just vc) (getVcChans -> Just (fromMain, toMain)) tid =
+vcWorker (Just vc) (getVcChans -> (fromMain, toMain)) tid =
   T.runSMTWith T.z3{T.verbose=True} $ do
   -- season the solver
   (b,st) <- runSolverWith runStdoutLoggingT mempty $ unPre $ contextToSBool' vc
@@ -349,7 +348,7 @@ vcWorker (Just vc) (getVcChans -> Just (fromMain, toMain)) tid =
 
 vcWorker _ _ _ = error "passed no channels to vcWorker!"
 
-vcHelper :: FromMain -> ToMain -> State -> ThreadID -> T.Symbolic ()
+vcHelper :: FromMain -> ToMain -> State s -> ThreadID -> T.Symbolic ()
 vcHelper fromMain toMain st tid =
   C.query $
   -- listen to the channel forever and check requests incrementally against the
@@ -395,16 +394,16 @@ type ToVC   = U.InChan  (Dim, ShouldNegate, SVariantContext)
 type FromMain = U.OutChan (Dim, ShouldNegate, SVariantContext)
 type ToMain   = U.InChan (Bool, SVariantContext)
 
-type WorkChanIn  = U.InChan  (Solver ())
-type WorkChanOut = U.OutChan (Solver ())
+type WorkChanIn  solver = U.InChan  solver
+type WorkChanOut solver = U.OutChan solver
 
 type ToResultChan   = U.InChan  Result
 type FromResultChan = U.OutChan Result
 
-newtype VCChannels     = VCChannels     { getVcChans     :: Maybe (FromMain    , ToMain         ) }
-newtype MainChannels   = MainChannels   { getMainChans   :: Maybe (FromVC      , ToVC           ) }
-newtype WorkChannels   = WorkChannels   { getWorkChans   :: Maybe (WorkChanIn  , WorkChanOut    ) }
-newtype ResultChannels = ResultChannels { getResultChans :: Maybe (ToResultChan, FromResultChan ) }
+newtype VCChannels     = VCChannels     { getVcChans     :: (FromMain     , ToMain         ) }
+newtype MainChannels   = MainChannels   { getMainChans   :: (FromVC       , ToVC           ) }
+newtype WorkChannels s = WorkChannels   { getWorkChans   :: (WorkChanIn s , WorkChanOut s  ) }
+newtype ResultChannels = ResultChannels { getResultChans :: (ToResultChan , FromResultChan ) }
 
 class IxStorable ix where
   type Container ix :: * -> *
@@ -434,7 +433,7 @@ instance IxStorable Dim where add    = Map.insert
 -- | That which contains that has that
 class Has that where
   type Contains that
-  type Contains that = State
+  type Contains that = Stores
   extract :: Contains that -> that
   wrap    :: that -> Contains that -> Contains that
 
@@ -451,9 +450,6 @@ instance Has Doubles where extract   = doubles
 
 instance Has Bools   where extract   = bools
                            wrap    b w = w{bools = b}
-
-instance Has Result  where extract   = result
-                           wrap    r w = w{result=r}
 
 instance Has Dimensions where extract   = dimensions
                               wrap    d w = w{dimensions=d}
@@ -481,28 +477,34 @@ instance Monoid    SVariantContext where mempty = true
 -- any of these then we would need to translate one to the other which will cost
 -- constant time _for every_ choice, hence we want to make that constant factor
 -- as small as possible
-data State = State
-    { result      :: Result
-    , vConfig     :: Maybe VariantContext -- the formula representation of the config
+data State solver = State
+  { stores    :: Stores
+  , channels  :: Channels solver
+  }
+
+data Stores = Stores
+    { vConfig     :: Maybe VariantContext -- the formula representation of the config
     , sConfig     :: SVariantContext      -- symbolic representation of a config
     , config      :: Context              -- a map or set representation of the config
     , ints        :: Ints
     , doubles     :: Doubles
     , bools       :: Bools
     , dimensions  :: Dimensions
-    , vcChans     :: VCChannels
-    , mainChans   :: MainChannels
-    , workChans   :: WorkChannels
-    , resultChans :: ResultChannels
     , threadId    :: ThreadID
     }
 
-instance Show State where
-  show State{..} = mconcat $
+data Channels a = Channels
+                  { vcChans     :: VCChannels
+                  , mainChans   :: MainChannels
+                  , workChans   :: WorkChannels a
+                  , resultChans :: ResultChannels
+                  }
+
+instance Show Stores where
+  show Stores{..} = mconcat $
     zipWith (\x y -> x <> "  :  " <> y <> "\n")
-    ["result","vConfig","config","ints","doubles","bools","dimensions"]
-    [ show result -- ya hate to see it
-    , show vConfig
+    ["vConfig","config","ints","doubles","bools","dimensions","tid"]
+    [ show vConfig
     , show sConfig
     , show config
     , show ints
@@ -512,56 +514,36 @@ instance Show State where
     , show threadId
     ]
 
-instance Semigroup State where
-  a <> b = State { result     = let !a' = result a
-                                    !b' = result b
-                                    in (a' <> b')
-                 , config     = config  a <> config  b
-                 , vConfig    = vConfig a <> vConfig b
-                 , sConfig    = sConfig a <> sConfig b
-                 , ints       = ints    a <> ints    b
-                 , doubles    = doubles a <> doubles b
-                 , bools      = bools   a <> bools   b
-                 , dimensions = dimensions a <> dimensions b
-                 , vcChans    = VCChannels $
-                                getVcChans (vcChans a) <|>
-                                getVcChans (vcChans b)
-                 , mainChans  = MainChannels $
-                                getMainChans (mainChans a) <|>
-                                getMainChans (mainChans b)
-                 , workChans  = WorkChannels $
-                                getWorkChans (workChans a) <|>
-                                getWorkChans (workChans b)
-                 , resultChans = ResultChannels $
-                                 getResultChans (resultChans a) <|>
-                                 getResultChans (resultChans b)
-                 , threadId    = threadId a
-                 }
+instance Semigroup Stores where
+  a <> b = Stores { config     = config  a <> config  b
+                  , vConfig    = vConfig a <> vConfig b
+                  , sConfig    = sConfig a <> sConfig b
+                  , ints       = ints    a <> ints    b
+                  , doubles    = doubles a <> doubles b
+                  , bools      = bools   a <> bools   b
+                  , dimensions = dimensions a <> dimensions b
+                  , threadId    = threadId a
+                  }
 
-instance Monoid State where
-  mempty = State{ result      = mempty
-                , config      = mempty
-                , vConfig     = mempty
-                , sConfig     = mempty
-                , ints        = mempty
-                , doubles     = mempty
-                , bools       = mempty
-                , dimensions  = mempty
-                , vcChans     = VCChannels   Nothing
-                , mainChans   = MainChannels Nothing
-                , workChans   = WorkChannels   Nothing
-                , resultChans = ResultChannels Nothing
-                , threadId    = 0
-                }
+instance Monoid Stores where
+  mempty = Stores { config      = mempty
+                  , vConfig     = mempty
+                  , sConfig     = mempty
+                  , ints        = mempty
+                  , doubles     = mempty
+                  , bools       = mempty
+                  , dimensions  = mempty
+                  , threadId    = 0
+                  }
 
 -- TODO remove the StateT dependency for ReaderT
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
-newtype SolverT m a = SolverT { runSolverT :: St.StateT State m a }
+newtype SolverT m a = SolverT { runSolverT :: St.StateT Stores m a }
   deriving ( Functor,Applicative,Monad,MonadIO -- base
            , MonadTrans, MonadError e, MonadLogger
-           , St.MonadState State, T.MonadSymbolic, C.MonadQuery
+           , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
            )
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
@@ -607,13 +589,13 @@ instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
 type Solver      = SolverT (LoggingT C.Query)
 type SolverNoLog = SolverT (NoLoggingT C.Query)
 newtype PreSolver m a = PreSolver { unPre :: SolverT m a }
-  deriving (Functor, Applicative, Monad, St.MonadState State
+  deriving (Functor, Applicative, Monad, St.MonadState Stores
            , MonadLogger, MonadIO, T.MonadSymbolic, C.MonadQuery)
 
-runSolverWith :: (m (a, State) -> c) -> State -> SolverT m a -> c
+runSolverWith :: (m (a, State s) -> c) -> State s -> SolverT m a -> c
 runSolverWith f s = f . flip St.runStateT s . runSolverT
 
-runSolverLog :: State -> Solver a -> C.Query (a, State)
+runSolverLog :: State s -> Solver a -> C.Query (a, State s)
 runSolverLog = runSolverWith runStdoutLoggingT
 
 -- runSolver = runSolverWith runNoLoggingT
@@ -1136,7 +1118,9 @@ findChoice (InNum (IIOp op l r) ctx)  = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
 findChoice (InBool Unit (InL parent And r))   = findChoice (InBool r $ InR true And parent)
 findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
-  -- TODO Not sure if unit can ever exist with a context
+  -- TODO Not sure if unit can ever exist with a context, most of these will
+  -- never pass the parser and cannot be constructed in the Prop' data type, but
+  -- the IL allows for them
 findChoice x@(InBool Ref{} InU'{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
 findChoice x@(InNum Ref'{} InU{})  = error $ "Boolean unary operator applied to numeric: " ++ show x
 findChoice (InBool Unit ctx)       = error $ "Unit with a context" ++ show ctx
@@ -1149,7 +1133,7 @@ findChoice x@(InNum Ref'{} InL{})  = error $ "An impossible case: " ++ show x
 findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 
 
-store :: (St.MonadState State io, MonadIO io) => Result -> io ()
+store :: (St.MonadState (Channels s) io, MonadIO io) => Result -> io ()
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
 store !r = do (results,_) <- St.gets (fromJust . getResultChans . resultChans)
@@ -1164,7 +1148,7 @@ mergeVC Nothing b@(Just _) = b
 mergeVC (Just l) (Just r)  = Just $ l &&& r
 
 -- | A function that enforces each configuration is updated in sync
-updateConfigs :: (St.MonadState State m) => Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
+updateConfigs :: (St.MonadState Stores m) => Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
 {-# INLINE updateConfigs #-}
 updateConfigs context (d,val) sConf = do
   -- update the variant context
@@ -1176,14 +1160,9 @@ updateConfigs context (d,val) sConf = do
 
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
-resetTo :: (St.MonadState State m) => State -> m ()
+resetTo :: (St.MonadState Stores m) => State s -> m ()
 resetTo s = do st <- St.get
-               St.put s{ result=result st
-                        , bools=bools st
-                        , ints=ints st
-                        , doubles=doubles st
-                        , dimensions=dimensions st
-                        }
+               St.put s{stores=stores st}
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
