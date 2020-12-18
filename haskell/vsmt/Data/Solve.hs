@@ -1168,13 +1168,14 @@ updateConfigs :: (St.MonadState State m) => Prop' Dim -> (Dim, Bool) -> SVariant
 {-# INLINE updateConfigs #-}
 updateConfigs context (d,val) sConf = do
   -- update the variant context
-  St.modify' (`by` (mergeVC (Just $ VariantContext context)))
+  St.modify' (`by` mergeVC (Just $ VariantContext context))
   -- update the dimension cache
   St.modify' (`by` add d val)
   -- update the symbolic config
   St.modify' (`by` const sConf)
 
--- | Reset the state but maintain the cache's
+-- | Reset the state but maintain the cache's. Notice that we only identify the
+-- items which _should not_ reset
 resetTo :: (St.MonadState State m) => State -> m ()
 resetTo s = do st <- St.get
                St.put s{ result=result st
@@ -1208,13 +1209,10 @@ alternative dim goLeft goRight =
                 pleaseNegate        = True
                 !symbolicContext    = sConfig s
 
-            St.get >>= logInProducerWith "VConfig" . vConfig
-            St.get >>= logInProducerWith "config"  . config
             -- When we see a new dimension we check if both of its possible
             -- bindings is satisfiable, if so then we proceed to compute the
             -- variant, if not then we skip. This happens twice because
             -- dimensions and variant contexts can only be booleans.
-            logInProducer "Querying VC for dim true"
             (checkDimTrue,!newSConfigL) <- liftIO $
                             U.writeChan toVC (dim, dontNegate, symbolicContext) >>
                             U.readChan fromVC
@@ -1222,29 +1220,22 @@ alternative dim goLeft goRight =
               let continueLeft = C.inNewAssertionStack $
                     do logInProducer "Left Alternative"
                        updateConfigs (bRef dim) (dim,True) newSConfigL
-                       St.get >>= logInProducerWith "VConfigL" . vConfig
-                       St.get >>= logInProducerWith "configL"  . config
                        goLeft
                   (requests,_) = fromJust . getWorkChans . workChans $ s
               logInProducer "Writing to go left"
               liftIO $ U.writeChan requests continueLeft
 
             -- reset for right side
-            St.get >>= logInProducerWith "State before reset"
-            resetTo s
-            St.get >>= logInProducerWith "State after reset"
 
            -- right side, notice that we negate the symbolic
-            logInProducer "Querying VC for dim false"
             (checkDimFalse,!newSConfigR) <- liftIO $
                              U.writeChan toVC (dim, pleaseNegate, symbolicContext) >>
                              U.readChan fromVC
             when checkDimFalse $ do
               let continueRight = C.inNewAssertionStack $
                     do log "Right Alternative"
+                       resetTo s -- reset any stateful mutations to before the left alternative
                        updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                       St.get >>= logInProducerWith "VConfigR" . vConfig
-                       St.get >>= logInProducerWith "configR" . config
                        goRight
                   (requests,_) = fromJust . getWorkChans . workChans $ s
 
