@@ -294,7 +294,7 @@ solve  i conf Settings{..} =
            do -- (_, st) <- runPreSolverLog mempty $ toIL i
               -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
               -- seasoning <- T.symbolicEnv
-              let seasoning = runPreSolverLog mempty $ toIL i
+              let seasoning = runPreSolver mempty $ toIL i
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
               -- mapConcurrently is to wait for results. We only know that a max
@@ -590,7 +590,7 @@ instance Monoid    SVariantContext where mempty = true
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions. We make a trade off of memory
--- for speed and represent the configuration in several ways. We keep a setline
+-- for speed and represent the configuration in several ways. We keep a setlike
 -- representation of the config to support setlike operations most notably
 -- `member`, we keep a formula representation to send to the result module and
 -- we keep the symbolic representation to send to the solver. If we were missing
@@ -714,8 +714,11 @@ type Solver       = SolverT (NoLoggingT C.Query)
 type PreSolverLog =  PreSolverT (LoggingT T.Symbolic)
 type PreSolver    =  PreSolverT (NoLoggingT T.Symbolic)
 
+-- | A presolver runs the first stage of the evaluation/accumulation loop, that
+-- is, it is a solver which doesn't understand async, nor incremental push/pops.
+-- Rather, it is the solver which generates the first core
 newtype PreSolverT m a = PreSolverT { runPreSolverT :: (St.StateT Stores m) a }
-  deriving ( Functor,Applicative,Monad,MonadIO -- base
+  deriving ( Functor,Applicative,Monad,MonadIO
            , MonadError e, MonadLogger
            , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
            )
