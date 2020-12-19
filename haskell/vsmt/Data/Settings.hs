@@ -50,7 +50,7 @@ defSettings :: Settings
 defSettings = Settings{ solver          = Solver S.z3
                       , seed            = Nothing
                       , generateModels  = True
-                      , verboseMode     = True
+                      , verboseMode     = False
                       , vcBufSize       = 250
                       , producerBufSize = 250
                       , consumerBufSize = 250

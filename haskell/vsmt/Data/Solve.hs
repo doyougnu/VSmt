@@ -603,14 +603,14 @@ data State m = State
   }
 
 data Stores = Stores
-    { vConfig     :: Maybe VariantContext -- the formula representation of the config
-    , sConfig     :: SVariantContext      -- symbolic representation of a config
-    , config      :: Context              -- a map or set representation of the config
-    , ints        :: Ints
-    , doubles     :: Doubles
-    , bools       :: Bools
-    , dimensions  :: Dimensions
-    , threadId    :: ThreadID
+    { vConfig     :: !(Maybe VariantContext) -- the formula representation of the config
+    , sConfig     :: !SVariantContext      -- symbolic representation of a config
+    , config      :: !Context              -- a map or set representation of the config
+    , ints        :: !Ints
+    , doubles     :: !Doubles
+    , bools       :: !Bools
+    , dimensions  :: !Dimensions
+    , threadId    :: !ThreadID
     }
 
 data Channels m = Channels
@@ -964,16 +964,16 @@ instance Prim T.SBool NRef where
 -- that will survive in the variational core are binary connectives, symbolic
 -- references and choices
 data IL = Unit
-    | Ref BRef
-    | BOp B_B IL
-    | BBOp BB_B IL IL
-    | IBOp NN_B IL' IL'
+    | Ref !BRef
+    | BOp   B_B !IL
+    | BBOp BB_B !IL  !IL
+    | IBOp NN_B !IL' !IL'
     | Chc Dim Proposition Proposition
     deriving Show
 
-data IL' = Ref' NRef
-    | IOp N_N IL'
-    | IIOp NN_N IL' IL'
+data IL' = Ref' !NRef
+    | IOp   N_N !IL'
+    | IIOp NN_N !IL' !IL'
     | Chc' Dim NExpression NExpression
     deriving Show
 
@@ -981,7 +981,7 @@ data IL' = Ref' NRef
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
 toIL ::
-  ( MonadLogger    m
+  ( MonadLogger   m
   , Constrainable m (ExRefType Var) IL'
   , Constrainable m Var IL
   ) => Prop' Var -> m IL
@@ -1213,15 +1213,15 @@ evaluate (BBOp op l r) = log "[Eval] General Case" >>
 -- removes the need to perform tree rotations. We make this as strict as
 -- possible because we know we will be consuming the entire structure so there
 -- is not need to build thunks
-data Ctx = InL Ctx BB_B IL
-    | InR T.SBool BB_B Ctx
-    | InLB Ctx NN_B IL'
-    | InRB NRef NN_B Ctx
-    | InL' Ctx NN_N IL'
-    | InR' NRef NN_N Ctx
-    | InU B_B Ctx
-    | InU' N_N Ctx
-    | Top
+data Ctx = InL  !Ctx      BB_B  IL
+         | InR  !T.SBool  BB_B  !Ctx
+         | InLB !Ctx      NN_B  IL'
+         | InRB NRef      NN_B  !Ctx
+         | InL' !Ctx      NN_N  IL'
+         | InR' NRef      NN_N  !Ctx
+         | InU            B_B   !Ctx
+         | InU'           N_N   !Ctx
+         | Top
     deriving Show
 
 data Loc = InBool !IL !Ctx
