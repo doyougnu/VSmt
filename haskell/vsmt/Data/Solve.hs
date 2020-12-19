@@ -977,10 +977,11 @@ data IL' = Ref' NRef
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
-toIL :: ( MonadLogger m
-        , Constrainable m (ExRefType Var) IL'
-        , Constrainable m Var IL) =>
-        Prop' Var -> m IL
+toIL ::
+  ( MonadLogger    m
+  , Constrainable m (ExRefType Var) IL'
+  , Constrainable m Var IL
+  ) => Prop' Var -> m IL
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = cached ref
@@ -1283,9 +1284,11 @@ findChoice x@(InNum Ref'{} InL{})  = error $ "An impossible case: " ++ show x
 findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 
 
-store :: ( St.MonadState Stores io
-         , R.MonadReader (Channels s) io
-         ,  MonadIO io) => Result -> io ()
+store ::
+  (St.MonadState Stores        io
+  , R.MonadReader (Channels s) io
+  ,  MonadIO                   io
+  ) => Result -> io ()
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
 store !r = do (results,_) <- R.asks (getResultChans . resultChans)
@@ -1317,12 +1320,15 @@ resetTo = St.put
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
 -- process the alternatives plugging the choice hole with its respective
-alternative :: ( St.MonadState Stores m
-               , MonadReader (Channels n) m
-               , MonadIO m, MonadIO n
-               , C.MonadQuery n
-               , MonadLogger n
-               , MonadLogger m) => Dim -> SolverT n () -> SolverT n () -> m ()
+alternative ::
+  ( St.MonadState Stores     m
+  , MonadReader (Channels n) m
+  , MonadIO                  m
+  , MonadIO                  n
+  , C.MonadQuery             n
+  , MonadLogger              n
+  , MonadLogger              m
+  ) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
   do s <- St.get -- cache the state
      chans <- R.ask
@@ -1364,22 +1370,24 @@ alternative dim goLeft goRight =
        logInProducer "Writing to continue right"
        liftIO $ U.writeChan requests continueRight
 
-removeChoices :: ( MonadLogger     m
-                 , C.MonadQuery    m
-                 , I.SolverContext m
-                 , T.MonadSymbolic m
-                 ) => VarCore -> SolverT m ()
+removeChoices ::
+  ( MonadLogger     m
+  , C.MonadQuery    m
+  , I.SolverContext m
+  , T.MonadSymbolic m
+  ) => VarCore -> SolverT m ()
 {-# INLINE removeChoices #-}
 removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
                                St.get >>= getResult . vConfig >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
-choose :: ( MonadLogger     m
-          , I.SolverContext m
-          , T.MonadSymbolic m
-          , C.MonadQuery    m
-          ) => Loc -> SolverT m ()
+choose ::
+  ( MonadLogger     m
+  , I.SolverContext m
+  , T.MonadSymbolic m
+  , C.MonadQuery    m
+  ) => Loc -> SolverT m ()
 choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
 choose loc =
   do
