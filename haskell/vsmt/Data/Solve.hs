@@ -128,7 +128,7 @@ logInThreadIOWith :: Show a => Text.Text -> Int -> Text.Text -> a -> IO ()
 logInThreadIOWith kind tid msg value = putStrLn logmsg
   where logmsg :: Text.Text
         logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> "
-                 <> msg <> sep <> Text.pack (show value)
+                 <> msg <> sep <> Text.pack (show value) <> "\n"
 
         sep :: Text.Text
         sep = " : "
@@ -148,16 +148,16 @@ logInIOConsumer = logInThreadIO "Consumer"
 logInIOVC :: Int -> Text.Text -> IO ()
 logInIOVC = logInThreadIO "VCWorker"
 
-logInProducer :: (St.MonadState Stores m, MonadLogger m) => Text.Text -> m ()
-logInProducer msg = St.gets threadId >>= flip logInProducer' msg
+logInProducer :: (R.MonadReader (Channels n) m, MonadLogger m) => Text.Text -> m ()
+logInProducer msg = R.asks threadId >>= flip logInProducer' msg
 
-logInProducerWith :: (St.MonadState Stores m, MonadLogger m, Show a) =>
+logInProducerWith :: (R.MonadReader (Channels n) m, MonadLogger m, Show a) =>
   Text.Text -> a -> m ()
-logInProducerWith msg value = do tid <- St.gets threadId
+logInProducerWith msg value = do tid <- R.asks threadId
                                  logInThreadWith "Producer" tid msg value
 
-logInConsumer :: (St.MonadState Stores m, MonadLogger m) => Text.Text -> m ()
-logInConsumer msg = St.gets threadId >>= flip logInConsumer' msg
+logInConsumer :: (R.MonadReader (Channels n) m, MonadLogger m) => Text.Text -> m ()
+logInConsumer msg = R.asks threadId >>= flip logInConsumer' msg
 
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
 logThenPass str a = logWith str a >> return a
@@ -185,13 +185,14 @@ solveVerbose  i conf Settings{..} =
          workChans   = WorkChannels   $ (prdIn, prdOut)
          resultChans = ResultChannels $ (resultsIn, resultsOut)
          chans       = Channels{ vcChans=vcChans, mainChans=mainChans
-                               , workChans=workChans, resultChans=resultChans}
+                               , workChans=workChans, resultChans=resultChans
+                               , threadId=0}
          startState  = State{stores=mempty, channels=chans}
 
          -- solver settings
          posVariants     = maxVariantCount i
          expectedResults = fromMaybe posVariants numResults
-         consSettings    = (verboseMode, expectedResults)
+         consSettings    = (True, expectedResults)
          consComms       = (resultCounter, results)
          solverConfig    = getConfig solver
 
@@ -229,7 +230,8 @@ solveVerbose  i conf Settings{..} =
            -- placed on a result chan anyway
            C.query $
              runSolverLog startState{stores=st} $
-             findVCore il >>= removeChoices
+             do void $ findVCore il >>= removeChoices
+                logInProducer "Populated and now dying!!!!"
 
      -- this thread will die once it finds a choice or a unit in the plain case
      aPopulate <- A.async populateChans
@@ -276,7 +278,7 @@ solve  i conf Settings{..} =
          resultChans = ResultChannels $ (resultsIn, resultsOut)
          chans :: Channels (NoLoggingT C.Query)
          chans       = Channels{ vcChans=vcChans, mainChans=mainChans
-                               , workChans=workChans, resultChans=resultChans}
+                               , workChans=workChans, resultChans=resultChans, threadId=0}
          startState  = State{stores=mempty, channels=chans}
 
          -- solver settings
@@ -392,12 +394,12 @@ producer ::
 producer seasoning c channels tid = void $ T.runSMTWith c $
   do (il, ss) <- seasoning
      let requests = snd . getWorkChans . workChans $ channels
-     C.query $ runSolver State{stores=ss{threadId=tid}, channels=channels} $
+     C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
        do void $ findVCore il
           forever $ do
-            logInProducer' tid "Waiting"
+            logInProducer "Waiting"
             continue <- liftIO $ U.readChan requests
-            logInProducer' tid "Read a request, lets go"
+            -- logInProducer "Read a request, lets go"
             continue
 
 -- | A consumer is a thread that waits for results on the result channel, when
@@ -610,7 +612,6 @@ data Stores = Stores
     , doubles     :: !Doubles
     , bools       :: !Bools
     , dimensions  :: !Dimensions
-    , threadId    :: !ThreadID
     }
 
 data Channels m = Channels
@@ -618,6 +619,7 @@ data Channels m = Channels
                 , mainChans   :: MainChannels
                 , workChans   :: WorkChannels m
                 , resultChans :: ResultChannels
+                , threadId    :: !ThreadID
                 }
 
 instance Show Stores where
@@ -631,7 +633,6 @@ instance Show Stores where
     , show doubles
     , show bools
     , show dimensions
-    , show threadId
     ]
 
 instance Semigroup Stores where
@@ -642,7 +643,6 @@ instance Semigroup Stores where
                   , doubles    = doubles a <> doubles b
                   , bools      = bools   a <> bools   b
                   , dimensions = dimensions a <> dimensions b
-                  , threadId    = threadId a
                   }
 
 instance Monoid Stores where
@@ -653,7 +653,6 @@ instance Monoid Stores where
                   , doubles     = mempty
                   , bools       = mempty
                   , dimensions  = mempty
-                  , threadId    = 0
                   }
 
 -- TODO remove the StateT dependency for ReaderT
@@ -662,7 +661,7 @@ instance Monoid Stores where
 -- configuration, variable stores
 newtype SolverT m a = SolverT { runSolverT :: R.ReaderT (Channels m)
                                               (St.StateT Stores m) a }
-  deriving ( Functor,Applicative,Monad,MonadIO -- base
+  deriving ( Functor,Applicative,Monad,MonadIO
            , MonadError e, MonadLogger, R.MonadReader (Channels m)
            , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
            )
@@ -750,11 +749,11 @@ class RunSolver s where
   runSolver :: State s -> (SolverMonad s) a -> C.Query (a, State s)
 
 instance RunSolver (LoggingT C.Query) where
-  type SolverMonad   (LoggingT C.Query) = SolverLog
+  type SolverMonad (LoggingT C.Query) = SolverLog
   runSolver = runSolverLog
 
 instance RunSolver (NoLoggingT C.Query) where
-  type SolverMonad   (NoLoggingT C.Query) = Solver
+  type SolverMonad (NoLoggingT C.Query) = Solver
   runSolver = runSolverNoLog
 
 class Show a => Constrainable m a b where cached :: a -> m b
@@ -990,7 +989,7 @@ toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = cached ref
 toIL (OpB op (ChcB d l r)) = return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
-toIL (OpBB Impl l r) = log "Impl" >> do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
+toIL (OpBB Impl l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
 toIL (OpBB Eqv l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp Eqv  l' r'
 toIL (OpBB XOr l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp XOr  l' r'
 toIL (OpBB And l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp And  l' r'
@@ -1142,7 +1141,8 @@ isValue' _        = False
   -- computation rules
 evaluate :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = logWith "Ref" b >> toSolver b
+evaluate (Ref b)  = -- logWith "Ref" b >>
+                    toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -1168,22 +1168,27 @@ evaluate x@(IBOp _ Chc' {} (Ref' _)) = return $! intoCore x
   -- congruence cases
 evaluate (BBOp And l Unit)      = evaluate l
 evaluate (BBOp And Unit r)      = evaluate r
-evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x; logWith "eval'ing L" x; evaluate l
-evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x; logWith "eval'ing R" x; evaluate r
+evaluate (BBOp And l x@(Ref _)) = do _ <- evaluate x
+                                     -- ; logWith "eval'ing L" x
+                                     evaluate l
+evaluate (BBOp And x@(Ref _) r) = do _ <- evaluate x
+                                     -- logWith "eval'ing R" x
+                                     evaluate r
 evaluate x@(IBOp op l r)        =
   logWith "Found relation" x >>
   let l' = accumulate' l
       r' = accumulate' r
       res = IBOp op l' r' in
     if isValue' l' && isValue' r'
-    then log "Trying to reduce relation" >> evaluate res
+    then --log "Trying to reduce relation" >>
+         evaluate res
     else return $! intoCore res
 
 
   -- accumulation cases
 evaluate x@(BOp Not _)  = do let x'  = accumulate x
                              if isValue x' then evaluate x' else return $ intoCore x'
-evaluate (BBOp And l r) = log "[Eval] And case" >>
+evaluate (BBOp And l r) = --log "[Eval] And case" >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
      let res = BBOp And l' r'
@@ -1195,16 +1200,16 @@ evaluate (BBOp And l r) = log "[Eval] And case" >>
      if isValue l' || isValue r'
        then evaluate res
        else return $! intoCore res
-evaluate (BBOp op l r) = log "[Eval] General Case" >>
+evaluate (BBOp op l r) = --log "[Eval] General Case" >>
   let l' = accumulate l
       r' = accumulate r
       res = BBOp op l' r' in
     if isValue l' && isValue r'
-       then log "[Eval] Reducing more" >>
+       then --log "[Eval] Reducing more" >>
             evaluate res
-    else do log "[Eval] couldn't reduce"
-            logWith "Left " l'
-            logWith "Right " r'
+    else do --log "[Eval] couldn't reduce"
+            --logWith "Left " l'
+            --logWith "Right " r'
             return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
@@ -1364,7 +1369,7 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
        let continueRight = C.inNewAssertionStack $
-             do log "Right Alternative"
+             do logInProducer "Right Alternative"
                 resetTo s
                 updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
                 goRight
@@ -1397,25 +1402,27 @@ choose loc =
     let !loc' = findChoice loc
     case loc' of
       (InBool (Chc d cl cr) ctx) -> do
-        log "Got choice in context InBool"
         conf <- St.gets config
         let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
             goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
         case find d conf of
-          Just True  -> log "Cache hit --- Left Selected"  >> goLeft
-          Just False -> log "Cache hit --- Right Selected" >> goRight
-          Nothing    -> alternative d goLeft goRight
+          Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
+                        goLeft
+          Just False -> -- logInProducer "Cache hit --- Right Selected" >>
+                        goRight
+          Nothing    -> logInProducer "Cache miss running alt" >>
+                        alternative d goLeft goRight
 
       (InNum (Chc' d cl cr) ctx) -> do
-        log "Got choice in context InNum"
+        logInProducer "Got choice in context InNum"
         conf <- St.gets config
         let goLeft  = toIL' cl >>= choose . findChoice . toLocWith' ctx . accumulate'
             goRight = toIL' cr >>= choose . findChoice . toLocWith' ctx . accumulate'
 
         case find d conf of
-          Just True  -> log "Cache hit --- Left Selected"  >> goLeft
-          Just False -> log "Cache hit --- Right Selected" >> goRight
+          Just True  -> logInProducer "Cache hit --- Left Selected"  >> goLeft
+          Just False -> logInProducer "Cache hit --- Right Selected" >> goRight
           Nothing    -> alternative d goLeft goRight
 
       (InBool Unit Top) -> removeChoices $ intoCore Unit
