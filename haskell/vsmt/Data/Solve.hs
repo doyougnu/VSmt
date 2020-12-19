@@ -29,7 +29,7 @@
 
 module Solve where
 
-import           Control.Applicative                   ((<|>))
+
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import qualified Control.Concurrent.STM                as STM
@@ -45,9 +45,8 @@ import           Control.Monad.Logger                  (LoggingT,
 import qualified Control.Monad.State.Strict            as St (MonadState,
                                                               StateT(..), get, gets,
                                                               modify', put,
-                                                              lift,
                                                               runStateT)
-import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader, lift)
+import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
@@ -168,6 +167,7 @@ logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
 -- findVCore :: (MonadLogger s, RunSolver s n) => IL -> n VarCore
+findVCore :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 findVCore = evaluate
 
 -- | TODO pending on server create, create a load function to handle injection
@@ -205,17 +205,17 @@ solveVerbose  i conf Settings{..} =
          -- channel.
          runProducers = T.runSMTWith solverConfig $
            do C.io $ putStrLn "preconditioning in main"
-              runPreSolverLog startState  $ toIL i
+              -- (_, st) <- runPreSolverLog mempty $ toIL i
               -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
               -- seasoning <- T.symbolicEnv
-              let seasoning = runPreSolverLog startState $ toIL i
+              let seasoning = runPreSolverLog mempty $ toIL i
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
               -- mapConcurrently is to wait for results. We only know that a max
               -- of 2^(# unique dimensions) is the max, but the user may only
               -- want a subset, thus we can't wait for them to finish.
               C.io $
-                A.mapConcurrently_ (producer seasoning solverConfig)
+                A.mapConcurrently_ (producer seasoning solverConfig chans)
                 [1..numProducers]
 
          runConsumers =
@@ -227,16 +227,14 @@ solveVerbose  i conf Settings{..} =
            [1..numVCWorkers]
 
          populateChans = T.runSMTWith solverConfig $ do
-           (il, st) <- runPreSolverLog startState $ toIL i
+           (il, st) <- runPreSolverLog mempty $ toIL i
            -- now generate the first core thereby placing work on the channels
            -- this thread will exit once it places requests on the producer
            -- chans. If the IL is a unit then it'll be caught by evaluate and
            -- placed on a result chan anyway
-           void $ C.query $
-             runSolverLog st{channels=chans} $
+           C.query $
+             runSolverLog startState{stores=st} $
              findVCore il >>= removeChoices
-
-           C.io $ logIO "[Populator] We out"
 
      -- this thread will die once it finds a choice or a unit in the plain case
      aPopulate <- A.async populateChans
@@ -290,7 +288,7 @@ sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
-type Seasoning s   = T.Symbolic (IL, State s)
+type Seasoning     = T.Symbolic (IL, Stores)
 type ThreadID      = Int
 type MaxVariantCnt = Int
 type ConsumerComms = (STM.TVar Int, STM.TVar Result)
@@ -298,12 +296,11 @@ type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
-producer :: Seasoning s -> T.SMTConfig -> Int -> IO ()
-producer seasoning c tid = void $ T.runSMTWith c $
-  do (il, st) <- seasoning
-     let ss       = stores st
-         requests = snd . getWorkChans . workChans . channels $ st
-     C.query $ runSolverLog st{stores=ss{threadId=tid}} $
+producer :: Seasoning -> T.SMTConfig -> Channels (LoggingT (C.QueryT IO)) -> Int -> IO ()
+producer seasoning c channels tid = void $ T.runSMTWith c $
+  do (il, ss) <- seasoning
+     let requests = snd . getWorkChans . workChans $ channels
+     C.query $ runSolverLog State{stores=ss{threadId=tid}, channels=channels} $
        do void $ findVCore il
           forever $ do
             logInProducer' tid "Waiting"
@@ -338,23 +335,20 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
 -- words the producer instances don't know about the variant context variables
 -- and thus the query formula variables are actually disjoint from dimensions
 -- just as we would expect.
-vcWorker :: Maybe VariantContext -> State s -> Int -> IO ()
-vcWorker Nothing st tid =
-  let (fromMain, toMain) = getVcChans . vcChans . channels $ st
-  in T.runSMTWith T.z3{T.verbose=True} $ vcHelper fromMain toMain st tid
-
-vcWorker (Just vc) st tid =
+vcWorker :: Maybe VariantContext -> State (LoggingT (C.QueryT IO)) -> Int -> IO ()
+vcWorker Nothing s@State{..} tid =
+  let (fromMain, toMain) = getVcChans . vcChans $ channels
+  in T.runSMTWith T.z3{T.verbose=True} $ vcHelper fromMain toMain s tid
+vcWorker (Just vc) s@State{..} tid =
   T.runSMTWith T.z3{T.verbose=True} $ do
   -- season the solver
-  let (fromMain, toMain) = getVcChans . vcChans . channels $ st
-  (b,st) <- runPreSolverLog st $ contextToSBool' vc
+  let (fromMain, toMain) = getVcChans . vcChans $ channels
+  (b,st) <- runPreSolverLog stores $ contextToSBool' vc
   T.constrain b
   -- now run the helper
-  vcHelper fromMain toMain st tid
+  vcHelper fromMain toMain s{stores=st} tid
 
-vcWorker _ _ _ = error "passed no channels to vcWorker!"
-
-vcHelper :: FromMain -> ToMain -> State s -> ThreadID -> T.Symbolic ()
+vcHelper :: FromMain -> ToMain -> State (LoggingT (C.QueryT IO)) -> ThreadID -> T.Symbolic ()
 vcHelper fromMain toMain st tid =
   C.query $
   -- listen to the channel forever and check requests incrementally against the
@@ -595,30 +589,25 @@ instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
   symbolicEnv = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
-type Solver = SolverT (LoggingT C.Query)
+type Solver      = SolverT (LoggingT C.Query)
 type SolverNoLog = SolverT (NoLoggingT C.Query)
--- type PreSolver = SolverT (LoggingT T.Symbolic)
+type PreSolver =  PreSolverT (LoggingT T.Symbolic)
 
-newtype PreSolver a = PreSolver { unPre :: SolverT (LoggingT T.Symbolic) a }
-  deriving (Functor, Applicative, Monad, St.MonadState Stores
-           , MonadLogger, MonadIO, T.MonadSymbolic)
-
+newtype PreSolverT m a = PreSolverT { runPreSolverT :: (St.StateT Stores m) a }
+  deriving ( Functor,Applicative,Monad,MonadIO -- base
+           , MonadError e, MonadLogger
+           , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
+           )
 -- runSolverWith :: (m (a, Stores) -> (b, Stores)) -> State n -> SolverT n a -> (b, State n)
 -- runSolverWith f State{..} = addChans . f . flip St.runStateT stores . flip R.runReaderT channels . runSolverT
 --   where
 --     addChans :: (b, Stores) -> (b, State m)
 --     addChans (r, stores) = (r, State{stores=stores,channels=channels})
 
--- runPreSolverLog :: State (LoggingT T.Symbolic) -> PreSolver a -> T.Symbolic (a, State (LoggingT T.Symbolic))
-runPreSolverLog State{channels=c,stores=s} = fmap remake
-                                          . runStdoutLoggingT
-                                          . flip St.runStateT s
-                                          . flip R.runReaderT c
-                                          . runSolverT
-                                          . unPre
-  where remake (a,ss) = (a, State{stores=ss,channels=c})
+runPreSolverLog :: Stores -> PreSolver a -> T.Symbolic (a, Stores)
+runPreSolverLog s = runStdoutLoggingT . flip St.runStateT s . runPreSolverT
 
-runSolverLog :: State (LoggingT T.Symbolic )-> Solver a -> C.Query (a, State (LoggingT T.Symbolic))
+runSolverLog :: State (LoggingT C.Query)-> Solver a -> C.Query (a, State (LoggingT C.Query))
 runSolverLog State{channels=c,stores=s} = fmap remake
                                           . runStdoutLoggingT
                                           . flip St.runStateT s
@@ -626,7 +615,7 @@ runSolverLog State{channels=c,stores=s} = fmap remake
                                           . runSolverT
   where remake (a,ss) = (a, State{stores=ss,channels=c})
 
--- runSolverNoLog :: State (LoggingT T.Symbolic) -> SolverNoLog a -> C.Query (a, State (LoggingT T.Symbolic))
+runSolverNoLog :: State (NoLoggingT C.Query) -> SolverNoLog a -> C.Query (a, State (NoLoggingT C.Query))
 runSolverNoLog State{channels=c,stores=s} = fmap remake
                                             . runNoLoggingT
                                             . flip St.runStateT s
@@ -634,25 +623,25 @@ runSolverNoLog State{channels=c,stores=s} = fmap remake
                                             . runSolverT
   where remake (a,ss) = (a, State{stores=ss,channels=c})
 
-class MonadLogger solver => RunSolver solver where
-  type SolverMonad solver :: * -> *
-  type ChanMonad   solver :: * -> *
-  runSolver :: State (ChanMonad solver) -> solver a -> SolverMonad solver (a, State (ChanMonad solver))
+-- class MonadLogger solver => RunSolver solver where
+--   type SolverMonad solver :: * -> *
+--   type ChanMonad   solver :: * -> *
+--   runSolver :: State (ChanMonad solver) -> solver a -> SolverMonad solver (a, State (ChanMonad solver))
 
-instance RunSolver Solver      where
-  type SolverMonad Solver = C.Query
-  type ChanMonad   Solver = (LoggingT C.Query)
-  runSolver = runSolverLog
+-- instance RunSolver Solver      where
+--   type SolverMonad Solver = C.Query
+--   type ChanMonad   Solver = (LoggingT C.Query)
+--   runSolver = runSolverLog
 
-instance RunSolver SolverNoLog where
-  type SolverMonad SolverNoLog = C.Query
-  type ChanMonad   SolverNoLog = (NoLoggingT C.Query)
-  runSolver = runSolverNoLog
+-- instance RunSolver SolverNoLog where
+--   type SolverMonad SolverNoLog = C.Query
+--   type ChanMonad   SolverNoLog = (NoLoggingT C.Query)
+--   runSolver = runSolverNoLog
 
-instance RunSolver PreSolver   where
-  type SolverMonad PreSolver = T.Symbolic
-  type ChanMonad   PreSolver = (LoggingT T.Symbolic)
-  runSolver = runPreSolverLog
+-- instance RunSolver PreSolver   where
+--   type SolverMonad PreSolver = T.Symbolic
+--   type ChanMonad   PreSolver = (LoggingT T.Symbolic)
+--   runSolver = runPreSolverLog
 
 class Show a => Constrainable m a b where cached :: a -> m b
 
@@ -1032,13 +1021,8 @@ isValue' _        = False
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
-evaluate :: ( St.MonadState Stores m
-            , R.MonadReader (Channels n) m
-            , RunSolver  m
-            , MonadLogger m
-            , I.SolverContext m) =>
-            IL -> m VarCore
   -- computation rules
+evaluate :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = logWith "Ref" b >> toSolver b
 evaluate x@Chc {} = return $! intoCore x
@@ -1220,17 +1204,12 @@ resetTo = St.put
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
 -- process the alternatives plugging the choice hole with its respective
--- alternatives
-alternative ::
-     ( St.MonadState Stores m
-     , R.MonadReader (Channels n) m
-     , MonadLogger m
-     , MonadIO m
-     , C.MonadQuery m
-     , RunSolver m
-     )
-  => Dim -> SolverT m () -> SolverT m () -> SolverT m ()
--- alternative :: Dim -> Solver () -> Solver () -> Solver ()
+alternative :: ( St.MonadState Stores m
+               , MonadReader (Channels n) m
+               , MonadIO m, MonadIO n
+               , C.MonadQuery n
+               , MonadLogger n
+               , MonadLogger m) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
   do s <- St.get -- cache the state
      chans <- R.ask
@@ -1272,18 +1251,10 @@ alternative dim goLeft goRight =
        logInProducer "Writing to continue right"
        liftIO $ U.writeChan requests continueRight
 
-
-removeChoices :: ( MonadLogger            m
-                 , St.MonadState Stores   m
-                 , R.MonadReader (Channels n) m
-                 , I.SolverContext        m
-                 , C.MonadQuery           m
-                 , MonadIO                m
-                 , RunSolver              m
-                 , T.MonadSymbolic        m
-                 , Constrainable m Var IL
-                 , Constrainable m Dim T.SBool
-                 , Constrainable m (ExRefType Var) IL'
+removeChoices :: ( MonadLogger     m
+                 , C.MonadQuery    m
+                 , I.SolverContext m
+                 , T.MonadSymbolic m
                  ) => VarCore -> SolverT m ()
 {-# INLINE removeChoices #-}
 removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
@@ -1291,19 +1262,11 @@ removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
-choose :: ( St.MonadState Stores m
-          , R.MonadReader (Channels n) m
+choose :: ( MonadLogger     m
           , I.SolverContext m
-          , MonadLogger m
-          , C.MonadQuery m
           , T.MonadSymbolic m
-          , Constrainable m (ExRefType Var) IL'
-          , Constrainable m Var IL
-          , Constrainable m Dim T.SBool
-          , RunSolver m
-          ) =>
-          Loc -> SolverT m ()
--- choose :: Loc -> Solver ()
+          , C.MonadQuery    m
+          ) => Loc -> SolverT m ()
 choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
 choose loc =
   do
@@ -1336,7 +1299,9 @@ choose loc =
 
 
 --------------------------- Variant Context Helpers ----------------------------
--- contextToSBool' :: VariantContext -> PreSolver T.SBool
+contextToSBool' :: ( Monad m
+                   , Constrainable m Dim T.SBool
+                   ) => VariantContext -> m T.SBool
 contextToSBool' (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
         go (LitB True)  = return T.sTrue
@@ -1356,7 +1321,10 @@ contextToSBool' (getVarFormula -> x) = go x
         dispatch Eqv  = (<=>)
         dispatch XOr  = (<=>)
 
--- contextToSBool :: VariantContext -> Solver T.SBool
+contextToSBool :: ( St.MonadState Stores m
+                  , C.MonadQuery         m
+                  , MonadIO              m
+                  ) => VariantContext -> m T.SBool
 contextToSBool (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
         go (LitB True)  = return T.sTrue
