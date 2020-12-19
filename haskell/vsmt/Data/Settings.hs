@@ -70,7 +70,7 @@ minSettings :: Settings
 minSettings = Settings{ solver          = Solver S.z3
                       , seed            = Nothing
                       , generateModels  = False
-                      , verboseMode     = True
+                      , verboseMode     = False
                       , vcBufSize       = 200
                       , producerBufSize = 200
                       , consumerBufSize = 200

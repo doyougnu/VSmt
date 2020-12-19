@@ -166,13 +166,9 @@ logThreadPass :: (MonadLogger m, Show b) => Int -> Text.Text -> b -> m b
 logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
--- findVCore :: (MonadLogger s, RunSolver s n) => IL -> n VarCore
 findVCore :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 findVCore = evaluate
 
--- | TODO pending on server create, create a load function to handle injection
--- | TODO reduce redundancy after config module is written
--- to the IL type
 solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
 solveVerbose  i conf Settings{..} =
   do (toMain, fromVC)          <- U.newChan vcBufSize
@@ -383,7 +379,6 @@ type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
 -- producer :: Seasoning -> T.SMTConfig -> Channels (LoggingT (C.QueryT IO)) -> Int -> IO ()
-
 producer ::
   ( RunSolver s
   , MonadLogger s
@@ -464,11 +459,11 @@ vcWorker c (Just vc) s@State{..} tid =
   vcHelper fromMain toMain s{stores=st} tid
 
 vcHelper ::
-  ( RunSolver      s
-  , MonadLogger    (SolverMonad s)
-  , MonadIO        (SolverMonad s)
-  , C.MonadQuery   (SolverMonad s)
-  , Constrainable  (SolverMonad s) a (T.SBV Bool)
+  ( RunSolver       s
+  , MonadLogger     (SolverMonad s)
+  , MonadIO         (SolverMonad s)
+  , C.MonadQuery    (SolverMonad s)
+  , Constrainable   (SolverMonad s) a (T.SBV Bool)
   , I.SolverContext (SolverMonad s)
   ) => U.OutChan (a, Bool, T.SBV Bool) ->
        U.InChan (Bool, T.SBV Bool)     ->
@@ -724,11 +719,6 @@ newtype PreSolverT m a = PreSolverT { runPreSolverT :: (St.StateT Stores m) a }
            , MonadError e, MonadLogger
            , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
            )
--- runSolverWith :: (m (a, Stores) -> (b, Stores)) -> State n -> SolverT n a -> (b, State n)
--- runSolverWith f State{..} = addChans . f . flip St.runStateT stores . flip R.runReaderT channels . runSolverT
---   where
---     addChans :: (b, Stores) -> (b, State m)
---     addChans (r, stores) = (r, State{stores=stores,channels=channels})
 
 runPreSolverLog :: Stores -> PreSolverLog a -> T.Symbolic (a, Stores)
 runPreSolverLog s = runStdoutLoggingT . flip St.runStateT s . runPreSolverT
@@ -763,11 +753,6 @@ instance RunSolver (LoggingT C.Query) where
 instance RunSolver (NoLoggingT C.Query) where
   type SolverMonad   (NoLoggingT C.Query) = Solver
   runSolver = runSolverNoLog
-
--- instance RunSolver PreSolver   where
---   type SolverMonad PreSolver = T.Symbolic
---   type SolverMonad   PreSolver = (LoggingT T.Symbolic)
---   runSolver = runPreSolverLog
 
 class Show a => Constrainable m a b where cached :: a -> m b
 
