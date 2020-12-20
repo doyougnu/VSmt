@@ -413,7 +413,7 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
   do !n <- STM.readTVarIO counter
      when verboseMode $ logInIOConsumerWith tid "n == " n
      when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
-     if n == 3
+     if n == expectedResults
        then (logInIOConsumer tid "All done") >> exitSuccess
        else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
@@ -464,16 +464,16 @@ vcHelper ::
        U.InChan (Bool, T.SBV Bool)     ->
        State s                         ->
        Int                             -> T.Symbolic ()
-vcHelper fromMain toMain st tid =
+vcHelper fromMain toMain st _ =
   C.query $
   -- listen to the channel forever and check requests incrementally against the
   -- context if there is one
     void $
     runSolver st $
     forever $
-     do logInVC' tid "waiting"
+     do -- logInVC' tid "waiting"
         (d, shouldNegate, vc') <- C.io $ U.readChan fromMain
-        logInVC' tid "got request"
+        -- logInVC' tid "got request"
         C.inNewAssertionStack $
           do sD <- cached d
              let !new = if shouldNegate then bnot sD else sD &&& vc'
@@ -751,13 +751,14 @@ instance RunSolver (NoLoggingT C.Query) where
 class Show a => Constrainable m a b where cached :: a -> m b
 
 -- TODO fix this duplication with derivingVia
-instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
+instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
   Constrainable (SolverT m) Var IL where
   cached ref = do
     st <- St.get
     case find ref $ extract st of
-      Just x -> return (Ref x)
+      Just x -> logWith "Cache Hit" ref >> return (Ref x)
       Nothing -> do
+        logWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
         St.modify' (`by` add ref newSym)
         return (Ref newSym)
@@ -792,7 +793,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
                        St.modify' (`by` add d newSym)
                        return $! Ref' $ SD newSym
 
-instance (Monad m, T.MonadSymbolic m) =>
+instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
   Constrainable (PreSolverT m) Var IL where
   cached ref   = do st <- St.get
                     case find ref $ extract st of
@@ -1308,7 +1309,12 @@ updateConfigs context (d,val) sConf = do
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
 resetTo :: (St.MonadState Stores m) => Stores -> m ()
-resetTo = St.put
+resetTo s = do st <- St.get
+               St.put s{ bools=bools st
+                       , ints=ints st
+                       , doubles=doubles st
+                       , dimensions = dimensions st
+                       }
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
@@ -1324,7 +1330,9 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
   do s <- St.get -- cache the state
-     logInProducerWith "In Alternative with DIM" dim
+     logInProducerWith "In alternative with Dim" dim
+     St.gets config >>= logInProducerWith "Choose"
+     St.gets bools  >>= logInProducerWith "Bools"
      chans <- R.ask
      let (fromVC, toVC) = getMainChans . mainChans $ chans
          dontNegate          = False
@@ -1339,14 +1347,20 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
        let continueLeft = C.inNewAssertionStack $
-             do logInProducer "Left Alternative"
+             do logInProducerWith "Left Alternative of" dim
+                St.gets config >>= logInProducerWith "With context"
                 -- have to refresh the state which could have changed when
                 -- another producer picked up the request
+                St.gets bools >>= logInProducerWith "Before reset"
+                -- resetTo s
                 resetTo s
                 updateConfigs (bRef dim) (dim,True) newSConfigL
+                St.gets bools >>= logInProducerWith "After reset"
+                St.gets config >>= logInProducerWith "context After reset"
                 goLeft
            requests = fst . getWorkChans . workChans $ chans
-       logInProducer "Writing to go left"
+       St.gets config >>= logInProducerWith "Writing to go left: Config :"
+       St.gets bools >>= logInProducerWith "Writing to go left: Bools : "
        liftIO $ U.writeChan requests continueLeft
 
 
@@ -1355,9 +1369,11 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
        let continueRight = C.inNewAssertionStack $
-             do logInProducer "Right Alternative"
+             do logInProducerWith "Right Alternative of" dim
+                St.gets bools >>= logInProducerWith "Before reset"
                 resetTo s
                 updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
+                St.gets bools >>= logInProducerWith "After reset"
                 goRight
            requests = fst . getWorkChans . workChans $ chans
 
@@ -1371,7 +1387,8 @@ removeChoices ::
   , T.MonadSymbolic m
   ) => VarCore -> SolverT m ()
 {-# INLINE removeChoices #-}
-removeChoices (VarCore Unit) = logInProducer "Core reduced to Unit" >>
+removeChoices (VarCore Unit) = St.gets bools >>= logInProducerWith "Core reduced to Unit" >>
+                               St.gets config >>= logInProducerWith "Core reduced to Unit with Context" >>
                                St.get >>= getResult . vConfig >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
@@ -1387,22 +1404,25 @@ choose loc =
   do
     let !loc' = findChoice loc
     St.gets config >>= logInProducerWith "Choose"
+    St.gets bools  >>= logInProducerWith "Bools"
     case loc' of
       (InBool (Chc d cl cr) ctx) -> do
         conf <- St.gets config
-        -- let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
-        --     goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
-
-        let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
-            goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+        -- we'd like to evaluate after IL but this makes the async harder so we
+        -- accumulate instead. Specifically there is an interaction with in new
+        -- assertion stack. When requests come out of order the assertion stack
+        -- scope is also out of order, because evaluation relies on this
+        -- ordering we cannot use it.
+        let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
+            goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
                         goLeft
           Just False -> -- logInProducer "Cache hit --- Right Selected" >>
                         goRight
-          Nothing    -> logInProducer "Cache miss running alt" >>
-                        alternative d goLeft goRight
+          Nothing    -> do logInProducer "Cache miss running alt";
+                           alternative d goLeft goRight
 
       (InNum (Chc' d cl cr) ctx) -> do
         logInProducer "Got choice in context InNum"
