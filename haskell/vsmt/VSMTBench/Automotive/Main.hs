@@ -18,7 +18,7 @@ import           Settings
 import           Core.Types
 import           Core.Core
 import           Utils
-import           Solve (solveVerbose,solveForCoreVerbose)
+import           Solve (solveVerbose, solve)
 
 import           Lang
 import           Auto
@@ -210,12 +210,10 @@ main = do
   --   -- , bgroup "Boolector" (benches boolectorDefConf)
   --   ]
 
-  let t = bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
-  -- let t = bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d")
+  -- let t = bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
+  let t = bRef "one" &&& bRef "two" &&& bRef "three" &&& bChc "AA" (bRef "a") (bRef "b") &&& bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
-  putStrLn $ show $ length failed
-  putStrLn $ show $ dimensions bProp
   -- putStrLn $ show $ bProp
-  res <- solveVerbose t Nothing minAsyncSettings
+  res <- solveVerbose t Nothing debugSettings -- defSettings
   putStrLn $ show res
   -- solveForCoreVerbose bProp Nothing

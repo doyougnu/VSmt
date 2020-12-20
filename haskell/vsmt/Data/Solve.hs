@@ -46,7 +46,7 @@ import qualified Control.Monad.State.Strict            as St (MonadState,
                                                               StateT(..), get, gets,
                                                               modify', put,
                                                               runStateT)
-import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader)
+import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader, local)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
@@ -201,17 +201,17 @@ solveVerbose  i conf Settings{..} =
          -- while this thread continues to solve, thereby populating the work
          -- channel.
          runProducers = T.runSMTWith solverConfig $
-           do -- (_, st) <- runPreSolverLog mempty $ toIL i
+           do (il, st) <- runPreSolverLog mempty $ toIL i
               -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-              -- seasoning <- T.symbolicEnv
-              let seasoning = runPreSolverLog mempty $ toIL i
+              seasoning <- T.symbolicEnv
+              -- let seasoning = runPreSolverLog mempty $ toIL i
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
               -- mapConcurrently is to wait for results. We only know that a max
               -- of 2^(# unique dimensions) is the max, but the user may only
               -- want a subset, thus we can't wait for them to finish.
               C.io $
-                A.mapConcurrently_ (producer seasoning solverConfig chans)
+                A.mapConcurrently_ (producer seasoning solverConfig st il chans)
                 [1..numProducers]
 
          runConsumers =
@@ -293,17 +293,17 @@ solve  i conf Settings{..} =
          -- while this thread continues to solve, thereby populating the work
          -- channel.
          runProducers = T.runSMTWith solverConfig $
-           do -- (_, st) <- runPreSolverLog mempty $ toIL i
+           do (il, st) <- runPreSolverLog mempty $ toIL i
               -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-              -- seasoning <- T.symbolicEnv
-              let seasoning = runPreSolver mempty $ toIL i
+              seasoning <- T.symbolicEnv
+              -- let seasoning = runPreSolver mempty $ toIL i
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
               -- mapConcurrently is to wait for results. We only know that a max
               -- of 2^(# unique dimensions) is the max, but the user may only
               -- want a subset, thus we can't wait for them to finish.
               C.io $
-                A.mapConcurrently_ (producer seasoning solverConfig chans)
+                A.mapConcurrently_ (producer seasoning solverConfig st il chans)
                 [1..numProducers]
 
          runConsumers =
@@ -372,7 +372,8 @@ sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
-type Seasoning     = T.Symbolic (IL, Stores)
+-- type Seasoning     = T.Symbolic (IL, Stores)
+type Seasoning     = I.State
 type ThreadID      = Int
 type MaxVariantCnt = Int
 type ConsumerComms = (STM.TVar Int, STM.TVar Result)
@@ -387,21 +388,26 @@ producer ::
   , I.SolverContext s
   , MonadIO s
   , SolverMonad s ~ SolverT s
-  ) => T.Symbolic (IL, Stores) ->
+  ) => Seasoning               ->
        T.SMTConfig             ->
+       Stores                  ->
+       IL                      ->
        Channels s              ->
        ThreadID                -> IO ()
-producer seasoning c channels tid = void $ T.runSMTWith c $
-  do (il, ss) <- seasoning
-     let requests = snd . getWorkChans . workChans $ channels
-     C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
-       do void $ findVCore il
-          forever $ do
-            logInProducer "Waiting"
-            continue <- liftIO $ U.readChan requests
-            -- logInProducer "Read a request, lets go"
-            continue
+producer seasoning c ss il channels tid = void $
+  T.runSMTWith c $
+  season seasoning $
+       do let requests = snd . getWorkChans . workChans $ channels
+          C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
+            do void $ findVCore il
+               forever $ do
+                 logInProducer "Waiting"
+                 continue <- liftIO $ U.readChan requests
+                 -- logInProducer "Read a request, lets go"
+                 continue
 
+season :: Monad m => Seasoning -> T.SymbolicT m a -> T.SymbolicT m a
+season = I.mapSymbolicT . R.local . const
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
 -- threads and atomically modifies the result TVar for main. The thread exits

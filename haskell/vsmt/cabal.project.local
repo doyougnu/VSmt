@@ -1,4 +1,5 @@
--- packages: ~/programming/sbv/sbv.cabal
+packages: lib/sbv
+
 profiling: True
 benchmarks: True
 library-profiling: True

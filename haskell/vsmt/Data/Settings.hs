@@ -81,7 +81,7 @@ minSettings = Settings{ solver          = Solver S.z3
                       }
 
 minAsyncSettings :: Settings
-minAsyncSettings = minSettings{numProducers = 1, numConsumers = 1, numVCWorkers = 1}
+minAsyncSettings = minSettings{numProducers = 3, numConsumers = 3, numVCWorkers = 3}
 
 debugSettings :: Settings
 debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}

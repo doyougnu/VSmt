@@ -21,7 +21,7 @@ import           Settings
 import           Core.Types
 import           Core.Core
 import           Utils
-import           Solve (solveVerbose,solveForCoreVerbose)
+import           Solve (solveVerbose,solve)
 
 import           Lang
 import           Parser
@@ -352,4 +352,6 @@ main = do
 --     ]
 
   -- (satWith z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
-  solveVerbose bProp Nothing defSettings
+  -- solveVerbose bProp Nothing defSettings
+  res <- solve bProp Nothing defSettings
+  putStrLn $ show res
