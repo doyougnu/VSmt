@@ -55,7 +55,7 @@ defSettings = Settings{ solver          = Solver S.z3
                       , producerBufSize = 250
                       , consumerBufSize = 250
                       , numResults      = Nothing
-                      , numProducers    = 250
+                      , numProducers    = 50
                       , numConsumers    = 50
                       , numVCWorkers    = 10
                       }
@@ -81,7 +81,7 @@ minSettings = Settings{ solver          = Solver S.z3
                       }
 
 minAsyncSettings :: Settings
-minAsyncSettings = minSettings{numProducers = 2, numConsumers = 2, numVCWorkers = 2}
+minAsyncSettings = minSettings{numProducers = 5, numConsumers = 5, numVCWorkers = 5}
 
 debugSettings :: Settings
 debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}

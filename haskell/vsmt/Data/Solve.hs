@@ -128,7 +128,7 @@ logInThreadIOWith :: Show a => Text.Text -> Int -> Text.Text -> a -> IO ()
 logInThreadIOWith kind tid msg value = putStrLn logmsg
   where logmsg :: Text.Text
         logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> "
-                 <> msg <> sep <> Text.pack (show value) <> "\n"
+                 <> msg <> sep <> Text.pack (show value)
 
         sep :: Text.Text
         sep = " : "
@@ -244,13 +244,13 @@ solveVerbose  i conf Settings{..} =
      -- wait until consumers exit, when they do we are done, we could choose to
      -- catch the exception here but because we exit with ExitSuccess there it
      -- would be rare if something other was thrown and the whole system would
-     -- likely stall on an MVar so thereno reason
+     -- likely stall on an MVar so thereno reason. If we don't use waitCatch
+     -- here then we would have to catch the exception thrown from the consumers
      void $ A.waitCatch aCons
 
      -- cleanup
      A.cancel aProds
      A.cancel aWorkers
-     A.cancel aCons
      A.cancel aPopulate -- make sure this thread did indeed die
 
      -- grab the results
@@ -407,26 +407,19 @@ producer seasoning c channels tid = void $ T.runSMTWith c $
 -- threads and atomically modifies the result TVar for main. The thread exits
 -- when the result counter hits the expected result number determined either by
 -- the possible variants or the user.
-consumer ::
-  (Show a
-  , Eq a
-  , Enum a
-  , Semigroup b
-  ) => (STM.TVar a, STM.TVar b) ->
-       (Bool, a)                ->
-       U.OutChan b              ->
-       Int                      -> IO c
+consumer :: (Semigroup b) =>
+  (STM.TVar Int, STM.TVar b) -> (Bool, Int) -> U.OutChan b -> Int -> IO ()
 consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
-  do n <- STM.readTVarIO counter
+  do !n <- STM.readTVarIO counter
      when verboseMode $ logInIOConsumerWith tid "n == " n
      when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
-     if n == expectedResults
-       then when verboseMode (logInIOConsumer tid "All done") >> exitSuccess
+     if n == 3
+       then (logInIOConsumer tid "All done") >> exitSuccess
        else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
                when verboseMode $ logInIOConsumer tid "got result"
-               atomically $ do STM.modifyTVar' counter succ
-                               STM.modifyTVar' acc (<> r)
+               atomically $ do STM.modifyTVar' acc (<> r)
+                               STM.modifyTVar' counter succ
 
 -- | A variant context (vc) work is a thread which serves to issue is sat or is not
 -- sat calls for the variant context. The producers will issue commands requests
@@ -489,7 +482,6 @@ vcHelper fromMain toMain st tid =
              C.checkSat >>= C.io . \case
                C.Sat -> U.writeChan toMain (True, new)
                _     -> U.writeChan toMain (False, new)
-             logInVC' tid "leaving stack"
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -1060,13 +1052,6 @@ accumulate x@(IBOp _ Chc' {} Chc' {})  = x
 accumulate x@(IBOp _ (Ref' _) Chc' {}) = x
 accumulate x@(IBOp _ Chc' {} (Ref' _)) = x
  -- congruence rules
--- accumulate (BOp Not x@(IBOp _ _ _)) = let e' = accumulate x
---                                           res = BOp Not e' in
---                                         if isValue x
---                                         then accumulate res
---                                         else res
-
--- accumulate (BOp Not e)   = accumulate $ driveNotDown e
 accumulate (BOp Not e) = let e'  = accumulate e
                              res = BOp Not e' in
                            if isValue e'
@@ -1339,6 +1324,7 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
   do s <- St.get -- cache the state
+     logInProducerWith "In Alternative with DIM" dim
      chans <- R.ask
      let (fromVC, toVC) = getMainChans . mainChans $ chans
          dontNegate          = False
@@ -1385,7 +1371,7 @@ removeChoices ::
   , T.MonadSymbolic m
   ) => VarCore -> SolverT m ()
 {-# INLINE removeChoices #-}
-removeChoices (VarCore Unit) = log "Core reduced to Unit" >>
+removeChoices (VarCore Unit) = logInProducer "Core reduced to Unit" >>
                                St.get >>= getResult . vConfig >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
@@ -1400,11 +1386,15 @@ choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
 choose loc =
   do
     let !loc' = findChoice loc
+    St.gets config >>= logInProducerWith "Choose"
     case loc' of
       (InBool (Chc d cl cr) ctx) -> do
         conf <- St.gets config
-        let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
-            goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+        -- let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
+        --     goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+
+        let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+            goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
