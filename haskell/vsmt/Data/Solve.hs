@@ -40,13 +40,16 @@ import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Logger                  (LoggingT,
                                                         MonadLogger (..),
                                                         NoLoggingT, logDebug,
+                                                        mapLoggingT,
+                                                        mapNoLoggingT,
                                                         runNoLoggingT,
                                                         runStdoutLoggingT)
 import qualified Control.Monad.State.Strict            as St (MonadState,
                                                               StateT(..), get, gets,
                                                               modify', put,
+                                                              mapStateT,
                                                               runStateT)
-import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader, local)
+import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader, local, mapReaderT)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
@@ -396,7 +399,7 @@ producer ::
        ThreadID                -> IO ()
 producer seasoning c ss il channels tid = void $
   T.runSMTWith c $
-  season seasoning $
+  seasonPreSolver seasoning $
        do let requests = snd . getWorkChans . workChans $ channels
           C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
             do void $ findVCore il
@@ -406,8 +409,23 @@ producer seasoning c ss il channels tid = void $
                  -- logInProducer "Read a request, lets go"
                  continue
 
-season :: Monad m => Seasoning -> T.SymbolicT m a -> T.SymbolicT m a
-season = I.mapSymbolicT . R.local . const
+-- seasonQ :: Monad m => I.State -> C.QueryT m a -> C.QueryT m a
+-- seasonQ = I.mapQueryT . R.local . const
+
+-- season' :: ( Monad m
+--            , MonadReader (C.QueryT m a) m
+--            ) =>
+--            Seasoning -> SolverT m a -> SolverT m a
+-- season' s = mapSolverT $ seasonQ s
+
+-- mapSolverT :: ( Monad m
+--               , C.MonadQuery m
+--               )
+--            => (I.State -> I.State) -> SolverT m a -> SolverT m a
+-- mapSolverT f m = SolverT $ R.mapReaderT (St.mapStateT (mapLoggingT (I.mapQueryT f))) $ runSolverT m
+
+
+
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
 -- threads and atomically modifies the result TVar for main. The thread exits
@@ -665,6 +683,26 @@ newtype SolverT m a = SolverT { runSolverT :: R.ReaderT (Channels m)
            )
 
 instance MonadTrans SolverT where lift = SolverT . lift . lift
+
+mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
+mapSolverT f m = SolverT $ R.mapReaderT (St.mapStateT f) $ runSolverT m
+
+mapSolver :: (I.State -> I.State) -> Solver a -> Solver a
+mapSolver f = mapSolverT (mapNoLoggingT (I.mapQueryT (R.local f)))
+
+mapSolverLog :: (I.State -> I.State) -> SolverLog a -> SolverLog a
+mapSolverLog f = mapSolverT (mapLoggingT (I.mapQueryT (R.local f)))
+
+seasonPreSolver :: Monad m => Seasoning -> T.SymbolicT m a -> T.SymbolicT m a
+seasonPreSolver = I.mapSymbolicT . R.local . const
+
+
+
+class Season m where
+  season :: (I.State -> I.State) -> m a -> m a
+
+instance Season Solver    where season = mapSolver
+instance Season SolverLog where season = mapSolverLog
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
@@ -1328,6 +1366,8 @@ resetTo s = do st <- St.get
 alternative ::
   ( St.MonadState Stores     m
   , MonadReader (Channels n) m
+  , Season      (SolverT n)
+  , T.MonadSymbolic          n
   , MonadIO                  m
   , MonadIO                  n
   , C.MonadQuery             n
@@ -1353,17 +1393,19 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
        let continueLeft = C.inNewAssertionStack $
-             do logInProducerWith "Left Alternative of" dim
-                St.gets config >>= logInProducerWith "With context"
-                -- have to refresh the state which could have changed when
-                -- another producer picked up the request
-                St.gets bools >>= logInProducerWith "Before reset"
-                -- resetTo s
-                resetTo s
-                updateConfigs (bRef dim) (dim,True) newSConfigL
-                St.gets bools >>= logInProducerWith "After reset"
-                St.gets config >>= logInProducerWith "context After reset"
-                goLeft
+             do seasoning <- C.queryState
+                season (const seasoning) $
+                  do logInProducerWith "Left Alternative of" dim
+                     St.gets config >>= logInProducerWith "With context"
+                     -- have to refresh the state which could have changed when
+                     -- another producer picked up the request
+                     St.gets bools >>= logInProducerWith "Before reset"
+                     -- resetTo s
+                     resetTo s
+                     updateConfigs (bRef dim) (dim,True) newSConfigL
+                     St.gets bools >>= logInProducerWith "After reset"
+                     St.gets config >>= logInProducerWith "context After reset"
+                     goLeft
            requests = fst . getWorkChans . workChans $ chans
        St.gets config >>= logInProducerWith "Writing to go left: Config :"
        St.gets bools >>= logInProducerWith "Writing to go left: Bools : "
@@ -1375,12 +1417,14 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
        let continueRight = C.inNewAssertionStack $
-             do logInProducerWith "Right Alternative of" dim
-                St.gets bools >>= logInProducerWith "Before reset"
-                resetTo s
-                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                St.gets bools >>= logInProducerWith "After reset"
-                goRight
+             do seasoning <- T.symbolicEnv
+                season (const seasoning) $
+                  do logInProducerWith "Right Alternative of" dim
+                     St.gets bools >>= logInProducerWith "Before reset"
+                     resetTo s
+                     updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
+                     St.gets bools >>= logInProducerWith "After reset"
+                     goRight
            requests = fst . getWorkChans . workChans $ chans
 
        logInProducer "Writing to continue right"
@@ -1390,6 +1434,7 @@ removeChoices ::
   ( MonadLogger     m
   , C.MonadQuery    m
   , I.SolverContext m
+  , Season (SolverT m)
   , T.MonadSymbolic m
   ) => VarCore -> SolverT m ()
 {-# INLINE removeChoices #-}
@@ -1403,6 +1448,7 @@ choose ::
   ( MonadLogger     m
   , I.SolverContext m
   , T.MonadSymbolic m
+  , Season (SolverT m)
   , C.MonadQuery    m
   ) => Loc -> SolverT m ()
 choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
