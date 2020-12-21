@@ -29,7 +29,7 @@
 
 module Solve where
 
-
+import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import qualified Control.Concurrent.STM                as STM
@@ -68,6 +68,8 @@ import           Core.Result
 import           Core.Types
 
 import           Settings
+
+import Debug.Trace
 
 ------------------------------ Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
@@ -205,9 +207,7 @@ solveVerbose  i conf Settings{..} =
          -- channel.
          runProducers = T.runSMTWith solverConfig $
            do (il, st) <- runPreSolverLog mempty $ toIL i
-              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-              seasoning <- T.symbolicEnv
-              -- let seasoning = runPreSolverLog mempty $ toIL i
+              !seasoning <- I.freezeSt
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
               -- mapConcurrently is to wait for results. We only know that a max
@@ -231,18 +231,19 @@ solveVerbose  i conf Settings{..} =
            -- this thread will exit once it places requests on the producer
            -- chans. If the IL is a unit then it'll be caught by evaluate and
            -- placed on a result chan anyway
-           C.query $
+           void $ C.query $
              runSolverLog startState{stores=st} $
              do void $ findVCore il >>= removeChoices
                 logInProducer "Populated and now dying!!!!"
 
+     -- this thread will die once it finds a choice or a unit in the plain case
+
+     aPopulate <- A.async populateChans
+     threadDelay 5000
      -- kick off
      aProds   <- A.async runProducers
      aCons    <- A.async runConsumers
      aWorkers <- A.async runVCWorkers
-
-     -- this thread will die once it finds a choice or a unit in the plain case
-     aPopulate <- A.async populateChans
 
 
      -- wait until consumers exit, when they do we are done, we could choose to
@@ -250,9 +251,11 @@ solveVerbose  i conf Settings{..} =
      -- would be rare if something other was thrown and the whole system would
      -- likely stall on an MVar so thereno reason. If we don't use waitCatch
      -- here then we would have to catch the exception thrown from the consumers
+     putStrLn "waiting to catch"
      A.waitCatch aCons >>= \case
-       Left e -> print e
+       Left e     -> print e
        Right unit -> return unit
+     putStrLn "Caught"
 
      -- cleanup
      A.cancel aProds
@@ -301,7 +304,7 @@ solve  i conf Settings{..} =
          runProducers = T.runSMTWith solverConfig $
            do (il, st) <- runPreSolverLog mempty $ toIL i
               -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-              seasoning <- T.symbolicEnv
+              !seasoning <- I.freezeSt
               -- let seasoning = runPreSolver mempty $ toIL i
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
@@ -330,13 +333,14 @@ solve  i conf Settings{..} =
              runSolver startState{stores=st} $
              findVCore il >>= removeChoices
 
-     -- this thread will die once it finds a choice or a unit in the plain case
-     aPopulate <- A.async populateChans
-
      -- kick off
      aProds   <- A.async runProducers
      aCons    <- A.async runConsumers
      aWorkers <- A.async runVCWorkers
+
+     -- this thread will die once it finds a choice or a unit in the plain case
+     void populateChans
+
 
      -- wait until consumers exit, when they do we are done, we could choose to
      -- catch the exception here but because we exit with ExitSuccess there it
@@ -348,7 +352,7 @@ solve  i conf Settings{..} =
      A.cancel aProds
      A.cancel aWorkers
      A.cancel aCons
-     A.cancel aPopulate -- make sure this thread did indeed die
+     -- A.cancel aPopulate -- make sure this thread did indeed die
 
      -- grab the results
      finalResults <- STM.readTVarIO results
@@ -378,8 +382,7 @@ sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
--- type Seasoning     = T.Symbolic (IL, Stores)
-type Seasoning     = I.State
+type Seasoning     = I.FrozenState
 type ThreadID      = Int
 type MaxVariantCnt = Int
 type ConsumerComms = (STM.TVar Int, STM.TVar Result)
@@ -387,12 +390,12 @@ type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 -- | Producers actually produce two things: 1 they produce requests to other
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
--- producer :: Seasoning -> T.SMTConfig -> Channels (LoggingT (C.QueryT IO)) -> Int -> IO ()
 producer ::
   ( RunSolver s
   , MonadLogger s
   , I.SolverContext s
   , MonadIO s
+  , Season (SolverT s)
   , SolverMonad s ~ SolverT s
   ) => Seasoning               ->
        T.SMTConfig             ->
@@ -402,15 +405,15 @@ producer ::
        ThreadID                -> IO ()
 producer seasoning c ss il channels tid = void $
   T.runSMTWith c $
-  seasonPreSolver seasoning $
-       do let requests = snd . getWorkChans . workChans $ channels
-          C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
-            do void $ findVCore il
-               forever $ do
-                 logInProducer "Waiting"
-                 continue <- liftIO $ U.readChan requests
-                 -- logInProducer "Read a request, lets go"
-                 continue
+  do I.unfreezeSt seasoning
+     let requests = snd . getWorkChans . workChans $ channels
+     C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
+       do void $ findVCore il
+          forever $ do
+            logInProducer "Waiting"
+            continue <- liftIO $ U.readChan requests
+            logInProducer "Read a request, lets go"
+            continue
 
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
@@ -423,7 +426,7 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
   do !n <- STM.readTVarIO counter
      when verboseMode $ logInIOConsumerWith tid "n == " n
      when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
-     if n == 2
+     if n == expectedResults
        then (logInIOConsumer tid "All done") >> exitSuccess
        else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
@@ -679,10 +682,11 @@ mapSolver f = mapSolverT (mapNoLoggingT (I.mapQueryT (R.local f)))
 mapSolverLog :: (I.State -> I.State) -> SolverLog a -> SolverLog a
 mapSolverLog f = mapSolverT (mapLoggingT (I.mapQueryT (R.local f)))
 
-seasonPreSolver :: Monad m => Seasoning -> T.SymbolicT m a -> T.SymbolicT m a
-seasonPreSolver = I.mapSymbolicT . R.local . const
+-- mapFreeze :: I.FrozenState -> Solver a -> Solver a
+-- mapFreeze f = mapSolverT (mapNoLoggingT (I.mapQueryT (I.unfreezeSt f)))
 
-
+-- mapPreFreeze :: I.FrozenState -> Solver a -> Solver a
+-- mapPreFreeze f = mapSolverT (mapNoLoggingT (I.mapQueryT (I.unfreezeSt f)))
 
 class Season m where
   season :: (I.State -> I.State) -> m a -> m a
@@ -791,6 +795,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
         logWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
         St.modify' (`by` add ref newSym)
+        logWith "Added and now returning" (Ref newSym)
         return (Ref newSym)
 
 instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
@@ -1009,7 +1014,7 @@ toIL ::
   ) => Prop' Var -> m IL
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
-toIL (RefB ref)    = cached ref
+toIL (RefB ref)    = do r <- cached ref; logWith "Returning" r; return r
 toIL (OpB op (ChcB d l r)) = return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
 toIL (OpBB Impl l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
@@ -1059,7 +1064,7 @@ isUnit _              = False
 accumulate :: IL -> IL
  -- computation rules
 accumulate Unit                        = Unit
-accumulate x@Ref{} = x
+accumulate x@Ref{} = trace ("Got Ref in Accum" ++ show x) $ x
 accumulate x@Chc{} = x
   -- bools
 accumulate (BOp Not (Ref r))            = Ref $! bnot r
@@ -1157,8 +1162,7 @@ isValue' _        = False
   -- computation rules
 evaluate :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = -- logWith "Ref" b >>
-                    toSolver b
+evaluate (Ref b)  = logWith "Ref" b >> toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -1316,7 +1320,7 @@ store ::
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
 store !r = do (results,_) <- R.asks (getResultChans . resultChans)
-              liftIO $ U.writeChan results r
+              liftIO $! U.writeChan results r
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1354,6 +1358,7 @@ alternative ::
   , MonadReader (Channels n) m
   , Season      (SolverT n)
   , T.MonadSymbolic          n
+  , T.MonadSymbolic          m
   , MonadIO                  m
   , MonadIO                  n
   , C.MonadQuery             n
@@ -1362,8 +1367,8 @@ alternative ::
   , MonadLogger              m
   ) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
-  do s <- St.get -- cache the state
-     seasoning <- C.queryState -- and the base solver state
+  do !s <- St.get -- cache the state
+     !seasoning <- I.freezeSt -- and the base solver state
      logInProducerWith "In alternative with Dim" dim
      St.gets config >>= logInProducerWith "Choose"
      St.gets bools  >>= logInProducerWith "Bools"
@@ -1381,8 +1386,9 @@ alternative dim goLeft goRight =
      (checkDimTrue,!newSConfigL) <- liftIO $
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
-       let continueLeft = C.inNewAssertionStack $
-                season (const seasoning) $
+       let continueLeft =
+             do I.unfreezeSt seasoning
+                C.inNewAssertionStack $
                   do logInProducerWith "Left Alternative of" dim
                      St.gets config >>= logInProducerWith "With context"
                      -- have to refresh the state which could have changed when
@@ -1403,8 +1409,9 @@ alternative dim goLeft goRight =
      (checkDimFalse,!newSConfigR) <- liftIO $
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
-       let continueRight = C.inNewAssertionStack $
-                season (const seasoning) $
+       let continueRight =
+             do I.unfreezeSt seasoning
+                C.inNewAssertionStack $
                   do logInProducerWith "Right Alternative of" dim
                      St.gets bools >>= logInProducerWith "Before reset"
                      resetTo s
@@ -1437,7 +1444,8 @@ choose ::
   , Season (SolverT m)
   , C.MonadQuery    m
   ) => Loc -> SolverT m ()
-choose (InBool l@Ref{} Top) = evaluate l >>= removeChoices
+choose (InBool l@Ref{} Top) = logInProducer "Choosing all done" >>
+                              evaluate l >>= removeChoices
 choose loc =
   do
     let !loc' = findChoice loc
@@ -1451,6 +1459,7 @@ choose loc =
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
+        logInProducerWith "Choose Context" ctx
         let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
             goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
