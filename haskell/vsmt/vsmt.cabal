@@ -48,7 +48,7 @@ library
                , monad-logger
                , mtl
                , parser-combinators
-               , sbv >= 8.8
+               , sbv
                , stm
                , text
                , transformers >= 0.5.6.2

@@ -36,7 +36,9 @@
       seasoned state. Hence, we are forced recompute the state for each thread
       with a call with ~toIL~.
 
-*** TODO Add serialization for incremental incremental vsmt (may add this to sbv)
+*** CANCELLED Add serialization for incremental incremental vsmt (may add this to sbv)
+    Not enough time left in phd for this
+    CLOSED: [2020-12-19 Sat 18:20]
 
 *** TODO Use Earley to parse expressions
 

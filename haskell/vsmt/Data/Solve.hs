@@ -236,20 +236,23 @@ solveVerbose  i conf Settings{..} =
              do void $ findVCore il >>= removeChoices
                 logInProducer "Populated and now dying!!!!"
 
-     -- this thread will die once it finds a choice or a unit in the plain case
-     aPopulate <- A.async populateChans
-
      -- kick off
      aProds   <- A.async runProducers
      aCons    <- A.async runConsumers
      aWorkers <- A.async runVCWorkers
+
+     -- this thread will die once it finds a choice or a unit in the plain case
+     aPopulate <- A.async populateChans
+
 
      -- wait until consumers exit, when they do we are done, we could choose to
      -- catch the exception here but because we exit with ExitSuccess there it
      -- would be rare if something other was thrown and the whole system would
      -- likely stall on an MVar so thereno reason. If we don't use waitCatch
      -- here then we would have to catch the exception thrown from the consumers
-     void $ A.waitCatch aCons
+     A.waitCatch aCons >>= \case
+       Left e -> print e
+       Right unit -> return unit
 
      -- cleanup
      A.cancel aProds
@@ -409,23 +412,6 @@ producer seasoning c ss il channels tid = void $
                  -- logInProducer "Read a request, lets go"
                  continue
 
--- seasonQ :: Monad m => I.State -> C.QueryT m a -> C.QueryT m a
--- seasonQ = I.mapQueryT . R.local . const
-
--- season' :: ( Monad m
---            , MonadReader (C.QueryT m a) m
---            ) =>
---            Seasoning -> SolverT m a -> SolverT m a
--- season' s = mapSolverT $ seasonQ s
-
--- mapSolverT :: ( Monad m
---               , C.MonadQuery m
---               )
---            => (I.State -> I.State) -> SolverT m a -> SolverT m a
--- mapSolverT f m = SolverT $ R.mapReaderT (St.mapStateT (mapLoggingT (I.mapQueryT f))) $ runSolverT m
-
-
-
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
 -- threads and atomically modifies the result TVar for main. The thread exits
@@ -437,7 +423,7 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
   do !n <- STM.readTVarIO counter
      when verboseMode $ logInIOConsumerWith tid "n == " n
      when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
-     if n == expectedResults
+     if n == 2
        then (logInIOConsumer tid "All done") >> exitSuccess
        else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
@@ -1371,11 +1357,13 @@ alternative ::
   , MonadIO                  m
   , MonadIO                  n
   , C.MonadQuery             n
+  , C.MonadQuery             m
   , MonadLogger              n
   , MonadLogger              m
   ) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
   do s <- St.get -- cache the state
+     seasoning <- C.queryState -- and the base solver state
      logInProducerWith "In alternative with Dim" dim
      St.gets config >>= logInProducerWith "Choose"
      St.gets bools  >>= logInProducerWith "Bools"
@@ -1385,6 +1373,7 @@ alternative dim goLeft goRight =
          pleaseNegate        = True
          !symbolicContext    = sConfig s
 
+
      -- When we see a new dimension we check if both of its possible
      -- bindings is satisfiable, if so then we proceed to compute the
      -- variant, if not then we skip. This happens twice because
@@ -1393,14 +1382,12 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
        let continueLeft = C.inNewAssertionStack $
-             do seasoning <- C.queryState
                 season (const seasoning) $
                   do logInProducerWith "Left Alternative of" dim
                      St.gets config >>= logInProducerWith "With context"
                      -- have to refresh the state which could have changed when
                      -- another producer picked up the request
                      St.gets bools >>= logInProducerWith "Before reset"
-                     -- resetTo s
                      resetTo s
                      updateConfigs (bRef dim) (dim,True) newSConfigL
                      St.gets bools >>= logInProducerWith "After reset"
@@ -1417,7 +1404,6 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
        let continueRight = C.inNewAssertionStack $
-             do seasoning <- T.symbolicEnv
                 season (const seasoning) $
                   do logInProducerWith "Right Alternative of" dim
                      St.gets bools >>= logInProducerWith "Before reset"
@@ -1467,6 +1453,9 @@ choose loc =
         -- ordering we cannot use it.
         let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
             goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+
+        -- let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+        --     goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>

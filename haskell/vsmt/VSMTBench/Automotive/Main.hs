@@ -211,9 +211,9 @@ main = do
   --   ]
 
   -- let t = bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
-  let t = bRef "one" &&& bRef "two" &&& bRef "three" &&& bChc "AA" (bRef "a") (bRef "b") &&& bChc "BB" (bRef "c") (bRef "d")
+  let t = bChc "AA" (bRef "a") (bRef "b") &&& bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  res <- solveVerbose t Nothing debugSettings -- defSettings
+  res <- solveVerbose t Nothing debugSettings -- minAsyncSettings
   putStrLn $ show res
   -- solveForCoreVerbose bProp Nothing
