@@ -124,7 +124,7 @@ logInConsumerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
 logInConsumerWith = logInThreadWith "Consumer"
 
 logInVCWith  :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
-logInVCWith = logInThreadWith "VC Worker"
+logInVCWith = logInThreadWith "VCWorker"
 
 logInVC' :: MonadLogger m => Int -> Text.Text -> m ()
 logInVC' = logInThread "VCWorker"
@@ -184,39 +184,35 @@ solveVerbose  i conf Settings{..} =
      resultCounter             <- STM.newTVarIO 0
      results                   <- STM.newTVarIO mempty
 
+     let posVariants     = maxVariantCount i
+         expectedResults = fromMaybe posVariants numResults
+         consSettings    = (True, expectedResults)
+         consComms       = (resultCounter, results)
+         solverConfig    = getConfig solver
+
+     (il, st, seasoning) <- T.runSMTWith solverConfig $
+       do (!i', !s) <- runPreSolverLog mempty $ toIL i
+          !seas   <- I.freezeSt
+          return (i',s,seas)
+
   -- init the channels
      let vcChans     = VCChannels     $ (fromMain, toMain)
          mainChans   = MainChannels   $ (fromVC, toVC)
          workChans   = WorkChannels   $ (prdIn, prdOut)
          resultChans = ResultChannels $ (resultsIn, resultsOut)
          chans :: Channels (LoggingT C.Query)
-         chans       = Channels{ vcChans=vcChans, mainChans=mainChans
-                               , workChans=workChans, resultChans=resultChans
-                               , threadId=0}
+         chans = Channels{ vcChans=vcChans, mainChans=mainChans
+                         , workChans=workChans, resultChans=resultChans
+                         , threadId=0}
          startState  = State{stores=mempty, channels=chans}
 
          -- solver settings
-         posVariants     = maxVariantCount i
-         expectedResults = fromMaybe posVariants numResults
-         consSettings    = (True, expectedResults)
-         consComms       = (resultCounter, results)
-         solverConfig    = getConfig solver
-
          -- This is our "main" thread, we're going to reduce to a variational
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
          -- channel.
-         runProducers = T.runSMTWith solverConfig $
-           do (il, st) <- runPreSolverLog mempty $ toIL i
-              !seasoning <- I.freezeSt
-              -- spawn producers, we fork a thread to spawn producers here to
-              -- prevent this call from blocking. The default behavior of
-              -- mapConcurrently is to wait for results. We only know that a max
-              -- of 2^(# unique dimensions) is the max, but the user may only
-              -- want a subset, thus we can't wait for them to finish.
-              C.io $
-                A.mapConcurrently_ (producer seasoning solverConfig st il chans)
-                [1..numProducers]
+         runProducers = A.mapConcurrently_
+           (producer seasoning solverConfig st il chans) [1..numProducers]
 
          runConsumers =
            A.mapConcurrently_ (consumer consComms consSettings resultsOut)
@@ -226,24 +222,27 @@ solveVerbose  i conf Settings{..} =
            A.mapConcurrently_ (vcWorker solverConfig conf startState)
            [1..numVCWorkers]
 
-         populateChans = T.runSMTWith solverConfig $
-           do (il, _) <- runPreSolverLog mempty $ toIL i
+--          populateChans = T.runSMTWith solverConfig $
+--            do (il', _) <- runPreSolverLog mempty $ toIL i
            -- this thread will exit once it places requests on the producer
            -- chans. If the IL is a unit then it'll be caught by evaluate and
            -- placed on a result chan anyway
-
-              liftIO $ U.writeChan prdIn $
-                do findVCore il >>= choose . findChoice . toLocWith Top . getCore
-                   liftIO $ threadDelay 9000000
-                   logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
+--
+--               liftIO $ U.writeChan prdIn . (seasoning,) $
+--                 do logInProducer "Hello im the first one"
+--                    findVCore il' >>= removeChoices
+--                    logInProducer "First again now waiting"
+--                    logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
 
      -- kick off
-     aProds   <- A.async runProducers
-     aCons    <- A.async runConsumers
-     aWorkers <- A.async runVCWorkers
+     !aProds   <- A.async runProducers
+     !aCons    <- A.async runConsumers
+     !aWorkers <- A.async runVCWorkers
 
      -- this thread will die once it finds a choice or a unit in the plain case
-     aPopulate <- A.async populateChans
+     -- liftIO $ threadDelay 9000000
+     -- aPopulate <- A.async populateChans
+     liftIO $ U.writeChan prdIn (findVCore il >>= removeChoices)
 
 
      -- wait until consumers exit, when they do we are done, we could choose to
@@ -260,7 +259,7 @@ solveVerbose  i conf Settings{..} =
      -- cleanup
      A.cancel aProds
      A.cancel aWorkers
-     A.cancel aPopulate -- make sure this thread did indeed die
+     -- A.cancel aPopulate -- make sure this thread did indeed die
 
      -- grab the results
      finalResults <- STM.readTVarIO results
@@ -271,92 +270,93 @@ solveVerbose  i conf Settings{..} =
      return finalResults
 
 solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-solve  i conf Settings{..} =
-  do (toMain, fromVC)          <- U.newChan vcBufSize
-     (toVC,   fromMain)        <- U.newChan vcBufSize
-     (prdIn, prdOut)           <- U.newChan producerBufSize
-     (resultsIn, resultsOut)   <- U.newChan consumerBufSize
+-- solve  i conf Settings{..} = undefined
+solve  = undefined
+--   do (toMain, fromVC)          <- U.newChan vcBufSize
+--      (toVC,   fromMain)        <- U.newChan vcBufSize
+--      (prdIn, prdOut)           <- U.newChan producerBufSize
+--      (resultsIn, resultsOut)   <- U.newChan consumerBufSize
 
-     resultCounter             <- STM.newTVarIO 0
-     results                   <- STM.newTVarIO mempty
+--      resultCounter             <- STM.newTVarIO 0
+--      results                   <- STM.newTVarIO mempty
 
-  -- init the channels
-     let vcChans     = VCChannels     $ (fromMain, toMain)
-         mainChans   = MainChannels   $ (fromVC, toVC)
-         workChans   = WorkChannels   $ (prdIn, prdOut)
-         resultChans = ResultChannels $ (resultsIn, resultsOut)
-         chans :: Channels (NoLoggingT C.Query)
-         chans       = Channels{ vcChans=vcChans, mainChans=mainChans
-                               , workChans=workChans, resultChans=resultChans, threadId=0}
-         startState  = State{stores=mempty, channels=chans}
+  -- init the channels--
+--      let vcChans     = VCChannels     $ (fromMain, toMain)
+--          mainChans   = MainChannels   $ (fromVC, toVC)
+--          workChans   = WorkChannels   $ (prdIn, prdOut)
+--          resultChans = ResultChannels $ (resultsIn, resultsOut)
+--          chans :: Channels (NoLoggingT C.Query)
+--          chans       = Channels{ vcChans=vcChans, mainChans=mainChans
+--                                , workChans=workChans, resultChans=resultChans, threadId=0}
+--          startState  = State{stores=mempty, channels=chans}
 
-         -- solver settings
-         posVariants     = maxVariantCount i
-         expectedResults = fromMaybe posVariants numResults
-         consSettings    = (verboseMode, expectedResults)
-         consComms       = (resultCounter, results)
-         solverConfig    = getConfig solver
+         -- solver settings--
+--          posVariants     = maxVariantCount i
+--          expectedResults = fromMaybe posVariants numResults
+--          consSettings    = (verboseMode, expectedResults)
+--          consComms       = (resultCounter, results)
+--          solverConfig    = getConfig solver
 
          -- This is our "main" thread, we're going to reduce to a variational
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
-         -- channel.
-         runProducers = T.runSMTWith solverConfig $
-           do (il, st) <- runPreSolverLog mempty $ toIL i
-              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans
-              !seasoning <- I.freezeSt
+         -- channel.--
+--          runProducers = T.runSMTWith solverConfig $
+--            do (il, st) <- runPreSolverLog mempty $ toIL i
+              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans--
+--               !seasoning <- I.freezeSt
               -- let seasoning = runPreSolver mempty $ toIL i
               -- spawn producers, we fork a thread to spawn producers here to
               -- prevent this call from blocking. The default behavior of
               -- mapConcurrently is to wait for results. We only know that a max
               -- of 2^(# unique dimensions) is the max, but the user may only
-              -- want a subset, thus we can't wait for them to finish.
-              C.io $
-                A.mapConcurrently_ (producer seasoning solverConfig st il chans)
-                [1..numProducers]
+              -- want a subset, thus we can't wait for them to finish.--
+--               C.io $
+--                 A.mapConcurrently_ (producer seasoning solverConfig st il chans)
+--                 [1..numProducers]
 
-         runConsumers =
-           A.mapConcurrently_ (consumer consComms consSettings resultsOut)
-           [1..numConsumers]
+--          runConsumers =
+--            A.mapConcurrently_ (consumer consComms consSettings resultsOut)
+--            [1..numConsumers]
 
-         runVCWorkers =
-           A.mapConcurrently_ (vcWorker solverConfig conf startState)
-           [1..numVCWorkers]
+--          runVCWorkers =
+--            A.mapConcurrently_ (vcWorker solverConfig conf startState)
+--            [1..numVCWorkers]
 
-         populateChans = T.runSMTWith solverConfig $
-           do (il,_) <- runPreSolverLog mempty $ toIL i
-              liftIO $ U.writeChan prdIn $
-                do (findVCore il >>= removeChoices)
-                   logInProducer "Populated and now dying!!!!"
+--          populateChans = T.runSMTWith solverConfig $
+--            do (il,_) <- runPreSolverLog mempty $ toIL i
+--               liftIO $ U.writeChan prdIn $
+--                 do (findVCore il >>= removeChoices)
+--                    logInProducer "Populated and now dying!!!!"
 
-     -- kick off
-     aProds   <- A.async runProducers
-     aCons    <- A.async runConsumers
-     aWorkers <- A.async runVCWorkers
+     -- kick off--
+--      aProds   <- A.async runProducers
+--      aCons    <- A.async runConsumers
+--      aWorkers <- A.async runVCWorkers
 
-     -- this thread will die once it finds a choice or a unit in the plain case
-     void populateChans
+     -- this thread will die once it finds a choice or a unit in the plain case--
+--      void populateChans
 
 
      -- wait until consumers exit, when they do we are done, we could choose to
      -- catch the exception here but because we exit with ExitSuccess there it
      -- would be rare if something other was thrown and the whole system would
-     -- likely stall on an MVar so thereno reason
-     void $ A.waitCatch aCons
+     -- likely stall on an MVar so thereno reason--
+--      void $ A.waitCatch aCons
 
-     -- cleanup
-     A.cancel aProds
-     A.cancel aWorkers
-     A.cancel aCons
-     -- A.cancel aPopulate -- make sure this thread did indeed die
+     -- cleanup--
+--      A.cancel aProds
+--      A.cancel aWorkers
+--      A.cancel aCons
+     -- A.cancel aPopulate -- make sure this thread did indeed die--
 
-     -- grab the results
-     finalResults <- STM.readTVarIO results
-     finalCounter <- STM.readTVarIO resultCounter
+     -- grab the results--
+--      finalResults <- STM.readTVarIO results
+--      finalCounter <- STM.readTVarIO resultCounter
 
-     when verboseMode $ logIOWith "finished with result count: " finalCounter
+--      when verboseMode $ logIOWith "finished with result count: " finalCounter
 
-     return finalResults
+--      return finalResults
 
 -- solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State s)
 -- solveForCoreVerbose  i (fromMaybe true -> conf) =
@@ -387,10 +387,12 @@ type ConsumerComms = (STM.TVar Int, STM.TVar Result)
 -- produces when a new choice is found to solve a variant. 2 they produce
 -- asynchronous results on the result channel
 producer ::
-  ( RunSolver s
-  , MonadLogger s
+  ( RunSolver       s
+  , MonadLogger     s
   , I.SolverContext s
-  , MonadIO s
+  , MonadIO         s
+  , T.MonadSymbolic s
+  , C.MonadQuery    s
   , SolverMonad s ~ SolverT s
   ) => Seasoning               ->
        T.SMTConfig             ->
@@ -399,16 +401,17 @@ producer ::
        Channels s              ->
        ThreadID                -> IO ()
 producer seasoning c ss il channels tid = void $
-  T.runSMTWith c $
+  T.runSMTWith c{T.verbose=True} $
   do I.unfreezeSt seasoning
      let requests = snd . getWorkChans . workChans $ channels
      C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
        do void $ findVCore il
           forever $ do
             logInProducer "Waiting"
-            continue <- liftIO $ U.readChan requests
-            logInProducer "Read a request, lets go"
-            continue
+            !continue <- liftIO $ U.readChan requests
+            C.inNewAssertionStack $!
+              do logInProducer "Read a request, lets go"
+                 continue
 
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
@@ -472,24 +475,32 @@ vcHelper ::
        U.InChan (Bool, T.SBV Bool)     ->
        State s                         ->
        Int                             -> T.Symbolic ()
-vcHelper fromMain toMain st _ =
+vcHelper fromMain toMain st tid =
   C.query $
   -- listen to the channel forever and check requests incrementally against the
   -- context if there is one
     void $
     runSolver st $
     forever $
-     do -- logInVC' tid "waiting"
-        (d, shouldNegate, vc') <- C.io $ U.readChan fromMain
-        -- logInVC' tid "got request"
-        C.inNewAssertionStack $
-          do sD <- cached d
-             let !new = if shouldNegate then bnot sD else sD &&& vc'
-             T.constrain new
+     do
 
-             C.checkSat >>= C.io . \case
-               C.Sat -> U.writeChan toMain (True, new)
-               _     -> U.writeChan toMain (False, new)
+
+
+
+
+
+
+
+       logInVC' tid "Waiting"
+       (d, shouldNegate, vc') <- C.io $ U.readChan fromMain
+        -- logInVC' tid "got request"
+       C.inNewAssertionStack $
+         do sD <- cached d
+            let !new = if shouldNegate then bnot sD else sD &&& vc'
+            T.constrain new
+            C.checkSat >>= C.io . \case
+              C.Sat -> U.writeChan toMain (True, new)
+              _     -> U.writeChan toMain (False, new)
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -1140,6 +1151,7 @@ accumulate' (IIOp o l r) = let l'  = accumulate' l
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, I.SolverContext m) => T.SBool -> m VarCore
+{-# INLINE toSolver #-}
 toSolver a = do T.constrain a; return $! intoCore Unit
 
 isValue :: IL -> Bool
@@ -1351,7 +1363,7 @@ resetTo s = do st <- St.get
 alternative ::
   ( St.MonadState Stores     m
   , MonadReader (Channels n) m
-  , Season      (SolverT n)
+  , Season      (SolverT  n)
   , T.MonadSymbolic          n
   , T.MonadSymbolic          m
   , MonadIO                  m
@@ -1372,6 +1384,7 @@ alternative dim goLeft goRight =
          dontNegate          = False
          pleaseNegate        = True
          !symbolicContext    = sConfig s
+         requests            = fst . getWorkChans . workChans $ chans
 
 
      -- When we see a new dimension we check if both of its possible
@@ -1381,39 +1394,35 @@ alternative dim goLeft goRight =
      (checkDimTrue,!newSConfigL) <- liftIO $
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
-       let continueLeft =
-             do I.unfreezeSt seasoning
-                C.inNewAssertionStack $!
-                  do logInProducerWith "Left Alternative of" dim
-                     St.gets config >>= logInProducerWith "With context"
+       let !continueLeft = do logInProducerWith "Left Alternative of" dim
+                              liftIO $ threadDelay 100000
+                              I.unfreezeSt seasoning
+                              St.gets config >>= logInProducerWith "With context"
                      -- have to refresh the state which could have changed when
                      -- another producer picked up the request
-                     St.gets bools >>= logInProducerWith "Before reset"
-                     resetTo s
-                     updateConfigs (bRef dim) (dim,True) newSConfigL
-                     St.gets bools >>= logInProducerWith "After reset"
-                     St.gets config >>= logInProducerWith "context After reset"
-                     goLeft
-           requests = fst . getWorkChans . workChans $ chans
+                              St.gets bools >>= logInProducerWith "Before reset"
+                              resetTo s
+                              updateConfigs (bRef dim) (dim,True) newSConfigL
+                              St.gets bools >>= logInProducerWith "After reset"
+                              St.gets config >>= logInProducerWith "context After reset"
+                              goLeft
        St.gets config >>= logInProducerWith "Writing to go left: Config :"
        St.gets bools >>= logInProducerWith "Writing to go left: Bools : "
-       liftIO $ U.writeChan requests continueLeft
+       seasoning `seq` liftIO $ U.writeChan requests continueLeft
 
 
      -- right side, notice that we negate the symbolic, and reset the state
      (checkDimFalse,!newSConfigR) <- liftIO $
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
-       let continueRight =
-             do I.unfreezeSt seasoning
-                C.inNewAssertionStack $!
-                  do logInProducerWith "Right Alternative of" dim
-                     St.gets bools >>= logInProducerWith "Before reset"
-                     resetTo s
-                     updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                     St.gets bools >>= logInProducerWith "After reset"
-                     goRight
-           requests = fst . getWorkChans . workChans $ chans
+       let !continueRight = do logInProducerWith "Right Alternative of" dim
+                               liftIO $ threadDelay 100000
+                               I.unfreezeSt seasoning
+                               St.gets bools >>= logInProducerWith "Before reset"
+                               resetTo s
+                               updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
+                               St.gets bools >>= logInProducerWith "After reset"
+                               goRight
 
        logInProducer "Writing to continue right"
        liftIO $ U.writeChan requests continueRight
