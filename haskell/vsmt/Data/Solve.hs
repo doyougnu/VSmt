@@ -189,6 +189,7 @@ solveVerbose  i conf Settings{..} =
          mainChans   = MainChannels   $ (fromVC, toVC)
          workChans   = WorkChannels   $ (prdIn, prdOut)
          resultChans = ResultChannels $ (resultsIn, resultsOut)
+         chans :: Channels (LoggingT C.Query)
          chans       = Channels{ vcChans=vcChans, mainChans=mainChans
                                , workChans=workChans, resultChans=resultChans
                                , threadId=0}
@@ -225,25 +226,24 @@ solveVerbose  i conf Settings{..} =
            A.mapConcurrently_ (vcWorker solverConfig conf startState)
            [1..numVCWorkers]
 
-         populateChans = T.runSMTWith solverConfig $ do
-           (il, st) <- runPreSolverLog mempty $ toIL i
-           -- now generate the first core thereby placing work on the channels
+         populateChans = T.runSMTWith solverConfig $
+           do (il, _) <- runPreSolverLog mempty $ toIL i
            -- this thread will exit once it places requests on the producer
            -- chans. If the IL is a unit then it'll be caught by evaluate and
            -- placed on a result chan anyway
-           void $ C.query $
-             runSolverLog startState{stores=st} $
-             do void $ findVCore il >>= removeChoices
-                logInProducer "Populated and now dying!!!!"
 
-     -- this thread will die once it finds a choice or a unit in the plain case
+              liftIO $ U.writeChan prdIn $
+                do findVCore il >>= choose . findChoice . toLocWith Top . getCore
+                   liftIO $ threadDelay 9000000
+                   logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
 
-     aPopulate <- A.async populateChans
-     threadDelay 5000
      -- kick off
      aProds   <- A.async runProducers
      aCons    <- A.async runConsumers
      aWorkers <- A.async runVCWorkers
+
+     -- this thread will die once it finds a choice or a unit in the plain case
+     aPopulate <- A.async populateChans
 
 
      -- wait until consumers exit, when they do we are done, we could choose to
@@ -323,15 +323,11 @@ solve  i conf Settings{..} =
            A.mapConcurrently_ (vcWorker solverConfig conf startState)
            [1..numVCWorkers]
 
-         populateChans = T.runSMTWith solverConfig $ do
-           (il, st) <- runPreSolver mempty $ toIL i
-           -- now generate the first core thereby placing work on the channels
-           -- this thread will exit once it places requests on the producer
-           -- chans. If the IL is a unit then it'll be caught by evaluate and
-           -- placed on a result chan anyway
-           C.query $
-             runSolver startState{stores=st} $
-             findVCore il >>= removeChoices
+         populateChans = T.runSMTWith solverConfig $
+           do (il,_) <- runPreSolverLog mempty $ toIL i
+              liftIO $ U.writeChan prdIn $
+                do (findVCore il >>= removeChoices)
+                   logInProducer "Populated and now dying!!!!"
 
      -- kick off
      aProds   <- A.async runProducers
@@ -395,7 +391,6 @@ producer ::
   , MonadLogger s
   , I.SolverContext s
   , MonadIO s
-  , Season (SolverT s)
   , SolverMonad s ~ SolverT s
   ) => Seasoning               ->
        T.SMTConfig             ->
@@ -427,7 +422,7 @@ consumer (counter,acc) (verboseMode,expectedResults) resultsOut tid = forever $
      when verboseMode $ logInIOConsumerWith tid "n == " n
      when verboseMode $ logInIOConsumerWith tid "expecting: " expectedResults
      if n == expectedResults
-       then (logInIOConsumer tid "All done") >> exitSuccess
+       then logInIOConsumer tid "All done" >> exitSuccess
        else do when verboseMode $ logInIOConsumer tid "waiting"
                r <- U.readChan resultsOut
                when verboseMode $ logInIOConsumer tid "got result"
@@ -794,8 +789,8 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
       Nothing -> do
         logWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
-        St.modify' (`by` add ref newSym)
         logWith "Added and now returning" (Ref newSym)
+        St.modify' (`by` add ref newSym)
         return (Ref newSym)
 
 instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
@@ -1388,7 +1383,7 @@ alternative dim goLeft goRight =
      when checkDimTrue $ do
        let continueLeft =
              do I.unfreezeSt seasoning
-                C.inNewAssertionStack $
+                C.inNewAssertionStack $!
                   do logInProducerWith "Left Alternative of" dim
                      St.gets config >>= logInProducerWith "With context"
                      -- have to refresh the state which could have changed when
@@ -1411,7 +1406,7 @@ alternative dim goLeft goRight =
      when checkDimFalse $ do
        let continueRight =
              do I.unfreezeSt seasoning
-                C.inNewAssertionStack $
+                C.inNewAssertionStack $!
                   do logInProducerWith "Right Alternative of" dim
                      St.gets bools >>= logInProducerWith "Before reset"
                      resetTo s
@@ -1444,7 +1439,9 @@ choose ::
   , Season (SolverT m)
   , C.MonadQuery    m
   ) => Loc -> SolverT m ()
-choose (InBool l@Ref{} Top) = logInProducer "Choosing all done" >>
+choose (InBool Unit Top)  = logInProducer "Choosing all done" >>
+                            St.get >>= getResult . vConfig >>= store
+choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
                               evaluate l >>= removeChoices
 choose loc =
   do
@@ -1460,11 +1457,13 @@ choose loc =
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
         logInProducerWith "Choose Context" ctx
-        let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
-            goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+        -- let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
+        --     goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
         -- let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
         --     goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+        let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+            goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
@@ -1485,7 +1484,6 @@ choose loc =
           Just False -> logInProducer "Cache hit --- Right Selected" >> goRight
           Nothing    -> alternative d goLeft goRight
 
-      (InBool Unit Top) -> removeChoices $ intoCore Unit
       x -> error $ "Choosing and missed cases with: " ++ show x
 
 
