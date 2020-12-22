@@ -88,6 +88,17 @@
 
 ** IN PROG Solver
 
+   - Note taken on [2020-12-22 Tue 12:53] \\
+     We ran into a severe architectural issue with the async version of vsmt.
+     The problem boils down to have to copy the base solver state for each
+     alternative. sbv currently doesn't have a way to do that so I added a
+     freeze un-freeze strategy from the vector package, but the z3 state still
+     messed up. There are two paths forward: 1. get sbv to return all the
+     constants and asserstions to recreate the solver state, this is what is
+     recommended by z3 devs and 2: use configurations to maintain the correct
+     context for each thread. This last strategy is very brute force-y and
+     essentially admits defeat.
+
    - Note taken on [2020-12-03 Thu 21:47] \\
      I tried to toggle debugging in the type system. It didn't work because the
      channels are hard coded over the solver monad. If you try to paramterize it then

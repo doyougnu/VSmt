@@ -29,7 +29,6 @@
 
 module Solve where
 
-import Control.Concurrent (threadDelay)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import qualified Control.Concurrent.STM                as STM
@@ -69,9 +68,6 @@ import           Core.Types
 
 import           Settings
 
-import Debug.Trace
-
------------------------------- Template Haskell --------------------------------
 log :: MonadLogger m => Text.Text -> m ()
 log = $(logDebug)
 
@@ -379,6 +375,7 @@ sat = solveVerbose
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
 type Seasoning     = I.FrozenState
+type QSeasoning    = I.FrozenIncState
 type ThreadID      = Int
 type MaxVariantCnt = Int
 type ConsumerComms = (STM.TVar Int, STM.TVar Result)
@@ -403,15 +400,18 @@ producer ::
 producer seasoning c ss il channels tid = void $
   T.runSMTWith c{T.verbose=True} $
   do I.unfreezeSt seasoning
+     T.setOption $ C.ProduceAssertions True
      let requests = snd . getWorkChans . workChans $ channels
-     C.query $ runSolver State{stores=ss, channels=channels{threadId=tid}} $
-       do void $ findVCore il
-          forever $ do
-            logInProducer "Waiting"
-            !continue <- liftIO $ U.readChan requests
-            C.inNewAssertionStack $!
-              do logInProducer "Read a request, lets go"
-                 continue
+     C.query $
+       do
+         runSolver State{stores=ss, channels=channels{threadId=tid}} $
+           do void $ findVCore il
+              forever $ do
+                logInProducer "Waiting"
+                !continue <- liftIO $ U.readChan requests
+                C.inNewAssertionStack $!
+                  do logInProducer "Read a request, lets go"
+                     continue
 
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
@@ -798,9 +798,9 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
     case find ref $ extract st of
       Just x -> logWith "Cache Hit" ref >> return (Ref x)
       Nothing -> do
-        logWith "Cache miss on" ref
+        logInProducerWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
-        logWith "Added and now returning" (Ref newSym)
+        logInProducerWith "Added and now returning" (Ref newSym)
         St.modify' (`by` add ref newSym)
         return (Ref newSym)
 
@@ -1020,7 +1020,7 @@ toIL ::
   ) => Prop' Var -> m IL
 toIL (LitB True)   = return $! Ref T.sTrue
 toIL (LitB False)  = return $! Ref T.sFalse
-toIL (RefB ref)    = do r <- cached ref; logWith "Returning" r; return r
+toIL (RefB ref)    = do cached ref
 toIL (OpB op (ChcB d l r)) = return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
 toIL (OpBB Impl l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
@@ -1070,7 +1070,7 @@ isUnit _              = False
 accumulate :: IL -> IL
  -- computation rules
 accumulate Unit                        = Unit
-accumulate x@Ref{} = trace ("Got Ref in Accum" ++ show x) $ x
+accumulate x@Ref{} = x
 accumulate x@Chc{} = x
   -- bools
 accumulate (BOp Not (Ref r))            = Ref $! bnot r
@@ -1169,7 +1169,7 @@ isValue' _        = False
   -- computation rules
 evaluate :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 evaluate Unit     = return $! intoCore Unit
-evaluate (Ref b)  = logWith "Ref" b >> toSolver b
+evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (Ref r))         = toSolver $! bnot r
@@ -1355,6 +1355,7 @@ resetTo s = do st <- St.get
                        , ints=ints st
                        , doubles=doubles st
                        , dimensions = dimensions st
+                       -- , config = config st
                        }
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
@@ -1375,7 +1376,7 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> m ()
 alternative dim goLeft goRight =
   do !s <- St.get -- cache the state
-     !seasoning <- I.freezeSt -- and the base solver state
+     -- !seasoning <- I.freezeIncSt -- and the base solver state
      logInProducerWith "In alternative with Dim" dim
      St.gets config >>= logInProducerWith "Choose"
      St.gets bools  >>= logInProducerWith "Bools"
@@ -1395,20 +1396,14 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
        let !continueLeft = do logInProducerWith "Left Alternative of" dim
-                              liftIO $ threadDelay 100000
-                              I.unfreezeSt seasoning
-                              St.gets config >>= logInProducerWith "With context"
-                     -- have to refresh the state which could have changed when
-                     -- another producer picked up the request
-                              St.gets bools >>= logInProducerWith "Before reset"
                               resetTo s
                               updateConfigs (bRef dim) (dim,True) newSConfigL
-                              St.gets bools >>= logInProducerWith "After reset"
-                              St.gets config >>= logInProducerWith "context After reset"
+                              a <- lift $ C.getAssertions
+                              logInProducerWith "Assertions" a
                               goLeft
        St.gets config >>= logInProducerWith "Writing to go left: Config :"
        St.gets bools >>= logInProducerWith "Writing to go left: Bools : "
-       seasoning `seq` liftIO $ U.writeChan requests continueLeft
+       liftIO $ U.writeChan requests continueLeft
 
 
      -- right side, notice that we negate the symbolic, and reset the state
@@ -1416,12 +1411,10 @@ alternative dim goLeft goRight =
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
        let !continueRight = do logInProducerWith "Right Alternative of" dim
-                               liftIO $ threadDelay 100000
-                               I.unfreezeSt seasoning
-                               St.gets bools >>= logInProducerWith "Before reset"
                                resetTo s
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                               St.gets bools >>= logInProducerWith "After reset"
+                               a <- lift $ C.getAssertions
+                               logInProducerWith "Assertions" a
                                goRight
 
        logInProducer "Writing to continue right"

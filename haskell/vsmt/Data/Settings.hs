@@ -22,6 +22,7 @@ module Settings
   , defSettingsNoVerbose
   , debugSettingsNoVerbose
   , minAsyncSettings
+  , minAsyncDebug
   ) where
 
 import GHC.Generics (Generic)
@@ -82,6 +83,9 @@ minSettings = Settings{ solver          = Solver S.z3
 
 minAsyncSettings :: Settings
 minAsyncSettings = minSettings{numProducers = 3, numConsumers = 3, numVCWorkers = 3}
+
+minAsyncDebug :: Settings
+minAsyncDebug = minSettings{solver = Solver S.z3{S.verbose=True}, numProducers = 3, numConsumers = 3, numVCWorkers = 3, verboseMode=True}
 
 debugSettings :: Settings
 debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}
