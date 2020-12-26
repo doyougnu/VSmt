@@ -170,106 +170,65 @@ findVCore :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
 findVCore = evaluate
 
 solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-solveVerbose  i conf Settings{..} =
-  do (toMain, fromVC)          <- U.newChan vcBufSize
-     (toVC,   fromMain)        <- U.newChan vcBufSize
-
-
-     let solverConfig    = getConfig solver
-         il              = toIL i
-
-  -- init the channels
-     let vcChans     = VCChannels     $ (fromMain, toMain)
-         mainChans   = MainChannels   $ (fromVC, toVC)
-         chans :: Channels
-         chans = Channels{ vcChans=vcChans, mainChans=mainChans
-                         , threadId=0}
-         startState  = State{stores=mempty, channels=chans}
-         seasoning = runPreSolverLog mempty il
-
-         runVCWorkers =
-           A.mapConcurrently_ (vcWorker solverConfig conf startState runSolverLog)
-           [1..numVCWorkers]
-
-         -- this thread will exit once it places requests on the producer
-         -- chans. If the IL is a unit then it'll be caught by evaluate and
-         -- placed on a result chan anyway
-         populateChans = T.runSMTWith solverConfig $
-           do (il', st) <- seasoning
-              C.query $
-                runSolverLog startState{stores=st} $
-                do void $ findVCore il' >>= removeChoices
-                   St.gets results
-
---
---               liftIO $ U.writeChan prdIn . (seasoning,) $
---                 do logInProducer "Hello im the first one"
---                    findVCore il' >>= removeChoices
---                    logInProducer "First again now waiting"
---                    logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
-
-     -- kick off
-     !aWorkers  <- A.async runVCWorkers
-
-     (results, _) <- populateChans
-
-     A.cancel aWorkers
-
-     return results
+solveVerbose = internalSolver runPreSolverLog runSolverLog
 
 solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-solve  i conf Settings{..} =
-  do (toMain, fromVC)          <- U.newChan vcBufSize
-     (toVC,   fromMain)        <- U.newChan vcBufSize
+solve = internalSolver runPreSolverNoLog runSolverNoLog
 
-     let solverConfig    = getConfig solver
-         il              = toIL i
+-- TODO fix this horrendous type signature
+internalSolver ::
+  ( Constrainable m1 (ExRefType Var) IL'
+  , Constrainable m1 Var IL
+  , Monoid t
+  , MonadLogger m1
+  , MonadLogger m2
+  , C.MonadQuery m2
+  , T.MonadSymbolic m2
+  , I.SolverContext m2) =>
+  (t -> m1 IL -> T.SymbolicT IO (IL, Stores))
+  -> (State -> SolverT m2 Result -> C.QueryT IO (b1, b2))
+  -> Prop' Var
+  -> Maybe VariantContext
+  -> Settings
+  -> IO b1
+internalSolver preSlvr slvr i conf Settings{..} = do
+  (toMain, fromVC)          <- U.newChan vcBufSize
+  (toVC,   fromMain)        <- U.newChan vcBufSize
 
-     -- TODO fix the async by replayign only constants and assertions
-     -- (il, st, seasoning) <- T.runSMTWith solverConfig $
-     --   do (!i', !s) <- runPreSolverLog mempty $ toIL i
-     --      !seas   <- I.freezeSt
-     --      return (i',s,seas)
+
+  let solverConfig    = getConfig solver
+      il              = toIL i
 
   -- init the channels
-     let vcChans     = VCChannels     $ (fromMain, toMain)
-         mainChans   = MainChannels   $ (fromVC, toVC)
-         chans :: Channels
-         chans = Channels{ vcChans=vcChans, mainChans=mainChans
+      vcChans   = VCChannels     $ (fromMain, toMain)
+      mainChans = MainChannels   $ (fromVC, toVC)
+      chans     = Channels{ vcChans=vcChans, mainChans=mainChans
                          , threadId=0}
-         startState  = State{stores=mempty, channels=chans}
-         seasoning = runPreSolverLog mempty il
+      startState  = State{stores=mempty, channels=chans}
+      seasoning = preSlvr mempty il
 
-         runVCWorkers =
-           A.mapConcurrently_ (vcWorker solverConfig conf startState runSolverNoLog)
-           [1..numVCWorkers]
+      runVCWorkers =
+        A.mapConcurrently_ (vcWorker solverConfig conf startState slvr)
+        [1..numVCWorkers]
 
-         -- this thread will exit once it places requests on the producer
-         -- chans. If the IL is a unit then it'll be caught by evaluate and
-         -- placed on a result chan anyway
-         populateChans = T.runSMTWith solverConfig $
-           do (il', st) <- seasoning
-              C.query $
-                runSolverNoLog startState{stores=st} $
-                do findVCore il' >>= removeChoices
-                   St.gets results
+      -- this thread will exit once it places requests on the producer
+      -- chans. If the IL is a unit then it'll be caught by evaluate and
+      -- placed on a result chan anyway
+      populateChans = T.runSMTWith solverConfig $
+        do (il', st) <- seasoning
+           C.query $
+             slvr startState{stores=st} $
+             do void $ findVCore il' >>= removeChoices
+                St.gets results
 
+  -- kick off
+  !aWorkers  <- A.async runVCWorkers
 
---
---               liftIO $ U.writeChan prdIn . (seasoning,) $
---                 do logInProducer "Hello im the first one"
---                    findVCore il' >>= removeChoices
---                    logInProducer "First again now waiting"
---                    logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
+  (results, _) <- populateChans
 
-     -- kick off
-     !aWorkers  <- A.async runVCWorkers
+  A.cancel aWorkers
 
-     (results, _) <- populateChans
-
-     A.cancel aWorkers
-
-     return results
+  return results
 
 -- solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State s)
 -- solveForCoreVerbose  i (fromMaybe true -> conf) =
@@ -282,12 +241,6 @@ solve  i conf Settings{..} =
 --               logWith "Core: "         core
 --               logWith "Is Core Unit: " (isUnit core)
 --               return core
-
-satVerbose :: Proposition -> Maybe VariantContext -> IO Result
-satVerbose p vc = solveVerbose p vc defSettings
-
-sat :: Proposition -> Maybe VariantContext -> Settings -> IO Result
-sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
@@ -600,8 +553,8 @@ newtype PreSolverT m a = PreSolverT { runPreSolverT :: (St.StateT Stores m) a }
 runPreSolverLog :: Stores -> PreSolverLog a -> T.Symbolic (a, Stores)
 runPreSolverLog s = runStdoutLoggingT . flip St.runStateT s . runPreSolverT
 
-runPreSolver :: Stores -> PreSolver a -> T.Symbolic (a, Stores)
-runPreSolver s = runNoLoggingT . flip St.runStateT s . runPreSolverT
+runPreSolverNoLog :: Stores -> PreSolver a -> T.Symbolic (a, Stores)
+runPreSolverNoLog s = runNoLoggingT . flip St.runStateT s . runPreSolverT
 
 runSolverNoLog :: State -> Solver a -> C.Query (a, State)
 runSolverNoLog State{channels=c,stores=s} = fmap remake
@@ -619,14 +572,19 @@ runSolverLog State{channels=c,stores=s} = fmap remake
                                             . runSolverT
   where remake (a,ss) = (a, State{stores=ss,channels=c})
 
+type PreRun m a = Stores -> m a -> T.Symbolic (a, Stores)
+type Run m    a = State  -> SolverT m a -> C.Query    (a, State)
+
+class RunPreSolver s where
+  runPreSolver :: Stores -> s a -> T.Symbolic (a, Stores)
+
 class RunSolver s where
   runSolver :: State -> s a -> C.Query (a, State)
 
-instance RunSolver SolverLog where
-  runSolver = runSolverLog
-
-instance RunSolver Solver where
-  runSolver = runSolverNoLog
+instance RunSolver SolverLog       where runSolver    = runSolverLog
+instance RunSolver Solver          where runSolver    = runSolverNoLog
+instance RunPreSolver PreSolverLog where runPreSolver = runPreSolverLog
+instance RunPreSolver PreSolver    where runPreSolver = runPreSolverNoLog
 
 class Show a => Constrainable m a b where cached :: a -> m b
 
@@ -1138,7 +1096,7 @@ findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l 
 findChoice (InBool (BBOp op l r) ctx) = findChoice (InBool l $ InL ctx op r)
 findChoice (InBool (IBOp op l r) ctx) = findChoice (InNum  l $ InLB ctx op r)
 findChoice (InBool (BOp o e) ctx)     = findChoice (InBool e $ InU o ctx)
-findChoice (InNum (IOp o e) ctx)      = findChoice (InNum e $ InU' o ctx)
+findChoice (InNum (IOp o e) ctx)      = findChoice (InNum e  $ InU' o ctx)
 findChoice (InNum (IIOp op l r) ctx)  = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
 findChoice (InBool Unit (InL parent And r))   = findChoice (InBool r $ InR true And parent)
