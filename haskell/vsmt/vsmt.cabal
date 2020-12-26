@@ -48,7 +48,7 @@ library
                , monad-logger
                , mtl
                , parser-combinators
-               , sbv
+               , sbv == 8.9.6
                , stm
                , text
                , transformers >= 0.5.6.2
@@ -217,7 +217,7 @@ benchmark busybox
 benchmark financial
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -N16 -p -s -hy"
+  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -p -s -hy -A64m -AL128m -n8m"
   other-extensions: BangPatterns
                     DataKinds
                     DeriveAnyClass
@@ -259,7 +259,7 @@ benchmark financial
 benchmark auto
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -N16"
+  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -p -s -hy -A64m -AL128m -n8m"
   other-extensions: BangPatterns
                     DataKinds
                     DeriveAnyClass

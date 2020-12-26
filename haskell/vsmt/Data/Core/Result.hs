@@ -86,16 +86,16 @@ instance Pretty d => Pretty (M.HashMap d ResultFormula) where
 -- printing
 prettyResultFormula :: Seq.Seq (Maybe VariantContext, I.CV) -> Text
 prettyResultFormula Seq.Empty = mempty
-prettyResultFormula ((Nothing, val) Seq.:<| Seq.Empty)  = pretty val
-prettyResultFormula ((Just ctx, val) Seq.:<| Seq.Empty) = parens $
+prettyResultFormula ((Nothing, !val) Seq.:<| Seq.Empty)  = pretty val
+prettyResultFormula ((Just !ctx, !val) Seq.:<| Seq.Empty) = parens $!
   "ite" <> space <> pretty ctx <> space <> parens (pretty val) <> space <> done
   where done = "Undefined"
-prettyResultFormula ((Nothing,val) Seq.:<| xs) = parens $!
+prettyResultFormula ((Nothing,!val) Seq.:<| xs) = parens $!
                                      "ite " <>
                                      parens "True :: Bool" <> space <>
                                      parens (pretty val) <> space <>
                                      pretty xs
-prettyResultFormula ((Just ctx,val) Seq.:<| xs) = parens $!
+prettyResultFormula ((Just !ctx,!val) Seq.:<| xs) = parens $!
                                           "ite " <>
                                           pretty ctx <> space <>
                                           parens (pretty val) <> space <>

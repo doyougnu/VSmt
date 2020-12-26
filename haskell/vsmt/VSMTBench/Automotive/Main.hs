@@ -96,7 +96,7 @@ main = do
 
       bProp :: Proposition
       -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
-      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin (take 500 bPs)
+      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin (take 300 bPs)
 
   -- Convert the fmf's to actual configurations
   -- [ppV1]   <- genConfigPool d0Conf
@@ -215,5 +215,5 @@ main = do
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
   res <- solve bProp Nothing defSettings
-  putStrLn $ show res
+  putStrLn $ show . length $ show res
   -- solveForCoreVerbose bProp Nothing

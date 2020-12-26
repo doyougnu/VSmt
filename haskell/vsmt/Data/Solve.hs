@@ -39,8 +39,6 @@ import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Logger                  (LoggingT,
                                                         MonadLogger (..),
                                                         NoLoggingT, logDebug,
-                                                        mapLoggingT,
-                                                        mapNoLoggingT,
                                                         runNoLoggingT,
                                                         runStdoutLoggingT)
 import qualified Control.Monad.State.Strict            as St (MonadState,
@@ -48,7 +46,7 @@ import qualified Control.Monad.State.Strict            as St (MonadState,
                                                               modify', put,
                                                               mapStateT,
                                                               runStateT)
-import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader, local, mapReaderT)
+import           Control.Monad.Reader                  as R (ReaderT(..), runReaderT, ask, asks, MonadReader, mapReaderT)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
@@ -527,11 +525,11 @@ instance MonadTrans SolverT where lift = SolverT . lift . lift
 mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
 mapSolverT f m = SolverT $ R.mapReaderT (St.mapStateT f) $ runSolverT m
 
-mapSolver :: (I.State -> I.State) -> Solver a -> Solver a
-mapSolver f = mapSolverT (mapNoLoggingT (I.mapQueryT (R.local f)))
+-- mapSolver :: (I.State -> I.State) -> Solver a -> Solver a
+-- mapSolver f = mapSolverT (mapNoLoggingT (I.mapQueryT (R.local f)))
 
-mapSolverLog :: (I.State -> I.State) -> SolverLog a -> SolverLog a
-mapSolverLog f = mapSolverT (mapLoggingT (I.mapQueryT (R.local f)))
+-- mapSolverLog :: (I.State -> I.State) -> SolverLog a -> SolverLog a
+-- mapSolverLog f = mapSolverT (mapLoggingT (I.mapQueryT (R.local f)))
 
 -- mapFreeze :: I.FrozenState -> Solver a -> Solver a
 -- mapFreeze f = mapSolverT (mapNoLoggingT (I.mapQueryT (I.unfreezeSt f)))
@@ -539,11 +537,11 @@ mapSolverLog f = mapSolverT (mapLoggingT (I.mapQueryT (R.local f)))
 -- mapPreFreeze :: I.FrozenState -> Solver a -> Solver a
 -- mapPreFreeze f = mapSolverT (mapNoLoggingT (I.mapQueryT (I.unfreezeSt f)))
 
-class Season m where
-  season :: (I.State -> I.State) -> m a -> m a
+-- class Season m where
+--   season :: (I.State -> I.State) -> m a -> m a
 
-instance Season Solver    where season = mapSolver
-instance Season SolverLog where season = mapSolverLog
+-- instance Season Solver    where season = mapSolver
+-- instance Season SolverLog where season = mapSolverLog
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
@@ -1202,8 +1200,7 @@ resetTo s = do st <- St.get
 -- way to continue with the right alternative. Spawn two new subprocesses that
 -- process the alternatives plugging the choice hole with its respective
 alternative ::
-  ( Season      (SolverT  n)
-  , T.MonadSymbolic          n
+  ( T.MonadSymbolic          n
   , MonadIO                  n
   , C.MonadQuery             n
   , MonadLogger              n
@@ -1256,7 +1253,6 @@ removeChoices ::
   ( MonadLogger     m
   , C.MonadQuery    m
   , I.SolverContext m
-  , Season (SolverT m)
   , T.MonadSymbolic m
   ) => VarCore -> SolverT m ()
 {-# INLINE removeChoices #-}
@@ -1270,7 +1266,6 @@ choose ::
   ( MonadLogger     m
   , I.SolverContext m
   , T.MonadSymbolic m
-  , Season (SolverT m)
   , C.MonadQuery    m
   ) => Loc -> SolverT m ()
 choose (InBool Unit Top)  = logInProducer "Choosing all done" >>

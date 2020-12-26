@@ -35,18 +35,19 @@ vc = onlyLex |||
 
 
 -- run with stack bench --profile vsat:busybox --benchmark-arguments='+RTS -S -RTS --output timings.html'
-main = do
-  let benches :: Prop' T.Text -> [Analysis T.Text] -> [Benchmark]
-      benches solverConf as =
-        [ mkBench "BruteForce"  "BusyBox" vc (bfWith solverConf) (constructBF as)
-        , mkBench "Variational" "BusyBox" vc (satWith solverConf) (constructVariational as)
-        , bench "Incremental/BusyBox" (nfIO (constructIncremental as))
-        ]
+main = return ()
+-- main = do
+--   let benches :: Prop' T.Text -> [Analysis T.Text] -> [Benchmark]
+--       benches solverConf as =
+--         [ mkBench "BruteForce"  "BusyBox" vc (bfWith solverConf) (constructBF as)
+--         , mkBench "Variational" "BusyBox" vc (satWith solverConf) (constructVariational as)
+--         , bench "Incremental/BusyBox" (nfIO (constructIncremental as))
+--         ]
 
-  ps <- getProblems
-  defaultMain
-    [ bgroup "Z3" (benches z3DefConf ps)
-    ]
+--   ps <- getProblems
+--   defaultMain
+--     [ bgroup "Z3" (benches z3DefConf ps)
+--     ]
   -- satWith z3DefConf (propOpts problems)
   -- dir >>= print
   -- results <- constructIncremental ps

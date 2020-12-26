@@ -11,6 +11,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
+{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE OverloadedStrings    #-}
 
@@ -27,7 +28,7 @@ import           Core.Types
 class Pretty a where pretty :: a -> Text.Text
 
 between :: Text.Text -> Text.Text -> Text.Text -> Text.Text
-between sigilL a sigilR = sigilL <> a <> sigilR
+between !sigilL !a !sigilR = sigilL <> a <> sigilR
 
 parens :: Text.Text -> Text.Text
 parens a = between "(" a ")"

@@ -116,7 +116,7 @@ main = do
         | d == "D_14" = "D_9"
         | otherwise = d
 
-      !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (take 1000 bPs)
+      !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (take 100 bPs)
       -- dmapping = getDimMap $ autoAndJoin bPs
       -- !bPropOpts = applyOpts defConf bProp
 
