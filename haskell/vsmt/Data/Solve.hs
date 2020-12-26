@@ -1195,7 +1195,7 @@ resetTo s = do st <- St.get
                        , ints=ints st
                        , doubles=doubles st
                        , dimensions = dimensions st
-                       , config = config st
+                       , results = results st
                        }
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
