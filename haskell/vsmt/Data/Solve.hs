@@ -1103,11 +1103,9 @@ updateConfigs context (d,val) sConf = do
 -- items which _should not_ reset and force those to be maintained
 resetTo :: (St.MonadState Stores io, MonadIO io) => FrozenStores -> io ()
 {-# INLINE resetTo #-}
-resetTo FrozenStores{..} = do update (bools)      (const fbools)
-                              update (ints)       (const fints)
-                              update (doubles)    (const fdoubles)
-                              update (dimensions) (const fdimensions)
-                              update (results)    (const fresults)
+resetTo FrozenStores{..} = do update config (const fconfig)
+                              update sConfig (const fsConfig)
+                              update vConfig (const fvConfig)
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
@@ -1121,7 +1119,6 @@ alternative ::
 alternative dim goLeft goRight =
   do !s <- freeze
      symbolicContext <- reads sConfig
-     -- !seasoning <- I.freezeIncSt -- and the base solver state
      logInProducerWith "In alternative with Dim" dim
      chans <- R.ask
      let (fromVC, toVC) = getMainChans . mainChans $ chans
@@ -1140,7 +1137,7 @@ alternative dim goLeft goRight =
                            do logInProducerWith "Left Alternative of" dim
                               resetTo s
                               reads config >>= logInProducerWith "ConfigL:"
-                              reads bools  >>= logInProducerWith "Bools::"
+                              reads bools  >>= logInProducerWith "Bools:"
                               updateConfigs (bRef dim) (dim,True) newSConfigL
                               goLeft
        logInProducer "Writing to continue left"
