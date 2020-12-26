@@ -462,8 +462,8 @@ data State = State
 
 data Stores = Stores
     { vConfig     :: !(Maybe VariantContext) -- the formula representation of the config
-    , sConfig     :: !SVariantContext      -- symbolic representation of a config
-    , config      :: !Context              -- a map or set representation of the config
+    , sConfig     :: !SVariantContext        -- symbolic representation of a config
+    , config      :: !Context                -- a map or set representation of the config
     , ints        :: !Ints
     , doubles     :: !Doubles
     , bools       :: !Bools
@@ -497,9 +497,7 @@ instance Semigroup Stores where
                   , doubles    = doubles a <> doubles b
                   , bools      = bools   a <> bools   b
                   , dimensions = dimensions a <> dimensions b
-                  , results    = let !a = results a
-                                     !b = results b
-                                     in a <> b
+                  , results    = results a <> results b
                   }
 
 instance Monoid Stores where
@@ -587,8 +585,8 @@ instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
   symbolicEnv = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
-type SolverLog    = SolverT (LoggingT C.Query)
-type Solver       = SolverT (NoLoggingT C.Query)
+type SolverLog    = SolverT    (LoggingT C.Query)
+type Solver       = SolverT    (NoLoggingT C.Query)
 type PreSolverLog = PreSolverT (LoggingT T.Symbolic)
 type PreSolver    = PreSolverT (NoLoggingT T.Symbolic)
 
