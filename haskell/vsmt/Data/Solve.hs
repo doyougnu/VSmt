@@ -497,7 +497,9 @@ instance Semigroup Stores where
                   , doubles    = doubles a <> doubles b
                   , bools      = bools   a <> bools   b
                   , dimensions = dimensions a <> dimensions b
-                  , results    = results a <> results b
+                  , results    = let !a = results a
+                                     !b = results b
+                                     in a <> b
                   }
 
 instance Monoid Stores where
@@ -864,12 +866,12 @@ toIL (LitB False)  = return $! Ref T.sFalse
 toIL (RefB ref)    = do cached ref
 toIL (OpB op (ChcB d l r)) = return $ Chc d (OpB op l) (OpB op r)
 toIL (OpB op e)    = BOp op <$> toIL e
-toIL (OpBB Impl l r) = do l' <- toIL l; r' <- toIL r; return $ BBOp Impl l' r'
-toIL (OpBB Eqv l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp Eqv  l' r'
-toIL (OpBB XOr l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp XOr  l' r'
-toIL (OpBB And l r)  = do l' <- toIL l; r' <- toIL r; return $ BBOp And  l' r'
-toIL (OpBB Or l r)   = do l' <- toIL l; r' <- toIL r; return $ BBOp Or   l' r'
-toIL (OpIB op l r)   = do l' <- toIL' l; r' <- toIL' r; return $ IBOp op l' r'
+toIL (OpBB Impl l r) = do !l' <- toIL l; !r' <- toIL r; return $ BBOp Impl l' r'
+toIL (OpBB Eqv l r)  = do !l' <- toIL l; !r' <- toIL r; return $ BBOp Eqv  l' r'
+toIL (OpBB XOr l r)  = do !l' <- toIL l; !r' <- toIL r; return $ BBOp XOr  l' r'
+toIL (OpBB And l r)  = do !l' <- toIL l; !r' <- toIL r; return $ BBOp And  l' r'
+toIL (OpBB Or l r)   = do !l' <- toIL l; !r' <- toIL r; return $ BBOp Or   l' r'
+toIL (OpIB op l r)   = do !l' <- toIL' l; !r' <- toIL' r; return $ IBOp op l' r'
 toIL (ChcB d l r)    = return $ Chc d l r
 
 toIL' :: ( Constrainable m (ExRefType Var) IL'
@@ -881,7 +883,7 @@ toIL' (RefI a)      = cached a
 toIL' x@(OpI op (ChcI d l r)) = do logWith "Moving op inside chc" x
                                    return $ Chc' d (OpI op l) (OpI op r)
 toIL' (OpI op e)    = IOp op <$> toIL' e
-toIL' (OpII op l r) = do l' <- toIL' l; r' <- toIL' r; return $! IIOp op l' r'
+toIL' (OpII op l r) = do !l' <- toIL' l; !r' <- toIL' r; return $! IIOp op l' r'
 toIL' (ChcI d l r)  = return $ Chc' d l r
 
 -------------------------------- Accumulation -----------------------------------
