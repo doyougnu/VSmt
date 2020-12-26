@@ -185,7 +185,7 @@ solveVerbose  i conf Settings{..} =
 
      let posVariants     = maxVariantCount i
          expectedResults = fromMaybe posVariants numResults
-         consSettings    = (True, expectedResults)
+         consSettings    = (verboseMode, expectedResults)
          consComms       = (resultCounter, results)
          solverConfig    = getConfig solver
          il              = toIL i
@@ -288,7 +288,7 @@ solve  i conf Settings{..} =
 
      let posVariants     = maxVariantCount i
          expectedResults = fromMaybe posVariants numResults
-         consSettings    = (True, expectedResults)
+         consSettings    = (False, expectedResults)
          consComms       = (resultCounter, results)
          solverConfig    = getConfig solver
          il              = toIL i
@@ -1358,8 +1358,8 @@ resetTo s = do st <- St.get
                St.put s{ bools=bools st
                        , ints=ints st
                        , doubles=doubles st
-                       -- , dimensions = dimensions st
-                       -- , config = config st
+                       , dimensions = dimensions st
+                       , config = config st
                        }
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
@@ -1403,11 +1403,8 @@ alternative dim goLeft goRight =
                               St.gets config >>= logInProducerWith "ConfigL:"
                               St.gets bools  >>= logInProducerWith "Bools::"
                               updateConfigs (bRef dim) (dim,True) newSConfigL
-                              -- a <- lift $ C.getAssertions
-                              -- logInProducerWith "Assertions" a
                               goLeft
-       St.gets config >>= logInProducerWith "Writing to go left: Config :"
-       St.gets bools >>= logInProducerWith "Writing to go left: Bools : "
+       logInProducer "Writing to continue left"
        liftIO $ U.writeChan requests continueLeft
 
 
@@ -1421,10 +1418,7 @@ alternative dim goLeft goRight =
                                St.gets config >>= logInProducerWith "ConfigR:"
                                St.gets bools  >>= logInProducerWith "BoolsR:"
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                               -- a <- lift $ C.getAssertions
-                               -- logInProducerWith "Assertions" a
                                goRight
-
        logInProducer "Writing to continue right"
        liftIO $ U.writeChan requests continueRight
 
@@ -1456,8 +1450,6 @@ choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
 choose loc =
   do
     let !loc' = findChoice loc
-    St.gets config >>= logInProducerWith "Choose"
-    St.gets bools  >>= logInProducerWith "Bools"
     case loc' of
       (InBool (Chc d cl cr) ctx) -> do
         conf <- St.gets config

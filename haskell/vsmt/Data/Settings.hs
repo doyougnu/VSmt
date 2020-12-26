@@ -57,8 +57,8 @@ defSettings = Settings{ solver          = Solver S.z3
                       , consumerBufSize = 250
                       , numResults      = Nothing
                       , numProducers    = 1
-                      , numConsumers    = 5
-                      , numVCWorkers    = 10
+                      , numConsumers    = 1
+                      , numVCWorkers    = 1
                       }
 
 defSettingsOnlySat :: Settings
