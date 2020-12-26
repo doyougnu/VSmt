@@ -214,6 +214,6 @@ main = do
   let t = bChc "AA" (bRef "a") (bRef "b") &&& bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  res <- solve bProp Nothing defSettings
+  res <- solveVerbose t Nothing debugSettings
   putStrLn $ show res
   -- solveForCoreVerbose bProp Nothing
