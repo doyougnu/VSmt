@@ -56,8 +56,8 @@ defSettings = Settings{ solver          = Solver S.z3
                       , producerBufSize = 250
                       , consumerBufSize = 250
                       , numResults      = Nothing
-                      , numProducers    = 50
-                      , numConsumers    = 50
+                      , numProducers    = 1
+                      , numConsumers    = 5
                       , numVCWorkers    = 10
                       }
 

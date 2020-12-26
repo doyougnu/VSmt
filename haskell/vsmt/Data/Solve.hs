@@ -277,93 +277,96 @@ solveVerbose  i conf Settings{..} =
      return finalResults
 
 solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
--- solve  i conf Settings{..} = undefined
-solve  = undefined
---   do (toMain, fromVC)          <- U.newChan vcBufSize
---      (toVC,   fromMain)        <- U.newChan vcBufSize
---      (prdIn, prdOut)           <- U.newChan producerBufSize
---      (resultsIn, resultsOut)   <- U.newChan consumerBufSize
+solve  i conf Settings{..} =
+  do (toMain, fromVC)          <- U.newChan vcBufSize
+     (toVC,   fromMain)        <- U.newChan vcBufSize
+     (prdIn, prdOut)           <- U.newChan producerBufSize
+     (resultsIn, resultsOut)   <- U.newChan consumerBufSize
 
---      resultCounter             <- STM.newTVarIO 0
---      results                   <- STM.newTVarIO mempty
+     resultCounter             <- STM.newTVarIO 0
+     results                   <- STM.newTVarIO mempty
 
-  -- init the channels--
---      let vcChans     = VCChannels     $ (fromMain, toMain)
---          mainChans   = MainChannels   $ (fromVC, toVC)
---          workChans   = WorkChannels   $ (prdIn, prdOut)
---          resultChans = ResultChannels $ (resultsIn, resultsOut)
---          chans :: Channels (NoLoggingT C.Query)
---          chans       = Channels{ vcChans=vcChans, mainChans=mainChans
---                                , workChans=workChans, resultChans=resultChans, threadId=0}
---          startState  = State{stores=mempty, channels=chans}
+     let posVariants     = maxVariantCount i
+         expectedResults = fromMaybe posVariants numResults
+         consSettings    = (True, expectedResults)
+         consComms       = (resultCounter, results)
+         solverConfig    = getConfig solver
+         il              = toIL i
 
-         -- solver settings--
---          posVariants     = maxVariantCount i
---          expectedResults = fromMaybe posVariants numResults
---          consSettings    = (verboseMode, expectedResults)
---          consComms       = (resultCounter, results)
---          solverConfig    = getConfig solver
+  -- init the channels
+     let vcChans     = VCChannels     $ (fromMain, toMain)
+         mainChans   = MainChannels   $ (fromVC, toVC)
+         workChans   = WorkChannels   $ (prdIn, prdOut)
+         resultChans = ResultChannels $ (resultsIn, resultsOut)
+         chans :: Channels (NoLoggingT C.Query)
+         chans = Channels{ vcChans=vcChans, mainChans=mainChans
+                         , workChans=workChans, resultChans=resultChans
+                         , threadId=0}
+         startState  = State{stores=mempty, channels=chans}
+         seasoning = runPreSolver mempty il
 
+         -- solver settings
          -- This is our "main" thread, we're going to reduce to a variational
          -- core and spawn producers. The producers will block on a work channel
          -- while this thread continues to solve, thereby populating the work
-         -- channel.--
---          runProducers = T.runSMTWith solverConfig $
---            do (il, st) <- runPreSolverLog mempty $ toIL i
-              -- TODO load the state explicitly after exposing instance in Data.SBV.Trans--
---               !seasoning <- I.freezeSt
-              -- let seasoning = runPreSolver mempty $ toIL i
-              -- spawn producers, we fork a thread to spawn producers here to
-              -- prevent this call from blocking. The default behavior of
-              -- mapConcurrently is to wait for results. We only know that a max
-              -- of 2^(# unique dimensions) is the max, but the user may only
-              -- want a subset, thus we can't wait for them to finish.--
---               C.io $
---                 A.mapConcurrently_ (producer seasoning solverConfig st il chans)
---                 [1..numProducers]
+         -- channel.
+         runProducers = A.mapConcurrently_
+           (producer seasoning solverConfig chans) [1..numProducers]
 
---          runConsumers =
---            A.mapConcurrently_ (consumer consComms consSettings resultsOut)
---            [1..numConsumers]
+         runConsumers =
+           A.mapConcurrently_ (consumer consComms consSettings resultsOut)
+           [1..numConsumers]
 
---          runVCWorkers =
---            A.mapConcurrently_ (vcWorker solverConfig conf startState)
---            [1..numVCWorkers]
+         runVCWorkers =
+           A.mapConcurrently_ (vcWorker solverConfig conf startState)
+           [1..numVCWorkers]
 
---          populateChans = T.runSMTWith solverConfig $
---            do (il,_) <- runPreSolverLog mempty $ toIL i
---               liftIO $ U.writeChan prdIn $
---                 do (findVCore il >>= removeChoices)
---                    logInProducer "Populated and now dying!!!!"
+         -- this thread will exit once it places requests on the producer
+         -- chans. If the IL is a unit then it'll be caught by evaluate and
+         -- placed on a result chan anyway
+         populateChans = T.runSMTWith solverConfig $
+           do (il', st) <- seasoning
+              C.query $
+                runSolver startState{stores=st} $
+                do findVCore il' >>= removeChoices
+                   logInProducer "Populated and now dying!!!!"
 
-     -- kick off--
---      aProds   <- A.async runProducers
---      aCons    <- A.async runConsumers
---      aWorkers <- A.async runVCWorkers
+--
+--               liftIO $ U.writeChan prdIn . (seasoning,) $
+--                 do logInProducer "Hello im the first one"
+--                    findVCore il' >>= removeChoices
+--                    logInProducer "First again now waiting"
+--                    logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
 
-     -- this thread will die once it finds a choice or a unit in the plain case--
---      void populateChans
+     -- kick off
+     !aProds    <- A.async runProducers
+     !aCons     <- A.async runConsumers
+     !aWorkers  <- A.async runVCWorkers
+
+     !aPopulate <- A.async populateChans
 
 
      -- wait until consumers exit, when they do we are done, we could choose to
      -- catch the exception here but because we exit with ExitSuccess there it
      -- would be rare if something other was thrown and the whole system would
-     -- likely stall on an MVar so thereno reason--
---      void $ A.waitCatch aCons
+     -- likely stall on an MVar so thereno reason. If we don't use waitCatch
+     -- here then we would have to catch the exception thrown from the consumers
+     A.waitCatch aCons >>= \case
+       Left e     -> print e
+       Right unit -> return unit
 
-     -- cleanup--
---      A.cancel aProds
---      A.cancel aWorkers
---      A.cancel aCons
-     -- A.cancel aPopulate -- make sure this thread did indeed die--
+     -- cleanup
+     A.cancel aProds
+     A.cancel aWorkers
+     A.cancel aPopulate -- make sure this thread did indeed die
 
-     -- grab the results--
---      finalResults <- STM.readTVarIO results
---      finalCounter <- STM.readTVarIO resultCounter
+     -- grab the results
+     finalResults <- STM.readTVarIO results
+     finalCounter <- STM.readTVarIO resultCounter
 
---      when verboseMode $ logIOWith "finished with result count: " finalCounter
+     when verboseMode $ logIOWith "finished with result count: " finalCounter
 
---      return finalResults
+     return finalResults
 
 -- solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State s)
 -- solveForCoreVerbose  i (fromMaybe true -> conf) =
@@ -408,7 +411,7 @@ producer ::
        Channels s              ->
        ThreadID                -> IO ()
 producer seasoning c channels tid = void $
-  T.runSMTWith c{T.verbose=True} $
+  T.runSMTWith c $
   do -- I.unfreezeSt seasoning
      -- T.setOption $ C.ProduceAssertions True
      (il,st) <- seasoning
@@ -802,7 +805,6 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
       Nothing -> do
         logInProducerWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
-        logInProducerWith "Added and now returning" (Ref newSym)
         St.modify' (`by` add ref newSym)
         return (Ref newSym)
 
@@ -1356,7 +1358,7 @@ resetTo s = do st <- St.get
                St.put s{ bools=bools st
                        , ints=ints st
                        , doubles=doubles st
-                       , dimensions = dimensions st
+                       -- , dimensions = dimensions st
                        -- , config = config st
                        }
 
@@ -1380,8 +1382,6 @@ alternative dim goLeft goRight =
   do !s <- St.get -- cache the state
      -- !seasoning <- I.freezeIncSt -- and the base solver state
      logInProducerWith "In alternative with Dim" dim
-     St.gets config >>= logInProducerWith "Choose"
-     St.gets bools  >>= logInProducerWith "Bools"
      chans <- R.ask
      let (fromVC, toVC) = getMainChans . mainChans $ chans
          dontNegate          = False
@@ -1400,6 +1400,8 @@ alternative dim goLeft goRight =
        let !continueLeft = C.inNewAssertionStack $!
                            do logInProducerWith "Left Alternative of" dim
                               resetTo s
+                              St.gets config >>= logInProducerWith "ConfigL:"
+                              St.gets bools  >>= logInProducerWith "Bools::"
                               updateConfigs (bRef dim) (dim,True) newSConfigL
                               -- a <- lift $ C.getAssertions
                               -- logInProducerWith "Assertions" a
@@ -1416,6 +1418,8 @@ alternative dim goLeft goRight =
        let !continueRight = C.inNewAssertionStack $
                             do logInProducerWith "Right Alternative of" dim
                                resetTo s
+                               St.gets config >>= logInProducerWith "ConfigR:"
+                               St.gets bools  >>= logInProducerWith "BoolsR:"
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
                                -- a <- lift $ C.getAssertions
                                -- logInProducerWith "Assertions" a
@@ -1463,13 +1467,11 @@ choose loc =
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
         logInProducerWith "Choose Context" ctx
-        -- let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
-        --     goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+        let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
+            goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
         -- let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
         --     goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
-        let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
-            goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
