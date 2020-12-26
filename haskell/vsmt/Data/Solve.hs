@@ -491,9 +491,9 @@ instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
   symbolicEnv = lift T.symbolicEnv
 
 -- | A solver type enabled with query operations and logging
-type SolverLog    = SolverT    (LoggingT C.Query)
+type SolverLog    = SolverT    (LoggingT   C.Query)
 type Solver       = SolverT    (NoLoggingT C.Query)
-type PreSolverLog = PreSolverT (LoggingT T.Symbolic)
+type PreSolverLog = PreSolverT (LoggingT   T.Symbolic)
 type PreSolver    = PreSolverT (NoLoggingT T.Symbolic)
 
 -- | A presolver runs the first stage of the evaluation/accumulation loop, that
@@ -1075,7 +1075,7 @@ store ::
   , R.MonadReader Channels     io
   ,  MonadIO                   io
   ) => Result -> io ()
-{-# INLINE store #-}
+{-# INLINE     store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
 store !r = update results (r <>)
 
@@ -1087,10 +1087,10 @@ mergeVC Nothing b@(Just _) = b
 mergeVC (Just l) (Just r)  = Just $ l &&& r
 
 -- | A function that enforces each configuration is updated in sync
-updateConfigs ::
-  (MonadIO m, St.MonadState Stores m)
-  => Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
-{-# INLINE updateConfigs #-}
+updateConfigs :: (MonadIO m, St.MonadState Stores m) =>
+  Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
+{-# INLINE     updateConfigs #-}
+{-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
 updateConfigs context (d,val) sConf = do
   -- update the variant context
   update vConfig (mergeVC (Just $ VariantContext context))
@@ -1102,7 +1102,8 @@ updateConfigs context (d,val) sConf = do
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
 resetTo :: (St.MonadState Stores io, MonadIO io) => FrozenStores -> io ()
-{-# INLINE resetTo #-}
+{-# INLINE     resetTo #-}
+{-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
 resetTo FrozenStores{..} = do update config (const fconfig)
                               update sConfig (const fsConfig)
                               update vConfig (const fvConfig)
@@ -1116,6 +1117,7 @@ alternative ::
   , C.MonadQuery             n
   , MonadLogger              n
   ) => Dim -> SolverT n () -> SolverT n () -> SolverT n ()
+{-# SPECIALIZE alternative :: Dim -> Solver () -> Solver () -> Solver () #-}
 alternative dim goLeft goRight =
   do !s <- freeze
      symbolicContext <- reads sConfig
@@ -1165,7 +1167,8 @@ removeChoices ::
   , I.SolverContext m
   , T.MonadSymbolic m
   ) => VarCore -> SolverT m ()
-{-# INLINE removeChoices #-}
+{-# INLINE     removeChoices #-}
+{-# SPECIALIZE removeChoices :: VarCore -> Solver () #-}
 removeChoices (VarCore Unit) = reads bools >>= logInProducerWith "Core reduced to Unit" >>
                                reads config >>= logInProducerWith "Core reduced to Unit with Context" >>
                                reads vConfig >>= getResult >>= store
@@ -1178,6 +1181,8 @@ choose ::
   , T.MonadSymbolic m
   , C.MonadQuery    m
   ) => Loc -> SolverT m ()
+{-# INLINE     choose #-}
+{-# SPECIALIZE choose :: Loc -> Solver () #-}
 choose (InBool Unit Top)  = logInProducer "Choosing all done" >>
                             reads vConfig >>= getResult >>= store
 choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
