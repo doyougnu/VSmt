@@ -11,6 +11,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -29,6 +30,7 @@
 
 module Solve where
 
+import           GHC.Generics                          (Generic)
 import qualified Control.Concurrent.Async              as A
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import qualified Control.Concurrent.STM                as STM
@@ -57,6 +59,7 @@ import qualified Data.SBV.Internals                    as I
 import qualified Data.SBV.Trans                        as T
 import qualified Data.SBV.Trans.Control                as C
 import qualified Data.Text                             as Text
+
 import           Data.Text.IO                          (putStrLn)
 import           Prelude                               hiding (EQ, GT, LT, log,putStrLn)
 import           System.Exit                           (exitSuccess)
@@ -185,11 +188,13 @@ solveVerbose  i conf Settings{..} =
          consSettings    = (True, expectedResults)
          consComms       = (resultCounter, results)
          solverConfig    = getConfig solver
+         il              = toIL i
 
-     (il, st, seasoning) <- T.runSMTWith solverConfig $
-       do (!i', !s) <- runPreSolverLog mempty $ toIL i
-          !seas   <- I.freezeSt
-          return (i',s,seas)
+     -- TODO fix the async by replayign only constants and assertions
+     -- (il, st, seasoning) <- T.runSMTWith solverConfig $
+     --   do (!i', !s) <- runPreSolverLog mempty $ toIL i
+     --      !seas   <- I.freezeSt
+     --      return (i',s,seas)
 
   -- init the channels
      let vcChans     = VCChannels     $ (fromMain, toMain)
@@ -201,6 +206,7 @@ solveVerbose  i conf Settings{..} =
                          , workChans=workChans, resultChans=resultChans
                          , threadId=0}
          startState  = State{stores=mempty, channels=chans}
+         seasoning = runPreSolverLog mempty il
 
          -- solver settings
          -- This is our "main" thread, we're going to reduce to a variational
@@ -208,7 +214,7 @@ solveVerbose  i conf Settings{..} =
          -- while this thread continues to solve, thereby populating the work
          -- channel.
          runProducers = A.mapConcurrently_
-           (producer seasoning solverConfig st il chans) [1..numProducers]
+           (producer seasoning solverConfig chans) [1..numProducers]
 
          runConsumers =
            A.mapConcurrently_ (consumer consComms consSettings resultsOut)
@@ -218,11 +224,16 @@ solveVerbose  i conf Settings{..} =
            A.mapConcurrently_ (vcWorker solverConfig conf startState)
            [1..numVCWorkers]
 
---          populateChans = T.runSMTWith solverConfig $
---            do (il', _) <- runPreSolverLog mempty $ toIL i
-           -- this thread will exit once it places requests on the producer
-           -- chans. If the IL is a unit then it'll be caught by evaluate and
-           -- placed on a result chan anyway
+         -- this thread will exit once it places requests on the producer
+         -- chans. If the IL is a unit then it'll be caught by evaluate and
+         -- placed on a result chan anyway
+         populateChans = T.runSMTWith solverConfig $
+           do (il', st) <- seasoning
+              C.query $
+                runSolver startState{stores=st} $
+                do findVCore il' >>= removeChoices
+                   logInProducer "Populated and now dying!!!!"
+
 --
 --               liftIO $ U.writeChan prdIn . (seasoning,) $
 --                 do logInProducer "Hello im the first one"
@@ -231,14 +242,16 @@ solveVerbose  i conf Settings{..} =
 --                    logInProducer "!!!!!!!!!!!!!!!!!!Populated and now dying!!!!"
 
      -- kick off
-     !aProds   <- A.async runProducers
-     !aCons    <- A.async runConsumers
-     !aWorkers <- A.async runVCWorkers
+     !aProds    <- A.async runProducers
+     !aCons     <- A.async runConsumers
+     !aWorkers  <- A.async runVCWorkers
+
+     !aPopulate <- A.async populateChans
 
      -- this thread will die once it finds a choice or a unit in the plain case
      -- liftIO $ threadDelay 9000000
      -- aPopulate <- A.async populateChans
-     liftIO $ U.writeChan prdIn (findVCore il >>= removeChoices)
+     -- liftIO $ U.writeChan prdIn (findVCore il >>= removeChoices)
 
 
      -- wait until consumers exit, when they do we are done, we could choose to
@@ -246,16 +259,14 @@ solveVerbose  i conf Settings{..} =
      -- would be rare if something other was thrown and the whole system would
      -- likely stall on an MVar so thereno reason. If we don't use waitCatch
      -- here then we would have to catch the exception thrown from the consumers
-     putStrLn "waiting to catch"
      A.waitCatch aCons >>= \case
        Left e     -> print e
        Right unit -> return unit
-     putStrLn "Caught"
 
      -- cleanup
      A.cancel aProds
      A.cancel aWorkers
-     -- A.cancel aPopulate -- make sure this thread did indeed die
+     A.cancel aPopulate -- make sure this thread did indeed die
 
      -- grab the results
      finalResults <- STM.readTVarIO results
@@ -374,8 +385,9 @@ sat = solveVerbose
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
-type Seasoning     = I.FrozenState
-type QSeasoning    = I.FrozenIncState
+-- type Seasoning     = I.FrozenState
+-- type QSeasoning    = I.FrozenIncState
+type Seasoning     = T.Symbolic (IL, Stores)
 type ThreadID      = Int
 type MaxVariantCnt = Int
 type ConsumerComms = (STM.TVar Int, STM.TVar Result)
@@ -393,25 +405,23 @@ producer ::
   , SolverMonad s ~ SolverT s
   ) => Seasoning               ->
        T.SMTConfig             ->
-       Stores                  ->
-       IL                      ->
        Channels s              ->
        ThreadID                -> IO ()
-producer seasoning c ss il channels tid = void $
+producer seasoning c channels tid = void $
   T.runSMTWith c{T.verbose=True} $
-  do I.unfreezeSt seasoning
-     T.setOption $ C.ProduceAssertions True
+  do -- I.unfreezeSt seasoning
+     -- T.setOption $ C.ProduceAssertions True
+     (il,st) <- seasoning
      let requests = snd . getWorkChans . workChans $ channels
      C.query $
        do
-         runSolver State{stores=ss, channels=channels{threadId=tid}} $
+         runSolver State{stores=st, channels=channels{threadId=tid}} $
            do void $ findVCore il
               forever $ do
                 logInProducer "Waiting"
                 !continue <- liftIO $ U.readChan requests
-                C.inNewAssertionStack $!
-                  do logInProducer "Read a request, lets go"
-                     continue
+                logInProducer "Read a request, lets go"
+                continue
 
 -- | A consumer is a thread that waits for results on the result channel, when
 -- it picks up a result it increases the result counter to broadcast to other
@@ -483,14 +493,6 @@ vcHelper fromMain toMain st tid =
     runSolver st $
     forever $
      do
-
-
-
-
-
-
-
-
        logInVC' tid "Waiting"
        (d, shouldNegate, vc') <- C.io $ U.readChan fromMain
         -- logInVC' tid "got request"
@@ -881,7 +883,7 @@ type BRef = T.SBool
 
 data NRef = SI T.SInteger
     | SD T.SDouble
-    deriving Show
+    deriving (Generic,Show)
 
 instance Num NRef where
   fromInteger = SI . T.literal . fromInteger
@@ -1002,13 +1004,13 @@ data IL = Unit
     | BBOp BB_B !IL  !IL
     | IBOp NN_B !IL' !IL'
     | Chc Dim Proposition Proposition
-    deriving Show
+    deriving (Generic, Show)
 
 data IL' = Ref' !NRef
     | IOp   N_N !IL'
     | IIOp NN_N !IL' !IL'
     | Chc' Dim NExpression NExpression
-    deriving Show
+    deriving (Generic, Show)
 
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
@@ -1395,11 +1397,12 @@ alternative dim goLeft goRight =
      (checkDimTrue,!newSConfigL) <- liftIO $
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
-       let !continueLeft = do logInProducerWith "Left Alternative of" dim
+       let !continueLeft = C.inNewAssertionStack $!
+                           do logInProducerWith "Left Alternative of" dim
                               resetTo s
                               updateConfigs (bRef dim) (dim,True) newSConfigL
-                              a <- lift $ C.getAssertions
-                              logInProducerWith "Assertions" a
+                              -- a <- lift $ C.getAssertions
+                              -- logInProducerWith "Assertions" a
                               goLeft
        St.gets config >>= logInProducerWith "Writing to go left: Config :"
        St.gets bools >>= logInProducerWith "Writing to go left: Bools : "
@@ -1410,11 +1413,12 @@ alternative dim goLeft goRight =
      (checkDimFalse,!newSConfigR) <- liftIO $
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
-       let !continueRight = do logInProducerWith "Right Alternative of" dim
+       let !continueRight = C.inNewAssertionStack $
+                            do logInProducerWith "Right Alternative of" dim
                                resetTo s
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
-                               a <- lift $ C.getAssertions
-                               logInProducerWith "Assertions" a
+                               -- a <- lift $ C.getAssertions
+                               -- logInProducerWith "Assertions" a
                                goRight
 
        logInProducer "Writing to continue right"

@@ -84,7 +84,7 @@ data SolverOp = IsSat      -- ^ call sat
               | Optimize   -- ^ optimize
               | Prove      -- ^ Prove, this could just be sat $ negate prop though
               | CodeGen    -- ^ generate code
-              deriving (Eq,Ord,Show)
+              deriving (Eq,Ord,Show,Generic)
 
 -- | Boolean expressions with choices, value and spine strict
 -- TODO combine using GADTS
@@ -116,6 +116,7 @@ data Type = TBool
 
 
 data Value = N NPrim | B Bool deriving (Eq,Show,Ord)
+
 
 newtype CheckableResult =
   CheckableResult { getChkResult :: M.HashMap Var [(Maybe VariantContext, Value)] }

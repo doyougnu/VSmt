@@ -82,13 +82,13 @@ minSettings = Settings{ solver          = Solver S.z3
                       }
 
 minAsyncSettings :: Settings
-minAsyncSettings = minSettings{numProducers = 3, numConsumers = 3, numVCWorkers = 3}
+minAsyncSettings = minSettings{numProducers = 1, numConsumers = 1, numVCWorkers = 1}
 
 minAsyncDebug :: Settings
-minAsyncDebug = minSettings{solver = Solver S.z3{S.verbose=True}, numProducers = 3, numConsumers = 3, numVCWorkers = 3, verboseMode=True}
+minAsyncDebug = minSettings{solver = Solver S.z3{S.verbose=True}, numProducers = 1, numConsumers = 1, numVCWorkers = 1, verboseMode=True}
 
 debugSettings :: Settings
 debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}
 
 debugSettingsNoVerbose :: Settings
-debugSettingsNoVerbose = minSettings{verboseMode=False}
+debugSettingsNoVerbose = minSettings{solver = Solver S.z3{S.verbose=False}}
