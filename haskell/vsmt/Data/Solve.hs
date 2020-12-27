@@ -42,13 +42,10 @@ import           Control.Monad.Logger                  (LoggingT,
                                                         runNoLoggingT,
                                                         runStdoutLoggingT)
 import           Control.Monad.Reader                  as R (MonadReader,
-                                                             ReaderT (..), ask,
+                                                             ReaderT (..),
                                                              asks, mapReaderT,
+                                                             local,
                                                              runReaderT)
-import qualified Control.Monad.State.Strict            as St (MonadState,
-                                                              StateT(..), get,
-                                                              gets, mapStateT,
-                                                              runStateT)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
@@ -149,16 +146,16 @@ logInIOConsumer = logInThreadIO "Consumer"
 logInIOVC :: Int -> Text.Text -> IO ()
 logInIOVC = logInThreadIO "VCWorker"
 
-logInProducer :: (R.MonadReader Channels m, MonadLogger m) => Text.Text -> m ()
-logInProducer msg = R.asks threadId >>= flip logInProducer' msg
+logInProducer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
+logInProducer msg = R.asks (threadId . channels) >>= flip logInProducer' msg
 
-logInProducerWith :: (R.MonadReader Channels m, MonadLogger m, Show a) =>
+logInProducerWith :: (R.MonadReader State m, MonadLogger m, Show a) =>
   Text.Text -> a -> m ()
-logInProducerWith msg value = do tid <- R.asks threadId
+logInProducerWith msg value = do tid <- R.asks (threadId . channels)
                                  logInThreadWith "Producer" tid msg value
 
-logInConsumer :: (R.MonadReader Channels m, MonadLogger m) => Text.Text -> m ()
-logInConsumer msg = R.asks threadId >>= flip logInConsumer' msg
+logInConsumer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
+logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
 
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
 logThenPass str a = logWith str a >> return a
@@ -414,17 +411,23 @@ newStore = do vConfig    <- STM.newTVarIO mempty
               dimensions <- STM.newTVarIO mempty
               return Stores{..}
 
-update :: (St.MonadState s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
-update field f = St.gets field >>= liftIO . STM.atomically . flip STM.modifyTVar' f
+update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
+update field = updateWith (field . stores)
 
-reads :: (St.MonadState s io, MonadIO io) => (s -> STM.TVar a) -> io a
-reads f = St.gets f >>= liftIO . STM.readTVarIO
+reads :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> io a
+reads f = readWith (f . stores)
+
+updateWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
+updateWith field f = R.asks field >>= liftIO . STM.atomically . flip STM.modifyTVar' f
+
+readWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> io a
+readWith f = R.asks f  >>= liftIO . STM.readTVarIO
 
 read :: MonadIO io => (s -> STM.TVar a) -> s -> io a
 read f = liftIO . STM.readTVarIO . f
 
-freeze :: (St.MonadState Stores io, MonadIO io) => io FrozenStores
-freeze = do st <- St.get
+freeze :: (R.MonadReader State io, MonadIO io) => io FrozenStores
+freeze = do st <- R.asks stores
             fvConfig <- read vConfig st
             fsConfig <- read sConfig st
             fconfig <- read config st
@@ -439,17 +442,15 @@ freeze = do st <- St.get
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
-newtype SolverT m a = SolverT { runSolverT :: R.ReaderT Channels
-                                              (St.StateT Stores m) a }
+newtype SolverT m a = SolverT { runSolverT :: R.ReaderT State m a }
   deriving ( Functor,Applicative,Monad,MonadIO
-           , MonadError e, MonadLogger, R.MonadReader Channels
-           , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
+           , MonadError e, MonadLogger, R.MonadReader State
+           , T.MonadSymbolic, C.MonadQuery, MonadTrans
            )
 
-instance MonadTrans SolverT where lift = SolverT . lift . lift
-
-mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
-mapSolverT f m = SolverT $ R.mapReaderT (St.mapStateT f) $ runSolverT m
+-- mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
+mapSolverT :: R.MonadReader r m => (r -> r) -> SolverT m a -> SolverT m a
+mapSolverT f = SolverT . R.mapReaderT (local f) . runSolverT
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
@@ -499,33 +500,23 @@ type PreSolver    = PreSolverT (NoLoggingT T.Symbolic)
 -- | A presolver runs the first stage of the evaluation/accumulation loop, that
 -- is, it is a solver which doesn't understand async, nor incremental push/pops.
 -- Rather, it is the solver which generates the first core
-newtype PreSolverT m a = PreSolverT { runPreSolverT :: (St.StateT Stores m) a }
+newtype PreSolverT m a = PreSolverT { runPreSolverT :: (R.ReaderT Stores m) a }
   deriving ( Functor,Applicative,Monad,MonadIO
-           , MonadError e, MonadLogger
-           , St.MonadState Stores, T.MonadSymbolic, C.MonadQuery
+           , MonadError e, MonadLogger, R.MonadReader Stores
+           , T.MonadSymbolic, C.MonadQuery
            )
 
 runPreSolverLog :: Stores -> PreSolverLog a -> T.Symbolic (a, Stores)
-runPreSolverLog s = runStdoutLoggingT . flip St.runStateT s . runPreSolverT
+runPreSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
 
 runPreSolverNoLog :: Stores -> PreSolver a -> T.Symbolic (a, Stores)
-runPreSolverNoLog s = runNoLoggingT . flip St.runStateT s . runPreSolverT
+runPreSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runPreSolverT
 
 runSolverNoLog :: State -> Solver a -> C.Query (a, State)
-runSolverNoLog State{channels=c,stores=s} = fmap remake
-                                          . runNoLoggingT
-                                          . flip St.runStateT s
-                                          . flip R.runReaderT c
-                                          . runSolverT
-  where remake (a,ss) = (a, State{stores=ss,channels=c})
+runSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runSolverT
 
 runSolverLog :: State -> SolverLog a -> C.Query (a, State)
-runSolverLog State{channels=c,stores=s} = fmap remake
-                                            . runStdoutLoggingT
-                                            . flip St.runStateT s
-                                            . flip R.runReaderT c
-                                            . runSolverT
-  where remake (a,ss) = (a, State{stores=ss,channels=c})
+runSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
 
 type PreRun m a = Stores -> m a -> T.Symbolic (a, Stores)
 type Run m    a = State  -> SolverT m a -> C.Query    (a, State)
@@ -588,42 +579,42 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
 
 instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
   Constrainable (PreSolverT m) Var IL where
-  cached ref   = do st <- reads bools
+  cached ref   = do st <- readWith bools
                     case find ref st of
                       Just x  -> return (Ref x)
                       Nothing -> do newSym <- T.sBool (Text.unpack ref)
-                                    update bools (add ref newSym)
+                                    updateWith bools (add ref newSym)
                                     return (Ref newSym)
 
 
 instance (Monad m, T.MonadSymbolic m) =>
   Constrainable (PreSolverT m) (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
-    do st <- reads ints
+    do st <- readWith ints
        case find i st of
          Just x  -> return . Ref' . SI $ x
          Nothing -> do newSym <- T.sInteger (Text.unpack i)
-                       update ints (add i newSym)
+                       updateWith ints (add i newSym)
                        return (Ref' . SI $ newSym)
 
   cached (ExRefTypeD d) =
-    do st <- reads doubles
+    do st <- readWith doubles
        case find d st of
          Just x  -> return . Ref' $ SD x
          Nothing -> do newSym <- T.sDouble (Text.unpack d)
-                       update doubles (add d newSym)
+                       updateWith doubles (add d newSym)
                        return $! Ref' $ SD newSym
 
 instance (Monad m, T.MonadSymbolic m) =>
   Constrainable (PreSolverT m) Dim T.SBool where
   cached d = do
-    ds <- reads dimensions
+    ds <- readWith dimensions
     case find d ds of
       Just x -> return x
       Nothing -> do
         let ref = Text.unpack $ getDim d
         newSym <- T.sBool ref
-        update dimensions (add d newSym)
+        updateWith dimensions (add d newSym)
         return newSym
 
 
@@ -1071,9 +1062,8 @@ findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 
 
 store ::
-  (St.MonadState Stores        io
-  , R.MonadReader Channels     io
-  ,  MonadIO                   io
+  ( R.MonadReader State io
+  ,  MonadIO            io
   ) => Result -> io ()
 {-# INLINE     store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
@@ -1087,7 +1077,7 @@ mergeVC Nothing b@(Just _) = b
 mergeVC (Just l) (Just r)  = Just $ l &&& r
 
 -- | A function that enforces each configuration is updated in sync
-updateConfigs :: (MonadIO m, St.MonadState Stores m) =>
+updateConfigs :: (MonadIO m, R.MonadReader State m) =>
   Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
 {-# INLINE     updateConfigs #-}
 {-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
@@ -1101,10 +1091,10 @@ updateConfigs context (d,val) sConf = do
 
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
-resetTo :: (St.MonadState Stores io, MonadIO io) => FrozenStores -> io ()
+resetTo :: (R.MonadReader State io, MonadIO io) => FrozenStores -> io ()
 {-# INLINE     resetTo #-}
 {-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
-resetTo FrozenStores{..} = do update config (const fconfig)
+resetTo FrozenStores{..} = do update config  (const fconfig)
                               update sConfig (const fsConfig)
                               update vConfig (const fvConfig)
 
@@ -1122,7 +1112,7 @@ alternative dim goLeft goRight =
   do !s <- freeze
      symbolicContext <- reads sConfig
      logInProducerWith "In alternative with Dim" dim
-     chans <- R.ask
+     chans <- R.asks channels
      let (fromVC, toVC) = getMainChans . mainChans $ chans
          dontNegate          = False
          pleaseNegate        = True
@@ -1250,7 +1240,7 @@ contextToSBool' (getVarFormula -> x) = go x
         dispatch Eqv  = (<=>)
         dispatch XOr  = (<=>)
 
-contextToSBool :: ( St.MonadState Stores m
+contextToSBool :: ( R.MonadReader State  m
                   , C.MonadQuery         m
                   , MonadIO              m
                   ) => VariantContext -> m T.SBool
