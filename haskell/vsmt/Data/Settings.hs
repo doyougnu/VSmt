@@ -21,6 +21,7 @@ module Settings
   , debugSettings
   , defSettingsNoVerbose
   , debugSettingsNoVerbose
+  , defSettingsVerbose
   , minAsyncSettings
   , minAsyncDebug
   ) where
@@ -66,6 +67,9 @@ defSettingsOnlySat = defSettings{generateModels = False}
 
 defSettingsNoVerbose :: Settings
 defSettingsNoVerbose = defSettings{solver=Solver $ S.z3{S.verbose=False}}
+
+defSettingsVerbose :: Settings
+defSettingsVerbose = defSettings{solver=Solver $ S.z3{S.verbose=True}}
 
 minSettings :: Settings
 minSettings = Settings{ solver          = Solver S.z3

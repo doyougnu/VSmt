@@ -12,6 +12,7 @@ import qualified Data.SBV.Control        as SC
 import qualified Data.SBV.Internals      as SI
 import qualified Data.Text.IO            as T (writeFile, appendFile)
 import           Text.Megaparsec         (parse)
+import Control.Monad
 
 import           Bench.Core
 import           Settings
@@ -214,7 +215,8 @@ main = do
   -- let t = bChc "AA" (bRef "a") (bRef "b") &&& bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  res <- solve bProp Nothing defSettings
-  putStrLn $ show . length $ take 10 $ show res
+  -- !res <- solve bProp Nothing defSettings
+  -- putStrLn $ show res
+  -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn $ show res
   -- solveForCoreVerbose bProp Nothing

@@ -1199,11 +1199,11 @@ choose loc =
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
         logInProducerWith "Choose Context" ctx
-        let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
-            goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
+        -- let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . accumulate
+        --     goRight = toIL cr >>= choose . findChoice . toLocWith ctx . accumulate
 
-        -- let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
-        --     goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+        let goLeft  = toIL cl >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
+            goRight = toIL cr >>= evaluate >>= choose . findChoice . toLocWith ctx . getCore
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
