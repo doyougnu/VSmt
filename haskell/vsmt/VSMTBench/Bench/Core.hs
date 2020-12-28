@@ -91,7 +91,7 @@ mkBench alg confDesc conf !f prop = run desc f prop
     confPool = unsafePerformIO $ genConfigPool conf --just call out to the
                                                       --solver, this should
                                                       --always be safe
-    prop' = flip selectVariant prop <$> confPool  -- some confs will never be
+    prop' = flip configure prop <$> confPool  -- some confs will never be
                                                   -- total, so we use select
                                                   -- variant here
     desc = mkDescription alg confDesc prop'

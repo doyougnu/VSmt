@@ -59,12 +59,5 @@ evalPlain (OpIB {}) = error "Type Chef throws smt problems?"
 vCoreMetrics :: a
 vCoreMetrics = error "vcore metrics"
 
-selectVariant :: a
-selectVariant = error "select variant"
-
-
-selectVariantTotal :: a
-selectVariantTotal = error "select variant total"
-
 renameDims :: (a -> b) -> Prop' a -> Prop' b
 renameDims = fmap
