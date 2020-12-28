@@ -18,7 +18,8 @@ let
               #   z3 = pkgs.z3;
               # };
 
-              sbv = haskellPackagesNew.callPackage ./lib/sbv/sbv.nix { };
+              # sbv = haskellPackagesNew.callPackage ./lib/sbv/sbv.nix { };
+              sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
               unordered-containers = haskellPackagesNew.callPackage ./unordered-containers.nix {};
             };
           };
