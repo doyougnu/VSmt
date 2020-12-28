@@ -41,6 +41,9 @@ import           Core.Types
 class Configurable conf p where
   configure :: conf -> p -> p
 
+instance Configurable c a => Configurable (Total c) a where
+  configure (Total c) = configure c
+
 instance Configurable Config (Prop' a) where
   configure conf (ChcB d l r) | conf d  = configure conf l
                               | otherwise = configure conf r

@@ -170,10 +170,10 @@ findVCore :: ( MonadLogger m
              ) => IL -> m VarCore
 findVCore = evaluate
 
-solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
+solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO Result
 solveVerbose = internalSolver runPreSolverLog runSolverLog
 
-solve :: Proposition -> Maybe VariantContext -> Settings -> IO Result
+solve :: Maybe VariantContext -> Settings -> Proposition  -> IO Result
 solve = internalSolver runPreSolverNoLog runSolverNoLog
 
 -- TODO fix this horrendous type signature
@@ -188,11 +188,11 @@ internalSolver ::
   ) =>
   (Stores -> m1 IL -> T.SymbolicT IO (IL, Stores))
   -> (State -> SolverT m2 Result -> C.QueryT IO (b1, b2))
-  -> Prop' Var
   -> Maybe VariantContext
   -> Settings
+  -> Prop' Var
   -> IO b1
-internalSolver preSlvr slvr i conf Settings{..} = do
+internalSolver preSlvr slvr conf Settings{..} i = do
   (toMain, fromVC)   <- U.newChan vcBufSize
   (toVC,   fromMain) <- U.newChan vcBufSize
   initialStore       <- newStore
