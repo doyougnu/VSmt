@@ -212,7 +212,7 @@ main = do
   --   ]
 
   -- let t = bRef "one" &&& bRef "two" &&& bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
-  let t = bChc "AA" (bRef "a") (bRef "b") &&& bChc "BB" (bRef "c") (bRef "d")
+  let t = bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
   !res <- solveVerbose t Nothing defSettings

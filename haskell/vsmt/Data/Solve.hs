@@ -1244,16 +1244,13 @@ choose loc =
       (InBool (Chc d cl cr) ctx) -> do
         conf <- reads config
         -- we'd like to evaluate after IL but this makes the async harder so we
-        -- iAccumulate instead. Specifically there is an interaction with in new
+        -- accumulate instead. Specifically there is an interaction with in new
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
         logInProducerWith "Choose Context" ctx
-        -- let goLeft  = toIL cl >>= choose . findChoice . toLocWith ctx . iAccumulate
-        --     goRight = toIL cr >>= choose . findChoice . toLocWith ctx . iAccumulate
-
-        let goLeft  = toIL cl >>= evaluate . snd >>= choose . findChoice . toLocWith ctx . getCore
-            goRight = toIL cr >>= evaluate . snd >>= choose . findChoice . toLocWith ctx . getCore
+        let goLeft  = toIL cl >>= accumulate . snd >>= choose . findChoice . toLocWith ctx . snd
+            goRight = toIL cr >>= accumulate . snd >>= choose . findChoice . toLocWith ctx . snd
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
