@@ -10,18 +10,6 @@ import qualified Data.Text               as T
 import BusyBox
 import Utils.VSMTBenchFramework
 
-eval :: Prop' (S.SBool, a) -> S.SBool
-eval (LitB True)     = S.sTrue
-eval (LitB False)    = S.sFalse
-eval (RefB (b,_))    = b
-eval (OpB _ e)       = S.sNot $ eval e
-eval (OpBB And l r)  = (S..&&) (eval l) (eval r)
-eval (OpBB Or  l r)  = (S..||) (eval l) (eval r)
-eval (OpBB Impl l r) = (S..=>) (eval l) (eval r)
-eval (OpBB BiImpl l r) = (S..<=>) (eval l) (eval r)
-eval (ChcB {}) = error "no choices here!"
-eval (OpIB {}) = error "Type Chef throws smt problems?"
-
   -- S.Symbolic (VProp d (S.SBool, Name) SNum) ->
 constructIncremental :: [Analysis] -> IO [[S.SatResult]]
 constructIncremental xs = S.runSMT $ do

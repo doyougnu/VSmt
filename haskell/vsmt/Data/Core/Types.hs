@@ -46,7 +46,7 @@ type PartialConfig = Dim -> Maybe Bool
 newtype Total a = Total a
 
 -- | an type to represent that an 'a' is plain
-newtype Plain a = Plain a
+newtype Plain a = Plain {unPlain :: a}
 
 --
 -- * Syntax
