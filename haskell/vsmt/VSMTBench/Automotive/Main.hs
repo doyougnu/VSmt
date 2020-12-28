@@ -99,11 +99,11 @@ main = do
       !bProp = (naiveEncode . autoToVSat) $ autoAndJoin bPs
 
   -- Convert the fmf's to actual configurations
-  [ppV1]   <- genConfigPool d0Conf
-  [ppV2]   <- genConfigPool d2Conf
-  [ppV3]   <- genConfigPool d3Conf
-  [ppV4]   <- genConfigPool d4Conf
-  [ppVAll] <- genConfigPool dAllConf
+  [ppV1]   <- validateTotal <$> genConfigPool d0Conf
+  [ppV2]   <- validateTotal <$> genConfigPool d2Conf
+  [ppV3]   <- validateTotal <$> genConfigPool d3Conf
+  [ppV4]   <- validateTotal <$> genConfigPool d4Conf
+  [ppVAll] <- validateTotal <$> genConfigPool dAllConf
 
   [justV1] <- genConfigPool justV1Conf
   [justV2] <- genConfigPool justV2Conf
@@ -121,18 +121,18 @@ main = do
   -- confs' <- mkCompRatioConfs ds pairs
   let --[v01Conf,v12Conf,v23Conf] = confs'
 
-  -- let bPropV1   = selectVariantTotal ppV1 bProp
-  --     bPropV2   = selectVariantTotal ppV2 bProp
-  --     bPropV3   = selectVariantTotal ppV3 bProp
-  --     bPropV4   = selectVariantTotal ppV4 bProp
-  --     bPropVAll = selectVariantTotal ppVAll bProp
+  let bPropV1   = selectVariantTotal ppV1 bProp
+      bPropV2   = selectVariantTotal ppV2 bProp
+      bPropV3   = selectVariantTotal ppV3 bProp
+      bPropV4   = selectVariantTotal ppV4 bProp
+      bPropVAll = selectVariantTotal ppVAll bProp
 
-      -- bPropJustV1 = selectVariant justV1 bProp
-      -- bPropJustV2 = selectVariant justV2 bProp
-      -- bPropJustV3 = selectVariant justV3 bProp
-      -- bPropJustV4 = selectVariant justV4 bProp
-      -- bPropJustV12 = selectVariant justV12 bProp
-      -- bPropJustV123 = selectVariant justV123 bProp
+      bPropJustV1 = selectVariant justV1 bProp
+      bPropJustV2 = selectVariant justV2 bProp
+      bPropJustV3 = selectVariant justV3 bProp
+      bPropJustV4 = selectVariant justV4 bProp
+      bPropJustV12 = selectVariant justV12 bProp
+      bPropJustV123 = selectVariant justV123 bProp
 
       benches :: Settings -> [Benchmark]
       benches vc = [
