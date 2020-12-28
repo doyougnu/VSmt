@@ -648,11 +648,11 @@ instance (Monad m, T.MonadSymbolic m) =>
 -- | A general caching mechanism using StableNames. There is a small chance of a
 -- collision ~32k per 2^24. I leave this completely unhandled as it is so rare I
 -- doubt it'll ever actually occur
-instance (Monad m, MonadIO m) => Cachable (SolverT m) IL (V,IL) where
+instance (Monad m, MonadIO m, MonadLogger m) => Cachable (SolverT m) IL (V,IL) where
   cached !il = do ch <- readCache accCache
                   sn <- liftIO $! il `seq` makeStableName il
                   case find sn ch of
-                    Just x  -> return x
+                    Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
                     Nothing -> do let !val = iAccumulate il
                                   updateCache accCache (add sn val)
                                   return val
