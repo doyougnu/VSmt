@@ -164,7 +164,10 @@ logThreadPass :: (MonadLogger m, Show b) => Int -> Text.Text -> b -> m b
 logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
-findVCore :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
+findVCore :: ( MonadLogger m
+             , I.SolverContext m
+             , Cachable m IL (V,IL)
+             ) => IL -> m VarCore
 findVCore = evaluate
 
 solveVerbose :: Proposition -> Maybe VariantContext -> Settings -> IO Result
@@ -175,8 +178,8 @@ solve = internalSolver runPreSolverNoLog runSolverNoLog
 
 -- TODO fix this horrendous type signature
 internalSolver ::
-  ( Constrainable m1 (ExRefType Var) IL'
-  , Constrainable m1 Var IL
+  ( Cachable m1 (ExRefType Var) IL'
+  , Cachable m1 Var IL
   , MonadLogger m1
   , MonadLogger m2
   , C.MonadQuery m2
@@ -256,7 +259,8 @@ type ThreadID      = Int
 -- and thus the query formula variables are actually disjoint from dimensions
 -- just as we would expect.
 vcWorker :: (MonadLogger f, C.MonadQuery f,
-             Constrainable f Dim (T.SBV Bool), I.SolverContext f, MonadIO f) =>
+             Cachable f Dim (T.SBV Bool)
+            , I.SolverContext f, MonadIO f) =>
   T.SMTConfig
   -> Maybe VariantContext
   -> State
@@ -276,7 +280,7 @@ vcWorker c (Just vc) s@State{..} slvr tid =
   vcHelper fromMain toMain s{stores=st} slvr tid
 
 vcHelper :: (C.ExtractIO m, MonadLogger f, C.MonadQuery f,
-             Constrainable f a1 (T.SBV Bool), I.SolverContext f, MonadIO f) =>
+             Cachable f a1 (T.SBV Bool), I.SolverContext f, MonadIO f) =>
   U.OutChan (a1, Bool, T.SBV Bool)
   -> U.InChan (Bool, T.SBV Bool)
   -> t
@@ -556,11 +560,11 @@ instance RunSolver Solver          where runSolver    = runSolverNoLog
 instance RunPreSolver PreSolverLog where runPreSolver = runPreSolverLog
 instance RunPreSolver PreSolver    where runPreSolver = runPreSolverNoLog
 
-class Show a => Constrainable m a b where cached :: a -> m b
+class Show a => Cachable m a b where cached :: a -> m b
 
 -- -- TODO fix this duplication with derivingVia
 instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
-  Constrainable (SolverT m) Var IL where
+  Cachable (SolverT m) Var IL where
   cached ref = do
     st <- reads bools
     case find ref st of
@@ -572,7 +576,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
         return (Ref newSym)
 
 instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
-  Constrainable (SolverT m) Dim T.SBool where
+  Cachable (SolverT m) Dim T.SBool where
   cached d = do
     st <- reads dimensions
     case find d st of
@@ -584,7 +588,7 @@ instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
         return newSym
 
 instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
-  Constrainable (SolverT m) (ExRefType Var) IL' where
+  Cachable (SolverT m) (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
     do st <- reads ints
        case find i st of
@@ -602,7 +606,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
                        return $! Ref' $ SD newSym
 
 instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
-  Constrainable (PreSolverT m) Var IL where
+  Cachable (PreSolverT m) Var IL where
   cached ref   = do st <- readWith bools
                     case find ref st of
                       Just x  -> return (Ref x)
@@ -612,7 +616,7 @@ instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
 
 
 instance (Monad m, T.MonadSymbolic m) =>
-  Constrainable (PreSolverT m) (ExRefType Var) IL' where
+  Cachable (PreSolverT m) (ExRefType Var) IL' where
   cached (ExRefTypeI i) =
     do st <- readWith ints
        case find i st of
@@ -630,7 +634,7 @@ instance (Monad m, T.MonadSymbolic m) =>
                        return $! Ref' $ SD newSym
 
 instance (Monad m, T.MonadSymbolic m) =>
-  Constrainable (PreSolverT m) Dim T.SBool where
+  Cachable (PreSolverT m) Dim T.SBool where
   cached d = do
     ds <- readWith dimensions
     case find d ds of
@@ -644,7 +648,7 @@ instance (Monad m, T.MonadSymbolic m) =>
 -- | A general caching mechanism using StableNames. There is a small chance of a
 -- collision ~32k per 2^24. I leave this completely unhandled as it is so rare I
 -- doubt it'll ever actually occur
-instance (Monad m, MonadIO m) => Constrainable (SolverT m) IL (V,IL) where
+instance (Monad m, MonadIO m) => Cachable (SolverT m) IL (V,IL) where
   cached !il = do ch <- readCache accCache
                   sn <- liftIO $! il `seq` makeStableName il
                   case find sn ch of
@@ -803,8 +807,8 @@ data IL' = Ref' !NRef
 -- Variational Core
 toIL ::
   ( MonadLogger   m
-  , Constrainable m (ExRefType Var) IL'
-  , Constrainable m Var IL
+  , Cachable m (ExRefType Var) IL'
+  , Cachable m Var IL
   ) => Prop' Var -> m (V, IL)
 toIL (LitB True)   = return $! (P, Ref T.sTrue)
 toIL (LitB False)  = return $! (P, Ref T.sFalse)
@@ -818,7 +822,7 @@ toIL (OpIB op l r) = do l'@(vl,_)  <- toIL' l
                         return $ (vl <@> vr, IBOp op l' r')
 toIL (ChcB d l r)  = return $ (V, Chc d l r)
 
-toIL' :: (Constrainable m (ExRefType Var) IL'
+toIL' :: (Cachable m (ExRefType Var) IL'
          , MonadLogger m) =>
          NExpr' Var -> m (V, IL')
 toIL' (LitI (I i))  = return . (P,) . Ref' . SI $ T.literal i
@@ -878,19 +882,23 @@ dispatchOp' NEQ = (T../=)
 dispatchOp' GT  = (T..> )
 dispatchOp' GTE = (T..>=)
 
--- | Accumulation: we purposefully are verbose to provide the optimizer better
--- opportunities. Accumulation seeks to combine as much as possible the plain
--- terms in the AST into symbolic references
+
+accumulate :: Cachable m IL (V, IL) => IL -> m (V, IL)
+accumulate = cached
+
+-- | Unmemoized internal Accumulation: we purposefully are verbose to provide
+-- the optimizer better opportunities. Accumulation seeks to combine as much as
+-- possible the plain terms in the AST into symbolic references
 iAccumulate :: IL -> (V, IL)
  -- computation rules
-iAccumulate Unit                        = (P,Unit)
+iAccumulate Unit    = (P,Unit)
 iAccumulate x@Ref{} = (P,x)
 iAccumulate x@Chc{} = (V,x)
   -- bools
 iAccumulate (BOp Not (_,Ref r))            = (P,) . Ref $! bnot r
-iAccumulate (BBOp op (_,Ref l) (_,Ref r))   = (P,) . Ref $! (dispatchOp op) l r
+iAccumulate (BBOp op (_,Ref l) (_,Ref r))  = (P,) . Ref $! (dispatchOp op) l r
   -- numerics
-iAccumulate (IBOp op (_,Ref' l) (_,Ref' r))  = (P,) . Ref $! (dispatchOp' op) l r
+iAccumulate (IBOp op (_,Ref' l) (_,Ref' r)) = (P,) . Ref $! (dispatchOp' op) l r
   -- choices
 iAccumulate x@(BBOp _ (_,Chc {}) (_,Chc {}))   = (V, x)
 iAccumulate x@(BBOp _ (_,Ref _) (_,Chc {}))    = (V, x)
@@ -971,7 +979,10 @@ isValue' _        = False
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
   -- computation rules
-evaluate :: (MonadLogger m, I.SolverContext m) => IL -> m VarCore
+evaluate :: ( MonadLogger m
+            , I.SolverContext m
+            , Cachable m IL (V,IL)
+            ) => IL -> m VarCore
 evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
@@ -981,8 +992,8 @@ evaluate (BBOp op (_,Ref l) (_,Ref r)) = toSolver $! (dispatchOp op) l r
   -- numerics
 evaluate (IBOp op  (_,Ref' l) (_,Ref' r)) = toSolver $! (dispatchOp' op) l r
   -- choices
-evaluate x@(BBOp _ (V,_) (V,_))            = return $! intoCore x
-evaluate x@(IBOp _ (V,_) (V,_))            = return $! intoCore x
+evaluate x@(BBOp _ (V,_) (V,_)) = return $! intoCore x
+evaluate x@(IBOp _ (V,_) (V,_)) = return $! intoCore x
   -- congruence cases
 evaluate (BBOp And (_,l) (_,Unit))      = evaluate l
 evaluate (BBOp And (_,Unit) (_,r))      = evaluate r
@@ -1001,8 +1012,8 @@ evaluate (IBOp op (_,l) (_,r))        =
     return $! intoCore res
 
   -- accumulation cases
-evaluate x@(BOp Not (P,_))  = let (_,x') = iAccumulate x in evaluate x'
-evaluate x@(BOp Not (V,_))  = let (_,x') = iAccumulate x in return $! intoCore x'
+evaluate x@(BOp Not (P,_))  = accumulate x >>= evaluate . snd
+evaluate x@(BOp Not (V,_))  = intoCore . snd <$> accumulate x
 evaluate (BBOp And (P,l) (P,r)) = log "[Eval P P] And case" >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
@@ -1017,18 +1028,18 @@ evaluate (BBOp And (P,l) (V,r)) = log "[Eval P V] And case" >>
      let !res = BBOp And (P,l') (V,r)
      evaluate res
 evaluate (BBOp op (P,l) (P,r)) = log "[Eval P P] General Case" >>
-  do let (_,l') = iAccumulate l
-         (_,r') = iAccumulate r
+  do (_,l') <- accumulate l
+     (_,r') <- accumulate r
      let res = BBOp op (P,l') (P,r')
      evaluate res
 evaluate (BBOp op (V,l) (P,r)) = log "[Eval V P] General Case" >>
-  let (_,r') = iAccumulate r
-      res = BBOp op (V,l) (P,r') in
-    return $! intoCore res
+  do (_,r') <- accumulate r
+     let res = BBOp op (V,l) (P,r')
+     return $! intoCore res
 evaluate (BBOp op (P,l) (V,r)) = log "[Eval P V] General Case" >>
-  let (_,l') = iAccumulate l
-      res = BBOp op (P,l') (V,r) in
-    return $! intoCore res
+  do (_,l') <- accumulate l
+     let res = BBOp op (P,l') (V,r)
+     return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
 -- TODO transform to a GADT
@@ -1268,7 +1279,7 @@ choose loc =
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool' :: ( Monad m
-                   , Constrainable m Dim T.SBool
+                   , Cachable m Dim T.SBool
                    ) => VariantContext -> m T.SBool
 contextToSBool' (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
