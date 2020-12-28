@@ -55,9 +55,5 @@ evalPlain (OpBB op l r)  = do l' <- evalPlain l
 evalPlain (ChcB {}) = error "no choices here!"
 evalPlain (OpIB {}) = error "Type Chef throws smt problems?"
 
-
-vCoreMetrics :: a
-vCoreMetrics = error "vcore metrics"
-
 renameDims :: (a -> b) -> Prop' a -> Prop' b
 renameDims = fmap

@@ -57,7 +57,7 @@ import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 
 import           Data.Text.IO                          (putStrLn)
-import           System.Mem.StableName                 (StableName, makeStableName)
+import           System.Mem.StableName                 (StableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
@@ -661,13 +661,14 @@ instance (Monad m, T.MonadSymbolic m) =>
 -- collision ~32k per 2^24. I leave this completely unhandled as it is so rare I
 -- doubt it'll ever actually occur
 instance (Monad m, MonadIO m, MonadLogger m) => Cachable (SolverT m) IL (V,IL) where
-  cached !il = do ch <- readCache accCache
-                  sn <- liftIO $! il `seq` makeStableName il
-                  case find sn ch of
-                    Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
-                    Nothing -> do let !val = iAccumulate il
-                                  updateCache accCache (add sn val)
-                                  return val
+  cached il = return $ iAccumulate il
+  -- cached !il = do ch <- readCache accCache
+  --                 sn <- liftIO $! il `seq` makeStableName il
+  --                 case find sn ch of
+  --                   Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
+  --                   Nothing -> do let !val = iAccumulate il
+  --                                 updateCache accCache (add sn val)
+  --                                 return val
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool

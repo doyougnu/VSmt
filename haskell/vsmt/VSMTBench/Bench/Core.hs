@@ -13,7 +13,8 @@ import           Control.DeepSeq (NFData)
 
 import           Core.Core
 import           Core.Types
-import           Utils
+import           Utils (genConfigPool)
+import           Solve (vCoreMetrics)
 
 
 run :: NFData a => String -> (t -> IO a) -> t -> Benchmark
@@ -33,9 +34,9 @@ mkDescription alg confDesc [prop] = desc
     !desc' = [ "Chc"        , show nChc
              , "numPlain"   , show nPln
              , "Compression", show ratio
-             -- , "VCore_Total", show vCoreTotal
-             -- , "VCorePlain" , show vCorePlain
-             -- , "VCoreVar"   , show vCoreVar
+             , "VCore_Total", show vCoreTotal
+             , "VCorePlain" , show vCorePlain
+             , "VCoreVar"   , show vCoreVar
              , "Variants"   , show variants
              ]
     !desc = mconcat $ intersperse "/" $ pure alg ++ pure confDesc ++ desc'
@@ -43,7 +44,8 @@ mkDescription alg confDesc [prop] = desc
     !nChc = choiceCount prop
     ratio :: Float
     !ratio = compressionRatio prop
-    -- !(vCoreTotal, vCorePlain, vCoreVar) = unsafePerformIO $ vCoreMetrics prop
+    vCoreTotal, vCorePlain, vCoreVar :: Int
+    !(vCoreTotal, vCorePlain, vCoreVar) = unsafePerformIO $ vCoreMetrics prop
     !variants = 2 ^ (Set.size $ dimensions prop)
 -- copying code, the greatest of all possible sins. This just isn't important
 -- enough to handle properly
@@ -52,9 +54,9 @@ mkDescription alg confDesc props = desc
     !desc' = [ "Chc"        , show nChc
              , "numPlain"   , show nPln
              , "Compression", show ratio
-             -- , "VCore_Total", show vCoreTotal
-             -- , "VCorePlain" , show vCorePlain
-             -- , "VCoreVar"   , show vCoreVar
+             , "VCore_Total", show vCoreTotalSum
+             , "VCorePlain" , show vCorePlainSum
+             , "VCoreVar"   , show vCoreVarSum
              , "Variants"   , show variants
              ]
     !desc = mconcat $ intersperse "/" $ pure alg ++ pure confDesc ++ desc'
@@ -62,10 +64,10 @@ mkDescription alg confDesc props = desc
     !nChc = average $ choiceCount <$> props
     ratio :: Float
     !ratio = average $ compressionRatio <$> props
-    -- vCoreTotalSum, vCorePlainSum, vCoreVarSum :: Int
-    -- !(vCoreTotalSum, vCorePlainSum, vCoreVarSum) =
-    --   (foldr (\(x,y,z) (xAcc, yAcc, zAcc) -> (x + xAcc, y + yAcc, z + zAcc)) (0,0,0)
-      -- $ (unsafePerformIO . vCoreMetrics) <$> props)
+    vCoreTotalSum, vCorePlainSum, vCoreVarSum :: Int
+    !(vCoreTotalSum, vCorePlainSum, vCoreVarSum) =
+      (foldr (\(x,y,z) (xAcc, yAcc, zAcc) -> (x + xAcc, y + yAcc, z + zAcc)) (0,0,0)
+      $ (unsafePerformIO . vCoreMetrics) <$> props)
     !variants = average $ (\p -> 2 ^ (Set.size $ dimensions p)) <$> props
     !l = genericLength props
     myDiv = (/) `on` fromIntegral
