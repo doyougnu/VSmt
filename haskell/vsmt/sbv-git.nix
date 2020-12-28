@@ -8,6 +8,7 @@
 mkDerivation {
   pname = "sbv";
   version = "8.9.5";
+  doCheck = false;
   src = fetchgit {
     url = "https://github.com/doyougnu/sbv.git";
     sha256 = "0n5sx2b0dk4wnrkm6qgr4sy45yz21bnv86j2wc24pfpm23n0i58l";
