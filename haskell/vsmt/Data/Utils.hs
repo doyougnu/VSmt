@@ -25,14 +25,15 @@ import           Solve
 
 type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
 
-genConfigPool :: Maybe VariantContext -> IO [M.Map Dim Bool]
+genConfigPool :: Maybe VariantContext -> IO [PartialConfig]
 genConfigPool Nothing  = return mempty
 genConfigPool (Just p) =
   do
     let p' = getVarFormula p
     S.AllSatResult _ _ _ _ allRes <- S.allSat $ eval $ Plain p'
     let resMaps = S.getModelDictionary <$> allRes
-    return $ M.foldMapWithKey (\k a -> M.singleton (Dim $ fromString k) (cvToBool a)) <$> resMaps
+        maps = M.foldMapWithKey (\k a -> M.singleton (Dim $ fromString k) (cvToBool a)) <$> resMaps
+    return (fmap (\m k -> M.lookup k m) maps)
 
 eval :: (Show a, Ord a) => Plain (Prop' a) -> S.Symbolic S.SBool
 eval = flip St.evalStateT mempty . evalPlain . unPlain

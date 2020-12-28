@@ -97,7 +97,7 @@ main = do
 
       bProp :: Proposition
       -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
-      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin (take 300 bPs)
+      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin bPs
 
   -- Convert the fmf's to actual configurations
   -- [ppV1]   <- genConfigPool d0Conf
