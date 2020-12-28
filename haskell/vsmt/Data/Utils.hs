@@ -25,9 +25,8 @@ import           Solve
 
 type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
 
-genConfigPool :: Maybe VariantContext -> IO [PartialConfig]
-genConfigPool Nothing  = return mempty
-genConfigPool (Just p) =
+genConfigPool :: VariantContext -> IO [PartialConfig]
+genConfigPool p =
   do
     let p' = getVarFormula p
     S.AllSatResult _ _ _ _ allRes <- S.allSat $ eval $ Plain p'

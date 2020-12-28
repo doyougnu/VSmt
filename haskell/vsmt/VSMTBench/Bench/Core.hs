@@ -82,7 +82,7 @@ mkDescription alg confDesc props = desc
 mkBench :: NFData a =>
      String
      -> String
-     -> Proposition
+     -> VariantContext
      -> (Proposition -> IO a)
      -> Proposition
      -> Benchmark
@@ -134,12 +134,12 @@ mkPairs (x:ys@(y:xs)) = [x,y] : mkPairs ys
 -- to restrict it to 2 solver calls. Hence if you have 4 features, then we want
 -- to test 0-1 1-2 2-3 3-4. The first list should be a list of all dimensions or
 -- features, while the second should be a list of pairs
-mkCompRatioPairs :: [Proposition] -> [[Proposition]] -> [Proposition]
-mkCompRatioPairs ds = fmap mkPairConf  . filter (not . (<2) . length)
-  where mkPairConf xs@(x:y:_) = (x &&& (negateRest x)) ||| (y &&& (negateRest y))
-          where negateRest a = conjoin $ (bnot <$> (ds \\ pure a))
+-- mkCompRatioPairs :: [Proposition] -> [[Proposition]] -> [Proposition]
+-- mkCompRatioPairs ds = fmap mkPairConf  . filter (not . (<2) . length)
+--   where mkPairConf xs@(x:y:_) = (x &&& (negateRest x)) ||| (y &&& (negateRest y))
+--           where negateRest a = conjoin $ (bnot <$> (ds \\ pure a))
 
-mkCompRatioConfs :: [Proposition] -> [[Proposition]] -> IO [Core.Types.Config]
-mkCompRatioConfs ds pairs = mapM (fmap head . genConfigPool . negated) $ filter ((==2) . length) pairs
-  where
-    negated pair = conjoin $ (bnot <$> (ds \\ pair))
+-- mkCompRatioConfs :: [Proposition] -> [[Proposition]] -> IO [Core.Types.PartialConfig]
+-- mkCompRatioConfs ds pairs = mapM (fmap head . genConfigPool . negated) $ filter ((==2) . length) pairs
+--   where
+--     negated pair = conjoin $ (bnot <$> (ds \\ pair))

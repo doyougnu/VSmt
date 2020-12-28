@@ -40,8 +40,8 @@ chAutoFile = "VSMTBench/Automotive/vsat_small_chunk.json"
 
 sliceAndNegate n xs = fromList (&&&) $ bnot <$> drop n xs
 
-ds :: [Proposition]
-ds = bRef <$> ["D_0","D_1","D_2","D_3"]
+ds :: [VariantContext]
+ds = toVariantContext . bRef . toDim <$> ["D_0","D_1","D_2","D_3"]
 -- D_0 /\    D_2   /\     D_4   /\  D_5
 -- <0 /\ <=0 /\ <1 /\ <=1 /\ <2 /\ <= 2
 
@@ -62,6 +62,7 @@ d4Conf = ((bnot d0) &&& (bnot d2) &&& (bnot d4) &&& d5) -- <0 /\ <1 /\
 dAllConf = (d0 &&& d2 &&& d4 &&& d5) -- <0 /\ <1 /\
 
 -- | Configs that remove choices and leave that particular choice
+justV1Conf :: VariantContext
 justV1Conf = (bnot d2) &&& (bnot d4) &&& (bnot d5)
 justV2Conf = (bnot d0) &&& (bnot d4) &&& (bnot d5)
 justV3Conf = (bnot d0) &&& (bnot d2) &&& (bnot d5)
@@ -69,8 +70,6 @@ justV4Conf = (bnot d0) &&& (bnot d2) &&& (bnot d4)
 
 justV12Conf = (bnot d4) &&& (bnot d5)
 justV123Conf = (bnot d5)
-
-negConf = conjoin $ bnot <$> ds
 
 -- | Compression Ratio setup
 -- [pD01Conf, pD12Conf, pD23Conf] = mkCompRatioPairs ds pairs
@@ -100,19 +99,19 @@ main = do
       !bProp = (naiveEncode . autoToVSat) $ autoAndJoin bPs
 
   -- Convert the fmf's to actual configurations
-  -- [ppV1]   <- genConfigPool d0Conf
-  -- [ppV2]   <- genConfigPool d2Conf
-  -- [ppV3]   <- genConfigPool d3Conf
-  -- [ppV4]   <- genConfigPool d4Conf
-  -- [ppVAll] <- genConfigPool dAllConf
+  [ppV1]   <- genConfigPool d0Conf
+  [ppV2]   <- genConfigPool d2Conf
+  [ppV3]   <- genConfigPool d3Conf
+  [ppV4]   <- genConfigPool d4Conf
+  [ppVAll] <- genConfigPool dAllConf
 
-  -- [justV1] <- genConfigPool justV1Conf
-  -- [justV2] <- genConfigPool justV2Conf
-  -- [justV3] <- genConfigPool justV3Conf
-  -- [justV4] <- genConfigPool justV4Conf
+  [justV1] <- genConfigPool justV1Conf
+  [justV2] <- genConfigPool justV2Conf
+  [justV3] <- genConfigPool justV3Conf
+  [justV4] <- genConfigPool justV4Conf
 
-  -- [justV12] <- genConfigPool justV12Conf
-  -- [justV123] <- genConfigPool justV123Conf
+  [justV12] <- genConfigPool justV12Conf
+  [justV123] <- genConfigPool justV123Conf
 
   -- | Compression ratio pairs
   -- [justV12]  <- genConfigPool pD01Conf
@@ -215,8 +214,8 @@ main = do
   let t = bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  !res <- solveVerbose t Nothing defSettings
-  putStrLn $ show res
-  -- putStrLn $ show . length $ take 10 $ show res
+  -- !res <- solveVerbose t Nothing defSettings
   -- putStrLn $ show res
+  -- putStrLn $ show . length $ take 10 $ show res
+  putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing
