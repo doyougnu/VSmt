@@ -43,7 +43,7 @@ mkDescription alg confDesc [prop] = desc
     !nChc = choiceCount prop
     ratio :: Float
     !ratio = compressionRatio prop
-    !(vCoreTotal, vCorePlain, vCoreVar) = unsafePerformIO $ vCoreMetrics prop
+    -- !(vCoreTotal, vCorePlain, vCoreVar) = unsafePerformIO $ vCoreMetrics prop
     !variants = 2 ^ (Set.size $ dimensions prop)
 -- copying code, the greatest of all possible sins. This just isn't important
 -- enough to handle properly
@@ -62,10 +62,10 @@ mkDescription alg confDesc props = desc
     !nChc = average $ choiceCount <$> props
     ratio :: Float
     !ratio = average $ compressionRatio <$> props
-    vCoreTotalSum, vCorePlainSum, vCoreVarSum :: Int
-    !(vCoreTotalSum, vCorePlainSum, vCoreVarSum) =
-      (foldr (\(x,y,z) (xAcc, yAcc, zAcc) -> (x + xAcc, y + yAcc, z + zAcc)) (0,0,0)
-      $ (unsafePerformIO . vCoreMetrics) <$> props)
+    -- vCoreTotalSum, vCorePlainSum, vCoreVarSum :: Int
+    -- !(vCoreTotalSum, vCorePlainSum, vCoreVarSum) =
+    --   (foldr (\(x,y,z) (xAcc, yAcc, zAcc) -> (x + xAcc, y + yAcc, z + zAcc)) (0,0,0)
+      -- $ (unsafePerformIO . vCoreMetrics) <$> props)
     !variants = average $ (\p -> 2 ^ (Set.size $ dimensions p)) <$> props
     !l = genericLength props
     myDiv = (/) `on` fromIntegral

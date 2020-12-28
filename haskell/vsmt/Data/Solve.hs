@@ -232,17 +232,29 @@ internalSolver preSlvr slvr conf Settings{..} i = do
 
   return results
 
--- solveForCoreVerbose :: Proposition -> Maybe VariantContext -> IO (VarCore, State s)
--- solveForCoreVerbose  i (fromMaybe true -> conf) =
---     T.runSMTWith T.z3{T.verbose=True} $
---       do (_,iState) <- runPreSolverLog mempty $ contextToSBool' conf
---          (il, st) <- runPreSolverLog iState $ toIL i
---          C.query $ runSolverLog st $
---            do core <- findVCore il
---               logWith "Proposition: "  i
---               logWith "Core: "         core
---               logWith "Is Core Unit: " (isUnit core)
---               return core
+solveForCore :: Proposition -> IO (VarCore, State)
+solveForCore i = do
+  (toMain, fromVC)   <- U.newChan 1
+  (toVC,   fromMain) <- U.newChan 1
+  initialStore       <- newStore
+  initialCache       <- newCaches
+
+  let solverConfig    = getConfig . solver $ defSettings
+      il              = toIL i
+
+      vcChans   = VCChannels     $ (fromMain, toMain)
+      mainChans = MainChannels   $ (fromVC, toVC)
+      chans     = Channels{ vcChans=vcChans, mainChans=mainChans, threadId=0}
+      startState  = State{stores=initialStore, channels=chans, caches=initialCache}
+      seasoning = runPreSolverNoLog initialStore (snd <$> il)
+
+      populateChans = T.runSMTWith solverConfig $
+        do (il', st) <- seasoning
+           C.query $
+             runSolverNoLog startState{stores=st} $
+             findVCore il'
+
+  populateChans
 
 ------------------------------ Async Helpers -----------------------------------
 -- | season the solver, that is prepare it for async workloads
@@ -784,6 +796,52 @@ data IL = Unit
     | IBOp NN_B (V, IL') (V, IL')
     | Chc Dim Proposition Proposition
     deriving (Generic, Show, Eq)
+
+vCoreSize :: IL -> Int
+vCoreSize (BBOp _ (_,l) (_,r)) = vCoreSize l + vCoreSize r
+vCoreSize (BOp _ (_,e))    = vCoreSize e
+vCoreSize (IBOp _ (_,l) (_,r)) = vCoreSize' l + vCoreSize' r
+vCoreSize _            = 1
+
+vCoreSize' :: IL' -> Int
+vCoreSize' (IOp _ (_,e))    = vCoreSize' e
+vCoreSize' (IIOp _ (_,l) (_,r)) = vCoreSize' l + vCoreSize' r
+vCoreSize' _            = 1
+
+vCoreNumPlain :: IL -> Int
+vCoreNumPlain Chc {}       = 0
+vCoreNumPlain (BOp _ (_,e))    = vCoreNumPlain e
+vCoreNumPlain (BBOp _ (_,l) (_,r)) = vCoreNumPlain  l + vCoreNumPlain r
+vCoreNumPlain (IBOp _ (_,l) (_,r)) = vCoreNumPlain' l + vCoreNumPlain' r
+vCoreNumPlain _            = 1
+
+vCoreNumPlain' :: IL' -> Int
+vCoreNumPlain' Chc' {}      = 0
+vCoreNumPlain' (IOp _ (_,e))    = vCoreNumPlain' e
+vCoreNumPlain' (IIOp _ (_,l) (_,r)) = vCoreNumPlain' l + vCoreNumPlain' r
+vCoreNumPlain' _            = 1
+
+vCoreNumVar :: IL -> Int
+vCoreNumVar Chc {}       = 0
+vCoreNumVar (BOp _ (_,e))    = vCoreNumVar e
+vCoreNumVar (BBOp _ (_,l) (_,r)) = vCoreNumVar  l + vCoreNumVar r
+vCoreNumVar (IBOp _ (_,l) (_,r)) = vCoreNumVar' l + vCoreNumVar' r
+vCoreNumVar _            = 1
+
+vCoreNumVar' :: IL' -> Int
+vCoreNumVar' Chc' {}      = 0
+vCoreNumVar' (IOp _ (_,e))    = vCoreNumVar' e
+vCoreNumVar' (IIOp _ (_,l) (_,r)) = vCoreNumVar' l + vCoreNumVar' r
+vCoreNumVar'  _           = 1
+
+vCoreMetrics :: Prop' Var -> IO (Int,Int,Int)
+vCoreMetrics i = do (core,_) <- solveForCore i
+                    let il = getCore core
+                        sz  = vCoreSize il
+                        nPl = vCoreNumPlain il
+                        nVr = vCoreNumVar il
+                    return (sz,nPl,nVr)
+
 
 -- | tags which describes where in the tree there is variation
 data V = P | V deriving (Generic, Show, Eq)
