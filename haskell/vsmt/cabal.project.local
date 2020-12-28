@@ -1,4 +1,4 @@
-packages: lib/sbv
+-- packages: lib/sbv
 
 profiling: True
 benchmarks: True

@@ -3,7 +3,7 @@
 , gauge, Glob, hlint, mtl, pretty, process, QuickCheck, random
 , silently, stdenv, syb, tasty, tasty-golden, tasty-hunit
 , tasty-quickcheck, template-haskell, time, transformers, z3
-, abc-verifier uniplate
+, abc-verifier, uniplate, unordered-containers
 }:
 mkDerivation {
   pname = "sbv";
@@ -14,7 +14,7 @@ mkDerivation {
   libraryHaskellDepends = [
     array async base containers crackNum deepseq directory filepath mtl
     pretty process QuickCheck random syb template-haskell time
-    transformers uniplate
+    transformers uniplate unordered-containers
   ];
   testHaskellDepends = [
     base bytestring containers crackNum directory doctest filepath Glob
