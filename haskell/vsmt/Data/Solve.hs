@@ -31,7 +31,8 @@
 module Solve where
 
 import qualified Control.Concurrent.Async              as A (async,cancel,mapConcurrently_)
-import qualified Control.Concurrent.STM                as STM (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
+-- import qualified Control.Concurrent.IOR                as IOR (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
+import qualified Data.IORef                as IOR (atomicModifyIORef', readIORef, newIORef,IORef)
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import           Control.Monad                         (forever, void, when)
 import           Control.Monad.Except                  (MonadError)
@@ -401,18 +402,18 @@ type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
 data Caches = Caches
-              { accCache :: (STM.TVar ACache)
+              { accCache :: (IOR.IORef ACache)
               }
 
 data Stores = Stores
-    { vConfig    :: (STM.TVar (Maybe VariantContext)) -- the formula representation of the config
-    , sConfig    :: (STM.TVar SVariantContext)        -- symbolic representation of a config
-    , config     :: (STM.TVar Context)                -- a map or set representation of the config
-    , ints       :: (STM.TVar Ints)
-    , doubles    :: (STM.TVar Doubles)
-    , bools      :: (STM.TVar Bools)
-    , dimensions :: (STM.TVar Dimensions)
-    , results    :: (STM.TVar Result)
+    { vConfig    :: (IOR.IORef (Maybe VariantContext)) -- the formula representation of the config
+    , sConfig    :: (IOR.IORef SVariantContext)        -- symbolic representation of a config
+    , config     :: (IOR.IORef Context)                -- a map or set representation of the config
+    , ints       :: (IOR.IORef Ints)
+    , doubles    :: (IOR.IORef Doubles)
+    , bools      :: (IOR.IORef Bools)
+    , dimensions :: (IOR.IORef Dimensions)
+    , results    :: (IOR.IORef Result)
     }
 
 data FrozenStores = FrozenStores
@@ -431,40 +432,40 @@ data Channels = Channels { vcChans   :: VCChannels
                          , threadId  :: !ThreadID
                          }
 newCaches :: IO Caches
-newCaches = do accCache <- STM.newTVarIO mempty
+newCaches = do accCache <- IOR.newIORef mempty
                return Caches{..}
 
 newStore :: IO Stores
-newStore = do vConfig    <- STM.newTVarIO mempty
-              sConfig    <- STM.newTVarIO mempty
-              config     <- STM.newTVarIO mempty
-              ints       <- STM.newTVarIO mempty
-              doubles    <- STM.newTVarIO mempty
-              bools      <- STM.newTVarIO mempty
-              results    <- STM.newTVarIO mempty
-              dimensions <- STM.newTVarIO mempty
+newStore = do vConfig    <- IOR.newIORef mempty
+              sConfig    <- IOR.newIORef mempty
+              config     <- IOR.newIORef mempty
+              ints       <- IOR.newIORef mempty
+              doubles    <- IOR.newIORef mempty
+              bools      <- IOR.newIORef mempty
+              results    <- IOR.newIORef mempty
+              dimensions <- IOR.newIORef mempty
               return Stores{..}
 
-update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
+update :: (R.MonadReader State io, MonadIO io) => (Stores -> IOR.IORef a) -> (a -> a) -> io ()
 update field = updateWith (field . stores)
 
-reads :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> io a
+reads :: (R.MonadReader State io, MonadIO io) => (Stores -> IOR.IORef a) -> io a
 reads f = readWith (f . stores)
 
-readCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> io a
+readCache :: (R.MonadReader State io, MonadIO io) => (Caches -> IOR.IORef a) -> io a
 readCache f = readWith (f . caches)
 
-updateCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> (a -> a) -> io ()
+updateCache :: (R.MonadReader State io, MonadIO io) => (Caches -> IOR.IORef a) -> (a -> a) -> io ()
 updateCache field = updateWith (field . caches)
 
-updateWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
-updateWith field f = R.asks field >>= liftIO . STM.atomically . flip STM.modifyTVar' f
+updateWith :: (R.MonadReader s io, MonadIO io) => (s -> IOR.IORef a) -> (a -> a) -> io ()
+updateWith field f = R.asks field >>= liftIO . flip IOR.atomicModifyIORef' (\a -> (f a, ()))
 
-readWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> io a
-readWith f = R.asks f  >>= liftIO . STM.readTVarIO
+readWith :: (R.MonadReader s io, MonadIO io) => (s -> IOR.IORef a) -> io a
+readWith f = R.asks f  >>= liftIO . IOR.readIORef
 
-read :: MonadIO io => (s -> STM.TVar a) -> s -> io a
-read f = liftIO . STM.readTVarIO . f
+read :: MonadIO io => (s -> IOR.IORef a) -> s -> io a
+read f = liftIO . IOR.readIORef . f
 
 freeze :: (R.MonadReader State io, MonadIO io) => io FrozenStores
 freeze = do st       <- R.asks stores
