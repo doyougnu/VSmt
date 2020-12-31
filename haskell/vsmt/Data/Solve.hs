@@ -31,7 +31,7 @@
 module Solve where
 
 import qualified Control.Concurrent.Async              as A (async,cancel,mapConcurrently_)
-import qualified Control.Concurrent.STM                as STM (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
+-- import qualified Control.Concurrent.STM                as STM (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
 -- import qualified Data.TVar                as STM (atomicModifyIORef', readIORef, newIORef,TVar)
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import           Control.Monad                         (forever, void, when)
@@ -42,11 +42,11 @@ import           Control.Monad.Logger                  (LoggingT,
                                                         NoLoggingT, logDebug,
                                                         runNoLoggingT,
                                                         runStdoutLoggingT)
-import           Control.Monad.Reader                  as R (MonadReader,
-                                                             ReaderT (..),
-                                                             asks, mapReaderT,
-                                                             local,
-                                                             runReaderT)
+-- import           Control.Monad.Reader                  as S (MonadState ,
+--                                                              ReaderT (..),
+--                                                              gets, mapReaderT,
+--                                                              local--                                                              runStateT)
+import           Control.Monad.State.Strict            as S (MonadState, StateT, gets,modify',runStateT)
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
@@ -147,16 +147,16 @@ logInIOConsumer = logInThreadIO "Consumer"
 logInIOVC :: Int -> Text.Text -> IO ()
 logInIOVC = logInThreadIO "VCWorker"
 
-logInProducer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
-logInProducer msg = R.asks (threadId . channels) >>= flip logInProducer' msg
+logInProducer :: (S.MonadState  State m, MonadLogger m) => Text.Text -> m ()
+logInProducer msg = S.gets (threadId . channels) >>= flip logInProducer' msg
 
-logInProducerWith :: (R.MonadReader State m, MonadLogger m, Show a) =>
+logInProducerWith :: (S.MonadState  State m, MonadLogger m, Show a) =>
   Text.Text -> a -> m ()
-logInProducerWith msg value = do tid <- R.asks (threadId . channels)
+logInProducerWith msg value = do tid <- S.gets (threadId . channels)
                                  logInThreadWith "Producer" tid msg value
 
-logInConsumer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
-logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
+logInConsumer :: (S.MonadState  State m, MonadLogger m) => Text.Text -> m ()
+logInConsumer msg = S.gets (threadId . channels) >>= flip logInConsumer' msg
 
 logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
 logThenPass str a = logWith str a >> return a
@@ -227,7 +227,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
            C.query $
              slvr startState{stores=st} $
              do void $ findVCore il' >>= removeChoices
-                readWith (unResult . results)
+                readWith results
 
   -- kick off
   !aWorkers  <- A.async runVCWorkers
@@ -388,10 +388,57 @@ instance Eq a => IxStorable (StableName a) where
   find   = Map.lookup
   adjust = Map.adjust
 
+-- | That which contains that has that
+class Has that where
+  type Contains that
+  type Contains that = Stores
+  extract :: Contains that -> that
+  wrap    :: that -> Contains that -> Contains that
+
+  -- this `by` that
+  by :: Contains that -> (that -> that) -> Contains that
+  by this f = flip wrap this . f . extract $ this
+
+-- avoiding lens and generic-deriving dependencies
+instance Has Ints    where extract   = ints
+                           wrap    i w = w{ints = i}
+
+instance Has Doubles where extract   = doubles
+                           wrap    d w = w{doubles = d}
+
+instance Has Bools   where extract   = bools
+                           wrap    b w = w{bools = b}
+
+instance Has Dimensions where extract   = dimensions
+                              wrap    d w = w{dimensions=d}
+
+instance Has Context where extract     = config
+                           wrap c w    = w{config=c}
+
+instance Has (Maybe VariantContext) where extract     = vConfig
+                                          wrap vc w   = w{vConfig=vc}
+
+instance Has SVariantContext where extract  = sConfig
+                                   wrap s w = w{sConfig=s}
+
+instance Has Result          where
+  type Contains Result = State
+  extract   = results
+  wrap    i w = w{results= i}
+
+instance Has Stores where
+  type Contains Stores = State
+  extract   = stores
+  wrap    i w = w{stores = i}
+
+instance Has Caches where
+  type Contains Caches = State
+  extract = caches
+  wrap c w = w{caches=c}
+
 type SVariantContext = T.SBool
 instance Semigroup SVariantContext where (<>) = (&&&)
 instance Monoid    SVariantContext where mempty = true
-
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions. We make a trade off of memory
@@ -403,29 +450,36 @@ instance Monoid    SVariantContext where mempty = true
 -- constant time _for every_ choice, hence we want to make that constant factor
 -- as small as possible
 data State = State
-  { stores   :: Stores
-  , channels :: Channels
-  , caches   :: Caches
-  , results  :: Results
+  { stores   :: !Stores
+  , channels :: !Channels
+  , caches   :: !Caches
+  , results  :: !Result
   }
+
+onStores :: (Stores -> Stores) -> State -> State
+onStores f State{..} = State{stores=f stores,..}
+
+onCaches :: (Caches -> Caches) -> State -> State
+onCaches f State{..} = State{caches=f caches,..}
+
+onResults :: (Result -> Result) -> State -> State
+onResults f State{..} = State{results=f results,..}
 
 type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
-newtype Results = Results { unResult :: (STM.TVar Result) }
-
 data Caches = Caches
-              { accCache :: (STM.TVar ACache)
+              { accCache :: !ACache
               }
 
 data Stores = Stores
-    { vConfig    :: (STM.TVar (Maybe VariantContext)) -- the formula representation of the config
-    , sConfig    :: (STM.TVar SVariantContext)        -- symbolic representation of a config
-    , config     :: (STM.TVar Context)                -- a map or set representation of the config
-    , ints       :: (STM.TVar Ints)
-    , doubles    :: (STM.TVar Doubles)
-    , bools      :: (STM.TVar Bools)
-    , dimensions :: (STM.TVar Dimensions)
+    { vConfig    :: !(Maybe VariantContext) -- the formula representation of the config
+    , sConfig    :: !SVariantContext        -- symbolic representation of a config
+    , config     :: !Context                -- a map or set representation of the config
+    , ints       :: !Ints
+    , doubles    :: !Doubles
+    , bools      :: !Bools
+    , dimensions :: !Dimensions
     }
 
 data FrozenStores = FrozenStores
@@ -443,46 +497,47 @@ data Channels = Channels { vcChans   :: VCChannels
                          , threadId  :: !ThreadID
                          }
 newCaches :: IO Caches
-newCaches = do accCache <- STM.newTVarIO mempty
-               return Caches{..}
+newCaches = return $ Caches {accCache = mempty}
 
-newResults :: IO Results
-newResults = Results <$> STM.newTVarIO mempty
+newResults :: IO Result
+newResults = return $ Result mempty
 
 newStore :: IO Stores
-newStore = do vConfig    <- STM.newTVarIO mempty
-              sConfig    <- STM.newTVarIO mempty
-              config     <- STM.newTVarIO mempty
-              ints       <- STM.newTVarIO mempty
-              doubles    <- STM.newTVarIO mempty
-              bools      <- STM.newTVarIO mempty
-              dimensions <- STM.newTVarIO mempty
+newStore = do vConfig    <- mempty
+              sConfig    <- mempty
+              config     <- mempty
+              ints       <- mempty
+              doubles    <- mempty
+              bools      <- mempty
+              dimensions <- mempty
               return Stores{..}
 
-update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
-update field = updateWith (field . stores)
+update :: Monad m => (Stores -> Stores) -> SolverT m ()
+update = S.modify' . onStores
 
-reads :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> io a
+updateCache :: Monad m => (Caches -> Caches) -> SolverT m ()
+updateCache = S.modify' . onCaches
+
+updateResults :: Monad m => (Result -> Result) -> SolverT m ()
+updateResults = S.modify' . onResults
+
+update' :: (MonadState (Contains that) m, Has that) => (that -> that) -> m ()
+update' f = S.modify' (`by` f)
+
+reads :: (S.MonadState  State io, MonadIO io) => (Stores -> a) -> io a
 reads f = readWith (f . stores)
 
-readCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> io a
+readCache :: (S.MonadState  State io, MonadIO io) => (Caches -> a) -> io a
 readCache f = readWith (f . caches)
 
-updateCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> (a -> a) -> io ()
-updateCache field = updateWith (field . caches)
+readWith :: (S.MonadState  s io, MonadIO io) => (s -> a) -> io a
+readWith f = S.gets f
 
-updateWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
-updateWith field f = R.asks field >>=
-                     liftIO . STM.atomically . flip STM.modifyTVar' f
+read :: MonadIO io => (s -> a) -> s -> io a
+read f = return . f
 
-readWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> io a
-readWith f = R.asks f  >>= liftIO . STM.readTVarIO
-
-read :: MonadIO io => (s -> STM.TVar a) -> s -> io a
-read f = liftIO . STM.readTVarIO . f
-
-freeze :: (R.MonadReader State io, MonadIO io) => io FrozenStores
-freeze = do st       <- R.asks stores
+freeze :: (S.MonadState  State io, MonadIO io) => io FrozenStores
+freeze = do st       <- S.gets stores
             fvConfig <- read vConfig st
             fsConfig <- read sConfig st
             fconfig  <- read config st
@@ -496,15 +551,15 @@ freeze = do st       <- R.asks stores
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
-newtype SolverT m a = SolverT { runSolverT :: R.ReaderT State m a }
+newtype SolverT m a = SolverT { runSolverT :: S.StateT State m a }
   deriving ( Functor,Applicative,Monad,MonadIO
-           , MonadError e, MonadLogger, R.MonadReader State
+           , MonadError e, MonadLogger, S.MonadState State
            , T.MonadSymbolic, C.MonadQuery, MonadTrans
            )
 
 -- mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
-mapSolverT :: R.MonadReader r m => (r -> r) -> SolverT m a -> SolverT m a
-mapSolverT f = SolverT . R.mapReaderT (local f) . runSolverT
+-- mapSolverT :: S.MonadState  r m => (r -> r) -> SolverT m a -> SolverT m a
+-- mapSolverT f = SolverT . S.mapReaderT (local f) . runSolverT
 
 -- | Unfortunately we have to write this one by hand. This type class tightly
 -- couples use to SBV and is the mechanism to constrain things in the solver
@@ -554,23 +609,23 @@ type PreSolver    = PreSolverT (NoLoggingT T.Symbolic)
 -- | A presolver runs the first stage of the evaluation/accumulation loop, that
 -- is, it is a solver which doesn't understand async, nor incremental push/pops.
 -- Rather, it is the solver which generates the first core
-newtype PreSolverT m a = PreSolverT { runPreSolverT :: (R.ReaderT Stores m) a }
+newtype PreSolverT m a = PreSolverT { runPreSolverT :: (S.StateT Stores m) a }
   deriving ( Functor,Applicative,Monad,MonadIO
-           , MonadError e, MonadLogger, R.MonadReader Stores
+           , MonadError e, MonadLogger, S.MonadState  Stores
            , T.MonadSymbolic, C.MonadQuery
            )
 
 runPreSolverLog :: Stores -> PreSolverLog a -> T.Symbolic (a, Stores)
-runPreSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
+runPreSolverLog s = runStdoutLoggingT . flip S.runStateT s . runPreSolverT
 
 runPreSolverNoLog :: Stores -> PreSolver a -> T.Symbolic (a, Stores)
-runPreSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runPreSolverT
+runPreSolverNoLog s = runNoLoggingT . flip S.runStateT s . runPreSolverT
 
 runSolverNoLog :: State -> Solver a -> C.Query (a, State)
-runSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runSolverT
+runSolverNoLog s = runNoLoggingT . flip S.runStateT s . runSolverT
 
 runSolverLog :: State -> SolverLog a -> C.Query (a, State)
-runSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
+runSolverLog s = runStdoutLoggingT . flip S.runStateT s . runSolverT
 
 type PreRun m a = Stores -> m a -> T.Symbolic (a, Stores)
 type Run m    a = State  -> SolverT m a -> C.Query    (a, State)
@@ -598,7 +653,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
       Nothing -> do
         logInProducerWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
-        update bools (add ref newSym)
+        update (`by` add ref newSym)
         return (Ref newSym)
 
 instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
@@ -610,7 +665,7 @@ instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
       Nothing -> do
         let ref = Text.unpack $ getDim d
         newSym <- T.label ref <$> C.freshVar ref
-        update dimensions (add d newSym)
+        update (`by` add d newSym)
         return newSym
 
 instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
@@ -620,7 +675,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
        case find i st of
          Just x  -> return . Ref' . SI $ x
          Nothing -> do newSym <- T.label (Text.unpack i) <$> C.freshVar (Text.unpack i)
-                       update ints (add i newSym)
+                       update (`by` add i newSym)
                        return (Ref' . SI $ newSym)
 
   cached (ExRefTypeD d) =
@@ -628,7 +683,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
        case find d st of
          Just x  -> return . Ref' $ SD x
          Nothing -> do newSym <- T.label (Text.unpack d) <$> C.freshVar (Text.unpack d)
-                       update doubles (add d newSym)
+                       update (`by` add d newSym)
                        return $! Ref' $ SD newSym
 
 instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
@@ -637,7 +692,7 @@ instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
                     case find ref st of
                       Just x  -> return (Ref x)
                       Nothing -> do newSym <- T.sBool (Text.unpack ref)
-                                    updateWith bools (add ref newSym)
+                                    update' (add ref newSym)
                                     return (Ref newSym)
 
 
@@ -648,7 +703,7 @@ instance (Monad m, T.MonadSymbolic m) =>
        case find i st of
          Just x  -> return . Ref' . SI $ x
          Nothing -> do newSym <- T.sInteger (Text.unpack i)
-                       updateWith ints (add i newSym)
+                       update' (add i newSym)
                        return (Ref' . SI $ newSym)
 
   cached (ExRefTypeD d) =
@@ -656,7 +711,7 @@ instance (Monad m, T.MonadSymbolic m) =>
        case find d st of
          Just x  -> return . Ref' $ SD x
          Nothing -> do newSym <- T.sDouble (Text.unpack d)
-                       updateWith doubles (add d newSym)
+                       update' (add d newSym)
                        return $! Ref' $ SD newSym
 
 instance (Monad m, T.MonadSymbolic m) =>
@@ -668,7 +723,7 @@ instance (Monad m, T.MonadSymbolic m) =>
       Nothing -> do
         let ref = Text.unpack $ getDim d
         newSym <- T.sBool ref
-        updateWith dimensions (add d newSym)
+        update' (add d newSym)
         return newSym
 
 -- | A general caching mechanism using StableNames. There is a small chance of a
@@ -680,7 +735,8 @@ instance (Monad m, MonadIO m, MonadLogger m) => Cachable (SolverT m) IL (V,IL) w
                   case find sn ch of
                     Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
                     Nothing -> do let !val = iAccumulate il
-                                  val `seq` updateCache accCache (add sn val)
+                                      go Caches{..} = Caches{ accCache=Map.insert sn val accCache ,..}
+                                  updateCache go
                                   return val
 
 ----------------------------------- IL -----------------------------------------
@@ -1193,10 +1249,7 @@ findChoice x@(InNum Ref'{} InL{})  = error $ "An impossible case: " ++ show x
 findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 
 
-store ::
-  ( R.MonadReader State io
-  ,  MonadIO            io
-  ) => Result -> io ()
+store :: Monad m => Result -> SolverT m ()
 {-# INLINE     store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
 -- if we use update like this we get the following ghc bug:
@@ -1209,9 +1262,8 @@ Benchmark auto: ERROR
 cabal: Benchmarks failed for bench:auto from vsmt-0.0.1.
 store !r = update results (r <>)
 -}
--- store !r = updateWith (unResult . results) (r <>)
-store !r = do asks (unResult . results) >>=
-                liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
+store !r = updateResults (r <>)
+-- store !r = do S.gets (unResult . results) >>= return . (r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1221,26 +1273,33 @@ mergeVC Nothing b@(Just _) = b
 mergeVC (Just l) (Just r)  = Just $ l &&& r
 
 -- | A function that enforces each configuration is updated in sync
-updateConfigs :: (MonadIO m, R.MonadReader State m) =>
-  Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
-{-# INLINE     updateConfigs #-}
-{-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
+-- updateConfigs :: (MonadIO m, S.MonadState State m) =>
+  -- Prop' Dim -> (Dim, Bool) -> SVariantContext -> SolverT m ()
+-- # INLINE     updateConfigs #
+-- # SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #
+updateConfigs :: (Monad m
+                 , IxStorable ix
+                 , Has b
+                 , Has (Container ix elem)
+                 , Contains (Container ix elem) ~ Stores
+                 , Contains b ~ Stores) =>
+                 Prop' Dim -> (ix, elem) -> b -> SolverT m ()
 updateConfigs context (d,val) sConf = do
   -- update the variant context
-  update vConfig (mergeVC (Just $ VariantContext context))
+  update (`by` mergeVC (Just $ VariantContext context))
   -- update the dimension cache
-  update config (add d val)
+  update (`by` add d val)
   -- update the symbolic config
-  update sConfig (const sConf)
+  update (`by` const sConf)
 
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
-resetTo :: (R.MonadReader State io, MonadIO io) => FrozenStores -> io ()
-{-# INLINE     resetTo #-}
-{-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
-resetTo FrozenStores{..} = do update config  (const fconfig)
-                              update sConfig (const fsConfig)
-                              update vConfig (const fvConfig)
+resetTo :: Monad m => FrozenStores -> SolverT m ()
+-- {-# INLINE     resetTo #-}
+-- {-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
+resetTo FrozenStores{..} = do update (`by` const fconfig)
+                              update (`by` const fsConfig)
+                              update (`by` const fvConfig)
 
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
@@ -1256,7 +1315,7 @@ alternative dim goLeft goRight =
   do !s <- freeze
      symbolicContext <- reads sConfig
      logInProducerWith "In alternative with Dim" dim
-     chans <- R.asks channels
+     chans <- S.gets channels
      let (fromVC, toVC) = getMainChans . mainChans $ chans
          dontNegate          = False
          pleaseNegate        = True
@@ -1381,10 +1440,10 @@ contextToSBool' (getVarFormula -> x) = go x
         dispatch Eqv  = (<=>)
         dispatch XOr  = (<=>)
 
-contextToSBool :: ( R.MonadReader State  m
+contextToSBool :: ( S.MonadState  State  m
                   , C.MonadQuery         m
                   , MonadIO              m
-                  ) => VariantContext -> m T.SBool
+                  ) => VariantContext -> SolverT m T.SBool
 contextToSBool (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m T.SBool
         go (LitB True)  = return T.sTrue
@@ -1393,7 +1452,7 @@ contextToSBool (getVarFormula -> x) = go x
                              case Map.lookup d dims of
                                Just b -> return b
                                Nothing -> do newSym <- T.label (Text.unpack $ getDim d) <$> C.freshVar (Text.unpack $ getDim d)
-                                             update dimensions (add d newSym)
+                                             update (`by` add d newSym)
                                              return newSym
         go (OpB Not e) = bnot <$> go e
         go (OpBB op l r) = do l' <- go l
