@@ -1209,8 +1209,9 @@ Benchmark auto: ERROR
 cabal: Benchmarks failed for bench:auto from vsmt-0.0.1.
 store !r = update results (r <>)
 -}
-store !r = do asks (unResult . results) >>=
-                liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
+store !r = updateWith (unResult . results) (r <>)
+-- store !r = do asks (unResult . results) >>=
+--                 liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
