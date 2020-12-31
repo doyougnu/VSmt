@@ -198,6 +198,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
   (toVC,   fromMain) <- U.newChan vcBufSize
   initialStore       <- newStore
   initialCache       <- newCaches
+  initialResults     <- newResults
 
 
   let solverConfig    = getConfig solver
@@ -207,7 +208,11 @@ internalSolver preSlvr slvr conf Settings{..} i = do
       vcChans   = VCChannels     $ (fromMain, toMain)
       mainChans = MainChannels   $ (fromVC, toVC)
       chans     = Channels{ vcChans=vcChans, mainChans=mainChans, threadId=0}
-      startState  = State{stores=initialStore, channels=chans, caches=initialCache}
+      startState  = State{ stores   = initialStore
+                         , channels = chans
+                         , caches   = initialCache
+                         , results  = initialResults
+                         }
       seasoning = preSlvr initialStore (snd <$> il)
 
       runVCWorkers =
@@ -222,7 +227,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
            C.query $
              slvr startState{stores=st} $
              do void $ findVCore il' >>= removeChoices
-                reads results
+                readWith (unResult . results)
 
   -- kick off
   !aWorkers  <- A.async runVCWorkers
@@ -239,6 +244,7 @@ solveForCore i = do
   (toVC,   fromMain) <- U.newChan 1
   initialStore       <- newStore
   initialCache       <- newCaches
+  initialResults     <- newResults
 
   let solverConfig    = getConfig . solver $ defSettings
       il              = toIL i
@@ -246,7 +252,11 @@ solveForCore i = do
       vcChans   = VCChannels     $ (fromMain, toMain)
       mainChans = MainChannels   $ (fromVC, toVC)
       chans     = Channels{ vcChans=vcChans, mainChans=mainChans, threadId=0}
-      startState  = State{stores=initialStore, channels=chans, caches=initialCache}
+      startState  = State{ stores   = initialStore
+                         , channels = chans
+                         , caches   = initialCache
+                         , results  = initialResults
+                         }
       seasoning = runPreSolverNoLog initialStore (snd <$> il)
 
       populateChans = T.runSMTWith solverConfig $
@@ -396,10 +406,13 @@ data State = State
   { stores   :: Stores
   , channels :: Channels
   , caches   :: Caches
+  , results  :: Results
   }
 
 type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
+
+newtype Results = Results { unResult :: (STM.TVar Result) }
 
 data Caches = Caches
               { accCache :: (STM.TVar ACache)
@@ -413,7 +426,6 @@ data Stores = Stores
     , doubles    :: (STM.TVar Doubles)
     , bools      :: (STM.TVar Bools)
     , dimensions :: (STM.TVar Dimensions)
-    , results    :: (STM.TVar Result)
     }
 
 data FrozenStores = FrozenStores
@@ -424,7 +436,6 @@ data FrozenStores = FrozenStores
     , fdoubles    :: !Doubles
     , fbools      :: !Bools
     , fdimensions :: !Dimensions
-    , fresults    :: !Result
     }
 
 data Channels = Channels { vcChans   :: VCChannels
@@ -435,6 +446,9 @@ newCaches :: IO Caches
 newCaches = do accCache <- STM.newTVarIO mempty
                return Caches{..}
 
+newResults :: IO Results
+newResults = Results <$> STM.newTVarIO mempty
+
 newStore :: IO Stores
 newStore = do vConfig    <- STM.newTVarIO mempty
               sConfig    <- STM.newTVarIO mempty
@@ -442,7 +456,6 @@ newStore = do vConfig    <- STM.newTVarIO mempty
               ints       <- STM.newTVarIO mempty
               doubles    <- STM.newTVarIO mempty
               bools      <- STM.newTVarIO mempty
-              results    <- STM.newTVarIO mempty
               dimensions <- STM.newTVarIO mempty
               return Stores{..}
 
@@ -476,7 +489,6 @@ freeze = do st       <- R.asks stores
             fints    <- read ints st
             fdoubles <- read doubles st
             fbools   <- read bools st
-            fresults <- read results st
             fdimensions <- read dimensions st
             return FrozenStores{..}
 
@@ -1187,8 +1199,18 @@ store ::
   ) => Result -> io ()
 {-# INLINE     store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
--- store !r = update results (r <>)
-store _ = do return ()
+-- if we use update like this we get the following ghc bug:
+{- Running 1 benchmarks...
+Benchmark auto: RUNNING...
+auto: internal error: PAP object (0x4200b2c8d8) entered!
+    (GHC version 8.10.2 for x86_64_unknown_linux)
+    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
+Benchmark auto: ERROR
+cabal: Benchmarks failed for bench:auto from vsmt-0.0.1.
+store !r = update results (r <>)
+-}
+store !r = do asks (unResult . results) >>=
+                liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1200,8 +1222,8 @@ mergeVC (Just l) (Just r)  = Just $ l &&& r
 -- | A function that enforces each configuration is updated in sync
 updateConfigs :: (MonadIO m, R.MonadReader State m) =>
   Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
--- {-# INLINE     updateConfigs #-}
--- {-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
+{-# INLINE     updateConfigs #-}
+{-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
 updateConfigs context (d,val) sConf = do
   -- update the variant context
   update vConfig (mergeVC (Just $ VariantContext context))
@@ -1213,8 +1235,8 @@ updateConfigs context (d,val) sConf = do
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
 resetTo :: (R.MonadReader State io, MonadIO io) => FrozenStores -> io ()
--- {-# INLINE     resetTo #-}
--- {-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
+{-# INLINE     resetTo #-}
+{-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
 resetTo FrozenStores{..} = do update config  (const fconfig)
                               update sConfig (const fsConfig)
                               update vConfig (const fvConfig)
@@ -1230,7 +1252,7 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> SolverT n ()
 {-# SPECIALIZE alternative :: Dim -> Solver () -> Solver () -> Solver () #-}
 alternative dim goLeft goRight =
-  do -- !s <- freeze
+  do !s <- freeze
      symbolicContext <- reads sConfig
      logInProducerWith "In alternative with Dim" dim
      chans <- R.asks channels
