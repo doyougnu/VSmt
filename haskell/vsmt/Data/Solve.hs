@@ -668,7 +668,7 @@ instance (Monad m, MonadIO m, MonadLogger m) => Cachable (SolverT m) IL (V,IL) w
                   case find sn ch of
                     Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
                     Nothing -> do let !val = iAccumulate il
-                                  updateCache accCache (add sn val)
+                                  val `seq` updateCache accCache (add sn val)
                                   return val
 
 ----------------------------------- IL -----------------------------------------
@@ -1048,9 +1048,9 @@ evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
 evaluate (BOp Not   (_,Ref r))         = toSolver $! bnot r
-evaluate (BBOp op (_,Ref l) (_,Ref r)) = toSolver $! (dispatchOp op) l r
+evaluate (BBOp op (_,Ref l) (_,Ref r)) = toSolver $! dispatchOp op l r
   -- numerics
-evaluate (IBOp op  (_,Ref' l) (_,Ref' r)) = toSolver $! (dispatchOp' op) l r
+evaluate (IBOp op  (_,Ref' l) (_,Ref' r)) = toSolver $! dispatchOp' op l r
   -- choices
 evaluate x@(BBOp _ (V,_) (V,_)) = return $! intoCore x
 evaluate x@(IBOp _ (V,_) (V,_)) = return $! intoCore x
@@ -1187,7 +1187,8 @@ store ::
   ) => Result -> io ()
 {-# INLINE     store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
-store !r = update results (r <>)
+-- store !r = update results (r <>)
+store _ = do return ()
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1229,7 +1230,7 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> SolverT n ()
 {-# SPECIALIZE alternative :: Dim -> Solver () -> Solver () -> Solver () #-}
 alternative dim goLeft goRight =
-  do !s <- freeze
+  do -- !s <- freeze
      symbolicContext <- reads sConfig
      logInProducerWith "In alternative with Dim" dim
      chans <- R.asks channels
@@ -1256,7 +1257,7 @@ alternative dim goLeft goRight =
        continueLeft
 
 
-     resetTo s
+     -- resetTo s
 
      -- right side, notice that we negate the symbolic, and reset the state
      (checkDimFalse,!newSConfigR) <- liftIO $
