@@ -31,8 +31,8 @@
 module Solve where
 
 import qualified Control.Concurrent.Async              as A (async,cancel,mapConcurrently_)
--- import qualified Control.Concurrent.IOR                as IOR (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
-import qualified Data.IORef                as IOR (atomicModifyIORef', readIORef, newIORef,IORef)
+import qualified Control.Concurrent.STM                as STM (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
+-- import qualified Data.TVar                as STM (atomicModifyIORef', readIORef, newIORef,TVar)
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import           Control.Monad                         (forever, void, when)
 import           Control.Monad.Except                  (MonadError)
@@ -402,18 +402,18 @@ type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
 data Caches = Caches
-              { accCache :: (IOR.IORef ACache)
+              { accCache :: (STM.TVar ACache)
               }
 
 data Stores = Stores
-    { vConfig    :: (IOR.IORef (Maybe VariantContext)) -- the formula representation of the config
-    , sConfig    :: (IOR.IORef SVariantContext)        -- symbolic representation of a config
-    , config     :: (IOR.IORef Context)                -- a map or set representation of the config
-    , ints       :: (IOR.IORef Ints)
-    , doubles    :: (IOR.IORef Doubles)
-    , bools      :: (IOR.IORef Bools)
-    , dimensions :: (IOR.IORef Dimensions)
-    , results    :: (IOR.IORef Result)
+    { vConfig    :: (STM.TVar (Maybe VariantContext)) -- the formula representation of the config
+    , sConfig    :: (STM.TVar SVariantContext)        -- symbolic representation of a config
+    , config     :: (STM.TVar Context)                -- a map or set representation of the config
+    , ints       :: (STM.TVar Ints)
+    , doubles    :: (STM.TVar Doubles)
+    , bools      :: (STM.TVar Bools)
+    , dimensions :: (STM.TVar Dimensions)
+    , results    :: (STM.TVar Result)
     }
 
 data FrozenStores = FrozenStores
@@ -432,40 +432,41 @@ data Channels = Channels { vcChans   :: VCChannels
                          , threadId  :: !ThreadID
                          }
 newCaches :: IO Caches
-newCaches = do accCache <- IOR.newIORef mempty
+newCaches = do accCache <- STM.newTVarIO mempty
                return Caches{..}
 
 newStore :: IO Stores
-newStore = do vConfig    <- IOR.newIORef mempty
-              sConfig    <- IOR.newIORef mempty
-              config     <- IOR.newIORef mempty
-              ints       <- IOR.newIORef mempty
-              doubles    <- IOR.newIORef mempty
-              bools      <- IOR.newIORef mempty
-              results    <- IOR.newIORef mempty
-              dimensions <- IOR.newIORef mempty
+newStore = do vConfig    <- STM.newTVarIO mempty
+              sConfig    <- STM.newTVarIO mempty
+              config     <- STM.newTVarIO mempty
+              ints       <- STM.newTVarIO mempty
+              doubles    <- STM.newTVarIO mempty
+              bools      <- STM.newTVarIO mempty
+              results    <- STM.newTVarIO mempty
+              dimensions <- STM.newTVarIO mempty
               return Stores{..}
 
-update :: (R.MonadReader State io, MonadIO io) => (Stores -> IOR.IORef a) -> (a -> a) -> io ()
+update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
 update field = updateWith (field . stores)
 
-reads :: (R.MonadReader State io, MonadIO io) => (Stores -> IOR.IORef a) -> io a
+reads :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> io a
 reads f = readWith (f . stores)
 
-readCache :: (R.MonadReader State io, MonadIO io) => (Caches -> IOR.IORef a) -> io a
+readCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> io a
 readCache f = readWith (f . caches)
 
-updateCache :: (R.MonadReader State io, MonadIO io) => (Caches -> IOR.IORef a) -> (a -> a) -> io ()
+updateCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> (a -> a) -> io ()
 updateCache field = updateWith (field . caches)
 
-updateWith :: (R.MonadReader s io, MonadIO io) => (s -> IOR.IORef a) -> (a -> a) -> io ()
-updateWith field f = R.asks field >>= liftIO . flip IOR.atomicModifyIORef' (\a -> (f a, ()))
+updateWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
+updateWith field f = R.asks field >>=
+                     liftIO . STM.atomically . flip STM.modifyTVar' f
 
-readWith :: (R.MonadReader s io, MonadIO io) => (s -> IOR.IORef a) -> io a
-readWith f = R.asks f  >>= liftIO . IOR.readIORef
+readWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> io a
+readWith f = R.asks f  >>= liftIO . STM.readTVarIO
 
-read :: MonadIO io => (s -> IOR.IORef a) -> s -> io a
-read f = liftIO . IOR.readIORef . f
+read :: MonadIO io => (s -> STM.TVar a) -> s -> io a
+read f = liftIO . STM.readTVarIO . f
 
 freeze :: (R.MonadReader State io, MonadIO io) => io FrozenStores
 freeze = do st       <- R.asks stores
@@ -869,17 +870,17 @@ toIL ::
   , Cachable m (ExRefType Var) IL'
   , Cachable m Var IL
   ) => Prop' Var -> m (V, IL)
-toIL (LitB True)   = return $! (P, Ref T.sTrue)
-toIL (LitB False)  = return $! (P, Ref T.sFalse)
+toIL (LitB True)   = return (P, Ref T.sTrue)
+toIL (LitB False)  = return (P, Ref T.sFalse)
 toIL (RefB ref)    = (P,) <$> cached ref
 toIL (OpB op e)      = do (v,e') <- toIL e; return (v, BOp op (v, e'))
 toIL (OpBB op l r) = do l'@(vl, _) <- toIL l
                         r'@(vr, _) <- toIL r
-                        return $ (vl <@> vr, BBOp op l' r')
+                        return (vl <@> vr, BBOp op l' r')
 toIL (OpIB op l r) = do l'@(vl,_)  <- toIL' l
                         r'@(vr,_) <- toIL' r
-                        return $ (vl <@> vr, IBOp op l' r')
-toIL (ChcB d l r)  = return $ (V, Chc d l r)
+                        return (vl <@> vr, IBOp op l' r')
+toIL (ChcB d l r)  = return (V, Chc d l r)
 
 toIL' :: (Cachable m (ExRefType Var) IL'
          , MonadLogger m) =>
@@ -890,8 +891,8 @@ toIL' (RefI a)      = (P,) <$> cached a
 toIL' (OpI op e)    = do e'@(v,_) <- toIL' e; return (v, IOp op e')
 toIL' (OpII op l r) = do l'@(vl,_) <- toIL' l
                          r'@(vr,_) <- toIL' r
-                         return $! (vl <@> vr, IIOp op l' r')
-toIL' (ChcI d l r)  = return $ (V, Chc' d l r)
+                         return (vl <@> vr, IIOp op l' r')
+toIL' (ChcI d l r)  = return (V, Chc' d l r)
 
 -------------------------------- Accumulation -----------------------------------
 -- For both evaluation and accumulation we implement the functions in a verbose
@@ -955,9 +956,9 @@ iAccumulate x@Ref{} = (P,x)
 iAccumulate x@Chc{} = (V,x)
   -- bools
 iAccumulate (BOp Not (_,Ref r))            = (P,) . Ref $! bnot r
-iAccumulate (BBOp op (_,Ref l) (_,Ref r))  = (P,) . Ref $! (dispatchOp op) l r
+iAccumulate (BBOp op (_,Ref l) (_,Ref r))  = (P,) . Ref $! dispatchOp op l r
   -- numerics
-iAccumulate (IBOp op (_,Ref' l) (_,Ref' r)) = (P,) . Ref $! (dispatchOp' op) l r
+iAccumulate (IBOp op (_,Ref' l) (_,Ref' r)) = (P,) . Ref $! dispatchOp' op l r
   -- choices
 iAccumulate x@(BBOp _ (_,Chc {}) (_,Chc {}))   = (V, x)
 iAccumulate x@(BBOp _ (_,Ref _) (_,Chc {}))    = (V, x)
@@ -992,8 +993,8 @@ iAccumulate (IBOp op (_,l) (_,r)) = let x@(vl,_) = iAccumulate' l
 iAccumulate' :: IL' -> (V, IL')
   -- computation rules
 iAccumulate' x@(Ref' _)          = (P, x)
-iAccumulate' (IOp op (_,Ref' n)) = (P,) . Ref' $! (dispatchUOp' op) n
-iAccumulate' (IIOp op (_,Ref' l) (_,Ref' r))  = (P,) . Ref' $! (dispatchIOp' op) l r
+iAccumulate' (IOp op (_,Ref' n)) = (P,) . Ref' $! dispatchUOp' op n
+iAccumulate' (IIOp op (_,Ref' l) (_,Ref' r))  = (P,) . Ref' $! dispatchIOp' op l r
   -- choices
 iAccumulate' x@Chc' {}                     = (V, x)
 iAccumulate' x@(IIOp _ (_,Chc' {}) (_,Chc' {}))    = (V, x)
@@ -1059,8 +1060,8 @@ evaluate (BBOp And (_,Unit) (_,r))      = evaluate r
 evaluate (BBOp And (_,l) (_,x@(Ref _))) = do _ <- evaluate x; evaluate l
 evaluate (BBOp And (_,x@(Ref _)) (_,r)) = do _ <- evaluate x; evaluate r
 evaluate (IBOp op (P,l) (P,r))        =
-  let l' = iAccumulate' l
-      r' = iAccumulate' r
+  let !l' = iAccumulate' l
+      !r' = iAccumulate' r
       res = IBOp op l' r'
   in evaluate res
 
