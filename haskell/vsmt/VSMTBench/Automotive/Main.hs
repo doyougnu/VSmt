@@ -86,7 +86,7 @@ main = do
       !bCs = constraints bAuto
       bPs' = parse langParser "" <$> bCs
       failed = lefts bPs'
-      bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights bPs'
+      bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ take 2000 $ bPs'
 
       -- | Hardcoding equivalencies in generated dimensions to reduce number of
       -- dimensions to 4
@@ -204,20 +204,20 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  defaultMain $
-    [  bgroup "Z3" (benches defSettings)
+  -- defaultMain $
+  --   [  bgroup "Z3" (benches defSettings)
       -- bgroup "Z3" (compRatioBenches z3DefConf)
     -- , bgroup "CVC4" (benches cvc4DefConf)
     -- , bgroup "Yices" (benches yicesDefConf)
     -- , bgroup "Boolector" (benches boolectorDefConf)
-    ]
+    -- ]
 
   -- let t = bRef "one" &&& bRef "two" &&& bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
-  let t = bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") ||| bChc "BB" (bRef "c") (bRef "d")
+  -- let t = bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  -- !res <- solveVerbose t Nothing defSettings
+  !res <- solve Nothing defSettings bProp
   -- putStrLn $ show res
-  -- putStrLn $ show . length $ take 10 $ show res
-  putStrLn "asddf"
+  putStrLn $ show . length $ take 10 $ show res
+  -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing

@@ -57,7 +57,7 @@ import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 
 import           Data.Text.IO                          (putStrLn)
-import           System.Mem.StableName                 (StableName)
+import           System.Mem.StableName                 (StableName,makeStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
@@ -401,18 +401,18 @@ type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
 data Caches = Caches
-              { accCache :: !(STM.TVar ACache)
+              { accCache :: (STM.TVar ACache)
               }
 
 data Stores = Stores
-    { vConfig    :: !(STM.TVar (Maybe VariantContext)) -- the formula representation of the config
-    , sConfig    :: !(STM.TVar SVariantContext)        -- symbolic representation of a config
-    , config     :: !(STM.TVar Context)                -- a map or set representation of the config
-    , ints       :: !(STM.TVar Ints)
-    , doubles    :: !(STM.TVar Doubles)
-    , bools      :: !(STM.TVar Bools)
-    , dimensions :: !(STM.TVar Dimensions)
-    , results    :: !(STM.TVar Result)
+    { vConfig    :: (STM.TVar (Maybe VariantContext)) -- the formula representation of the config
+    , sConfig    :: (STM.TVar SVariantContext)        -- symbolic representation of a config
+    , config     :: (STM.TVar Context)                -- a map or set representation of the config
+    , ints       :: (STM.TVar Ints)
+    , doubles    :: (STM.TVar Doubles)
+    , bools      :: (STM.TVar Bools)
+    , dimensions :: (STM.TVar Dimensions)
+    , results    :: (STM.TVar Result)
     }
 
 data FrozenStores = FrozenStores
@@ -661,14 +661,13 @@ instance (Monad m, T.MonadSymbolic m) =>
 -- collision ~32k per 2^24. I leave this completely unhandled as it is so rare I
 -- doubt it'll ever actually occur
 instance (Monad m, MonadIO m, MonadLogger m) => Cachable (SolverT m) IL (V,IL) where
-  cached il = return $ iAccumulate il
-  -- cached !il = do ch <- readCache accCache
-  --                 sn <- liftIO $! il `seq` makeStableName il
-  --                 case find sn ch of
-  --                   Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
-  --                   Nothing -> do let !val = iAccumulate il
-  --                                 updateCache accCache (add sn val)
-  --                                 return val
+  cached !il = do ch <- readCache accCache
+                  sn <- liftIO $! il `seq` makeStableName il
+                  case find sn ch of
+                    Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
+                    Nothing -> do let !val = iAccumulate il
+                                  updateCache accCache (add sn val)
+                                  return val
 
 ----------------------------------- IL -----------------------------------------
 type BRef = T.SBool
@@ -810,11 +809,11 @@ vCoreSize' (IIOp _ (_,l) (_,r)) = vCoreSize' l + vCoreSize' r
 vCoreSize' _            = 1
 
 vCoreNumPlain :: IL -> Int
-vCoreNumPlain Chc {}       = 0
-vCoreNumPlain (BOp _ (_,e))    = vCoreNumPlain e
+vCoreNumPlain Chc {}               = 0
+vCoreNumPlain (BOp _ (_,e))        = vCoreNumPlain e
 vCoreNumPlain (BBOp _ (_,l) (_,r)) = vCoreNumPlain  l + vCoreNumPlain r
 vCoreNumPlain (IBOp _ (_,l) (_,r)) = vCoreNumPlain' l + vCoreNumPlain' r
-vCoreNumPlain _            = 1
+vCoreNumPlain _                    = 1
 
 vCoreNumPlain' :: IL' -> Int
 vCoreNumPlain' Chc' {}      = 0
@@ -1022,7 +1021,7 @@ iAccumulate' (IIOp o (_,l) (_,r)) = let x@(vl,_)  = iAccumulate' l
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, I.SolverContext m) => T.SBool -> m VarCore
-{-# INLINE toSolver #-}
+-- {-# INLINE toSolver #-}
 toSolver a = do T.constrain a; return $! intoCore Unit
 
 isValue :: IL -> Bool
@@ -1198,8 +1197,8 @@ mergeVC (Just l) (Just r)  = Just $ l &&& r
 -- | A function that enforces each configuration is updated in sync
 updateConfigs :: (MonadIO m, R.MonadReader State m) =>
   Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
-{-# INLINE     updateConfigs #-}
-{-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
+-- {-# INLINE     updateConfigs #-}
+-- {-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
 updateConfigs context (d,val) sConf = do
   -- update the variant context
   update vConfig (mergeVC (Just $ VariantContext context))
@@ -1211,8 +1210,8 @@ updateConfigs context (d,val) sConf = do
 -- | Reset the state but maintain the cache's. Notice that we only identify the
 -- items which _should not_ reset and force those to be maintained
 resetTo :: (R.MonadReader State io, MonadIO io) => FrozenStores -> io ()
-{-# INLINE     resetTo #-}
-{-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
+-- {-# INLINE     resetTo #-}
+-- {-# SPECIALIZE resetTo :: FrozenStores -> Solver () #-}
 resetTo FrozenStores{..} = do update config  (const fconfig)
                               update sConfig (const fsConfig)
                               update vConfig (const fvConfig)
