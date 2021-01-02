@@ -412,20 +412,20 @@ data State = State
 type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
-newtype Results = Results { unResult :: (STM.TVar Result) }
+newtype Results = Results { unResult :: STM.TVar Result }
 
 data Caches = Caches
-              { accCache :: (STM.TVar ACache)
+              { accCache :: STM.TVar ACache
               }
 
 data Stores = Stores
-    { vConfig    :: (STM.TVar (Maybe VariantContext)) -- the formula representation of the config
-    , sConfig    :: (STM.TVar SVariantContext)        -- symbolic representation of a config
-    , config     :: (STM.TVar Context)                -- a map or set representation of the config
-    , ints       :: (STM.TVar Ints)
-    , doubles    :: (STM.TVar Doubles)
-    , bools      :: (STM.TVar Bools)
-    , dimensions :: (STM.TVar Dimensions)
+    { vConfig    :: STM.TVar (Maybe VariantContext) -- the formula representation of the config
+    , sConfig    :: STM.TVar SVariantContext        -- symbolic representation of a config
+    , config     :: STM.TVar Context                -- a map or set representation of the config
+    , ints       :: STM.TVar Ints
+    , doubles    :: STM.TVar Doubles
+    , bools      :: STM.TVar Bools
+    , dimensions :: STM.TVar Dimensions
     }
 
 data FrozenStores = FrozenStores
