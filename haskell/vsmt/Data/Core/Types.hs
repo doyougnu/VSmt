@@ -113,7 +113,7 @@ data Type = TBool
           deriving (Eq,Generic,Show,Ord)
 
 
-data Value = N NPrim | B Bool deriving (Eq,Show,Ord)
+data Value = N NPrim | B Bool deriving (Eq,Show,Ord,Generic)
 
 
 newtype CheckableResult =
@@ -394,6 +394,7 @@ instance Fractional (NExpr' a) where
 instance (NFData a) => NFData (Prop' a)
 instance (NFData a) => NFData (NExpr' a)
 instance NFData a => NFData (ExRefType a)
+instance NFData Value
 instance NFData NPrim
 instance NFData B_B
 instance NFData N_N

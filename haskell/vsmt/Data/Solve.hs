@@ -171,11 +171,11 @@ findVCore :: ( MonadLogger m
              ) => IL -> m VarCore
 findVCore = evaluate
 
-solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext, (Z.Result, String))]
+solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]
 solveVerbose = internalSolver runPreSolverLog runSolverLog
 
 
-solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext, (Z.Result, String))]
+solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]
 solve = internalSolver runPreSolverNoLog runSolverNoLog
 
 -- TODO fix this horrendous type signature
@@ -187,7 +187,7 @@ internalSolver :: (MonadLogger m
                   , Z.MonadZ3 f
                   ) =>
   (Stores -> f IL -> Z.Z3 (IL, Stores))
-  -> (State -> SolverT m [(Maybe VariantContext, (Z.Result, String))] -> Z.Z3 (b1, b2))
+  -> (State -> SolverT m [(Maybe VariantContext, (Z.Result,[(Var,Value)]))] -> Z.Z3 (b1, b2))
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
@@ -450,7 +450,7 @@ data State = State
 type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
-newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result, String))]) }
+newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]) }
 
 deriving instance Generic Z.Result
 deriving anyclass instance NFData  Z.Result
@@ -1170,7 +1170,7 @@ store ::
   ( R.MonadReader State io
   ,  MonadIO            io
   , Z.MonadZ3           io
-  ) => (Maybe VariantContext, (Z.Result, String)) -> io ()
+  ) => (Maybe VariantContext, (Z.Result,[(Var,Value)])) -> io ()
 -- if we use update like this we get the following ghc bug:
 {- Running 1 benchmarks...
 Benchmark auto: RUNNING...

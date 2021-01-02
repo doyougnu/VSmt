@@ -30,14 +30,15 @@ import           Control.Monad.IO.Class (MonadIO)
 -- import           Control.DeepSeq     (NFData,force)
 -- import           Data.Map               (toList)
 import qualified Z3.Monad               as Z
--- import           Data.Text              (Text,unpack)
+import           Data.Text              (pack)
 -- import           Data.Maybe             (isJust)
 -- import qualified Data.HashMap.Strict    as M
 -- import           Data.String            (IsString, fromString)
 -- import           GHC.Generics           (Generic)
 -- import qualified Data.Sequence          as Seq
 
--- import           Core.Types
+import           Parser.Z3
+import           Core.Types
 
 -- import           Core.Pretty
 
@@ -150,10 +151,11 @@ isSat = do cs <- Z.check
 -- wasSat = isJust . satResult . unboxResult
 
 -- | Generate a VSMT model
-getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result, String)
-getResult = do (r,m) <- Z.getModel
+getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result,[(Var,Value)])
+getResult = do (!r,!m) <- Z.getModel
                m'    <- maybe (pure mempty) Z.modelToString m
-               return (r, m')
+               let !ms = parseModel . pack $ m'
+               return (r, ms)
 
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.
