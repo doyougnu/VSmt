@@ -350,5 +350,5 @@ main = do
 
   -- (satWith z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
   -- solveVerbose bProp Nothing defSettings
-  res <- solve Nothing defSettings bProp
+  res <- solveVerbose Nothing defSettings bProp
   putStrLn $ show res

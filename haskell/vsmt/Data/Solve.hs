@@ -272,15 +272,10 @@ type ThreadID      = Int
 -- and thus the query formula variables are actually disjoint from dimensions
 -- just as we would expect.
 vcWorker ::
-  ( MonadLogger f
-  , Z.MonadZ3 f
-  , Cachable f Dim SDimension
-  )
-  => Maybe VariantContext
-  -> State
-  -> (State -> f b -> Z.Z3 a)
-  -> Int
-  -> IO ()
+  (MonadLogger f
+  , Z.MonadZ3  f
+  , Cachable   f Dim SDimension
+  ) => Maybe VariantContext -> State -> (State -> f b -> Z.Z3 a) -> Int -> IO ()
 vcWorker Nothing s@State{..} slvr tid =
   let (fromMain, toMain) = getVcChans . vcChans $ channels
   in Z.evalZ3 $ vcHelper fromMain toMain s slvr tid
@@ -298,9 +293,8 @@ vcHelper ::
   , Z.MonadZ3 f1
   , Cachable f1 a1 SDimension
   , Functor f2
-  )
-  => U.OutChan (a1, Bool, SDimension)
-  -> U.InChan (Bool, SDimension)
+  ) => U.OutChan (a1, Bool, Maybe SDimension)
+  -> U.InChan (Bool, Maybe SDimension)
   -> t
   -> (t -> f1 b -> f2 a2)
   -> Int
@@ -314,14 +308,20 @@ vcHelper fromMain toMain st slvr tid =
      do
        logInVC' tid "Waiting"
        (d, shouldNegate, vc') <- liftIO $ U.readChan fromMain
-        -- logInVC' tid "got request"
+       logInVC' tid "got request"
        Z.local $
          do sD <- cached d
-            !new <- if shouldNegate then sDNot sD else sDAnd sD vc'
+            logInVCWith tid "before" sD
+            !new <- case vc' of
+                      Just e  -> if shouldNegate
+                                 then sDNot sD >>= sDAnd e
+                                 else sDAnd e sD
+                      Nothing -> return sD
+            logInVCWith tid "created" new
             Z.assert (unSDimension new)
             Z.check >>= liftIO . \case
-              Z.Sat -> U.writeChan toMain (True, new)
-              _     -> U.writeChan toMain (False, new)
+              Z.Sat -> U.writeChan toMain (True, Just new)
+              _     -> U.writeChan toMain (False, Just new)
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -426,9 +426,7 @@ instance Eq a => IxStorable (StableName a) where
   find   = Map.lookup
   adjust = Map.adjust
 
-type SVariantContext = SDimension
-
-
+type SVariantContext = Maybe SDimension
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions. We make a trade off of memory
@@ -456,9 +454,9 @@ data Caches = Caches
               }
 
 data Stores = Stores
-    { vConfig    :: (STM.TVar (Maybe VariantContext)) -- the formula representation of the config
-    , sConfig    :: (STM.TVar SVariantContext)        -- symbolic representation of a config
-    , config     :: (STM.TVar Context)                -- a map or set representation of the config
+    { vConfig    :: (STM.TVar (Maybe VariantContext))  -- the formula representation of the config
+    , sConfig    :: (STM.TVar SVariantContext) -- symbolic representation of a config
+    , config     :: (STM.TVar Context)                 -- a map or set representation of the config
     , ints       :: (STM.TVar Ints)
     , doubles    :: (STM.TVar Doubles)
     , bools      :: (STM.TVar Bools)
@@ -466,9 +464,9 @@ data Stores = Stores
     }
 
 data FrozenStores = FrozenStores
-    { fvConfig    :: !(Maybe VariantContext) -- the formula representation of the config
-    , fsConfig    :: !SVariantContext        -- symbolic representation of a config
-    , fconfig     :: !Context                -- a map or set representation of the config
+    { fvConfig    :: !(Maybe VariantContext)  -- the formula representation of the config
+    , fsConfig    :: !SVariantContext -- symbolic representation of a config
+    , fconfig     :: !Context                 -- a map or set representation of the config
     , fints       :: !Ints
     , fdoubles    :: !Doubles
     , fbools      :: !Bools
@@ -488,7 +486,7 @@ newResults = Results <$> STM.newTVarIO mempty
 
 newStore :: IO Stores
 newStore = do vConfig    <- STM.newTVarIO mempty
-              sConfig    <- Z.evalZ3 sDTrue >>= STM.newTVarIO
+              sConfig    <- STM.newTVarIO Nothing
               config     <- STM.newTVarIO mempty
               ints       <- STM.newTVarIO mempty
               doubles    <- STM.newTVarIO mempty
@@ -1189,8 +1187,6 @@ mergeVC (Just l) (Just r)  = Just $ l &&& r
 -- | A function that enforces each configuration is updated in sync
 updateConfigs :: (MonadIO m, R.MonadReader State m) =>
   Prop' Dim -> (Dim, Bool) -> SVariantContext -> m ()
-{-# INLINE     updateConfigs #-}
-{-# SPECIALIZE updateConfigs :: Prop' Dim -> (Dim, Bool) -> SVariantContext -> Solver () #-}
 updateConfigs context (d,val) sConf = do
   -- update the variant context
   update vConfig (mergeVC (Just $ VariantContext context))
@@ -1219,8 +1215,8 @@ alternative ::
 alternative dim goLeft goRight =
   do !s <- freeze
      symbolicContext <- reads sConfig
-     logInProducerWith "In alternative with Dim" dim
      chans <- R.asks channels
+     logInProducerWith "In alternative with Dim" dim
      let (fromVC, toVC) = getMainChans . mainChans $ chans
          dontNegate          = False
          pleaseNegate        = True
@@ -1230,6 +1226,7 @@ alternative dim goLeft goRight =
      -- bindings is satisfiable, if so then we proceed to compute the
      -- variant, if not then we skip. This happens twice because
      -- dimensions and variant contexts can only be booleans.
+     logInProducer "Checking dim true"
      (checkDimTrue,!newSConfigL) <- liftIO $
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
@@ -1244,6 +1241,7 @@ alternative dim goLeft goRight =
        continueLeft
 
 
+     logInProducer "Now left side"
      -- resetTo s
 
      -- right side, notice that we negate the symbolic, and reset the state
@@ -1292,7 +1290,7 @@ choose loc =
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
-        logInProducerWith "Choose Context" ctx
+        logInProducer "Choosing Context"
         let goLeft  = toIL cl >>= accumulate . snd >>= findChoice . toLocWith ctx . snd >>= choose
             goRight = toIL cr >>= accumulate . snd >>= findChoice . toLocWith ctx . snd >>= choose
 
