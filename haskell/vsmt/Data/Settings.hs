@@ -14,24 +14,16 @@
 
 module Settings
   ( Settings(..)
-  , getConfig
   , defSettings
   , defSettingsOnlySat
   , minSettings
   , debugSettings
-  , defSettingsNoVerbose
-  , debugSettingsNoVerbose
-  , defSettingsVerbose
   , minAsyncSettings
-  , minAsyncDebug
   ) where
 
 import GHC.Generics (Generic)
 
-import qualified Data.SBV  as S (z3, SMTConfig(..), name)
-
-data Settings = Settings { solver           :: Solver
-                         , seed             :: Maybe Integer
+data Settings = Settings { seed             :: Maybe Integer
                          , numResults       :: Maybe Int
                          , generateModels   :: Bool
                          , verboseMode      :: Bool
@@ -43,14 +35,11 @@ data Settings = Settings { solver           :: Solver
                          , numVCWorkers     :: Int
                          } deriving (Show, Generic)
 
-newtype Solver = Solver { getConfig :: S.SMTConfig }
-instance Show Solver where show = show . S.name . S.solver . getConfig
 
 -- | Convert an interfacial interface to an SMT one
 -- | A default configuration uses z3 and tries to shrink propositions
 defSettings :: Settings
-defSettings = Settings{ solver          = Solver S.z3
-                      , seed            = Nothing
+defSettings = Settings{ seed            = Nothing
                       , generateModels  = True
                       , verboseMode     = False
                       , vcBufSize       = 250
@@ -65,15 +54,8 @@ defSettings = Settings{ solver          = Solver S.z3
 defSettingsOnlySat :: Settings
 defSettingsOnlySat = defSettings{generateModels = False}
 
-defSettingsNoVerbose :: Settings
-defSettingsNoVerbose = defSettings{solver=Solver $ S.z3{S.verbose=False}}
-
-defSettingsVerbose :: Settings
-defSettingsVerbose = defSettings{solver=Solver $ S.z3{S.verbose=True}}
-
 minSettings :: Settings
-minSettings = Settings{ solver          = Solver S.z3
-                      , seed            = Nothing
+minSettings = Settings{ seed            = Nothing
                       , generateModels  = False
                       , verboseMode     = False
                       , vcBufSize       = 200
@@ -88,11 +70,5 @@ minSettings = Settings{ solver          = Solver S.z3
 minAsyncSettings :: Settings
 minAsyncSettings = minSettings{numProducers = 1, numConsumers = 1, numVCWorkers = 1}
 
-minAsyncDebug :: Settings
-minAsyncDebug = minSettings{solver = Solver S.z3{S.verbose=True}, numProducers = 1, numConsumers = 1, numVCWorkers = 1, verboseMode=True}
-
 debugSettings :: Settings
-debugSettings = minSettings{solver = Solver S.z3{S.verbose=True}, verboseMode=True}
-
-debugSettingsNoVerbose :: Settings
-debugSettingsNoVerbose = minSettings{solver = Solver S.z3{S.verbose=False}}
+debugSettings = minSettings{verboseMode=True}
