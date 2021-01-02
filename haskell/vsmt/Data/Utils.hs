@@ -13,47 +13,45 @@
 
 module Utils where
 
-import qualified Data.Map            as M
-import qualified Data.SBV            as S
-import qualified Control.Monad.State as St
+-- import qualified Data.Map            as M
+-- import qualified Control.Monad.State as St
 
-import           Data.SBV.Internals (cvToBool)
-import           Data.String        (IsString(..))
+-- import           Data.String        (IsString(..))
 
 import           Core.Types
-import           Solve
+-- import           Solve
 
-type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
+-- type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
 
 genConfigPool :: VariantContext -> IO [PartialConfig]
-genConfigPool p =
-  do
-    let p' = getVarFormula p
-    S.AllSatResult _ _ _ _ allRes <- S.allSat $ eval $ Plain p'
-    let resMaps = S.getModelDictionary <$> allRes
-        maps = M.foldMapWithKey (\k a -> M.singleton (Dim $ fromString k) (cvToBool a)) <$> resMaps
-    return (fmap (\m k -> M.lookup k m) maps)
+genConfigPool _ = undefined
+--   do
+--     let p' = getVarFormula p
+--     S.AllSatResult _ _ _ _ allRes <- S.allSat $ eval $ Plain p'
+--     let resMaps = S.getModelDictionary <$> allRes
+--         maps = M.foldMapWithKey (\k a -> M.singleton (Dim $ fromString k) (cvToBool a)) <$> resMaps
+--     return (fmap (\m k -> M.lookup k m) maps)
 
-eval :: (Show a, Ord a) => Plain (Prop' a) -> S.Symbolic S.SBool
-eval = flip St.evalStateT mempty . evalPlain . unPlain
+-- eval :: (Show a, Ord a) => Plain (Prop' a) -> S.Symbolic S.SBool
+-- eval = flip St.evalStateT mempty . evalPlain . unPlain
 
-evalPlain :: (Show a, Ord a) => Prop' a -> SimpleCache a S.Symbolic S.SBool
-evalPlain (LitB True)     = return S.sTrue
-evalPlain (LitB False)    = return S.sFalse
-evalPlain (RefB b)        = do st <- St.get
-                               case M.lookup b st of
-                                 Just x  -> return x
-                                 Nothing -> do
-                                   newSym <- St.lift $ S.sBool (show b)
-                                   St.modify' (M.insert b newSym)
-                                   return newSym
-evalPlain (OpB _ e)       = S.sNot <$> evalPlain e
-evalPlain (OpBB op l r)  = do l' <- evalPlain l
-                              r' <- evalPlain r
-                              let o = dispatchOp op
-                              return $! o l' r'
-evalPlain (ChcB {}) = error "no choices here!"
-evalPlain (OpIB {}) = error "Type Chef throws smt problems?"
+-- evalPlain :: (Show a, Ord a) => Prop' a -> SimpleCache a S.Symbolic S.SBool
+-- evalPlain (LitB True)     = return S.sTrue
+-- evalPlain (LitB False)    = return S.sFalse
+-- evalPlain (RefB b)        = do st <- St.get
+--                                case M.lookup b st of
+--                                  Just x  -> return x
+--                                  Nothing -> do
+--                                    newSym <- St.lift $ S.sBool (show b)
+--                                    St.modify' (M.insert b newSym)
+--                                    return newSym
+-- evalPlain (OpB _ e)       = S.sNot <$> evalPlain e
+-- evalPlain (OpBB op l r)  = do l' <- evalPlain l
+--                               r' <- evalPlain r
+--                               let o = dispatchOp op
+--                               return $! o l' r'
+-- evalPlain (ChcB {}) = error "no choices here!"
+-- evalPlain (OpIB {}) = error "Type Chef throws smt problems?"
 
 renameDims :: (a -> b) -> Prop' a -> Prop' b
 renameDims = fmap

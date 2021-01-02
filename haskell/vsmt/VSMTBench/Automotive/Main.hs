@@ -7,9 +7,6 @@ import           Gauge
 import           Data.Aeson              (decodeStrict, encodeFile)
 import           Data.Either             (lefts, rights)
 import qualified Data.ByteString         as BS (readFile)
-import qualified Data.SBV                as S
-import qualified Data.SBV.Control        as SC
-import qualified Data.SBV.Internals      as SI
 import qualified Data.Text.IO            as T (writeFile, appendFile)
 import           Text.Megaparsec         (parse)
 import           Data.Maybe              (fromJust)

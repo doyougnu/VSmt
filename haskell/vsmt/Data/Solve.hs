@@ -168,11 +168,11 @@ findVCore :: ( MonadLogger m
              ) => IL -> m VarCore
 findVCore = evaluate
 
-solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext, (Z.Result, Maybe Z.Model))]
+solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext, (Z.Result, String))]
 solveVerbose = internalSolver runPreSolverLog runSolverLog
 
 
-solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext, (Z.Result, Maybe Z.Model))]
+solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext, (Z.Result, String))]
 solve = internalSolver runPreSolverNoLog runSolverNoLog
 
 -- TODO fix this horrendous type signature
@@ -184,7 +184,7 @@ internalSolver :: (MonadLogger m
                   , Z.MonadZ3 f
                   ) =>
   (Stores -> f IL -> Z.Z3 (IL, Stores))
-  -> (State -> SolverT m [(Maybe VariantContext, (Z.Result, Maybe Z.Model))] -> Z.Z3 (b1, b2))
+  -> (State -> SolverT m [(Maybe VariantContext, (Z.Result, String))] -> Z.Z3 (b1, b2))
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
@@ -449,7 +449,7 @@ data State = State
 type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
-newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result, Maybe Z.Model))]) }
+newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result, String))]) }
 
 data Caches = Caches
               { accCache :: (STM.TVar ACache)
@@ -1164,7 +1164,8 @@ findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 store ::
   ( R.MonadReader State io
   ,  MonadIO            io
-  ) => (Maybe VariantContext, (Z.Result, Maybe Z.Model)) -> io ()
+  , Z.MonadZ3           io
+  ) => (Maybe VariantContext, (Z.Result, String)) -> io ()
 -- if we use update like this we get the following ghc bug:
 {- Running 1 benchmarks...
 Benchmark auto: RUNNING...
@@ -1175,9 +1176,8 @@ Benchmark auto: ERROR
 cabal: Benchmarks failed for bench:auto from vsmt-0.0.1.
 store !r = update results (r <>)
 -}
--- store !r = updateWith (unResult . results) (r <>)
-store !r = do asks (unResult . results) >>=
-                liftIO . STM.atomically . flip STM.modifyTVar' (pure r <>)
+store r = asks (unResult . results)
+          >>= liftIO . STM.atomically . flip STM.modifyTVar' (pure r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext

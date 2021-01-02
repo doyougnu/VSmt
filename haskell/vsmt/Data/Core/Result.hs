@@ -150,8 +150,10 @@ isSat = do cs <- Z.check
 -- wasSat = isJust . satResult . unboxResult
 
 -- | Generate a VSMT model
-getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result, Maybe Z.Model)
-getResult = Z.getModel
+getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result, String)
+getResult = do (r,m) <- Z.getModel
+               m'    <- maybe (pure mempty) Z.modelToString m
+               return (r, m')
 
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.

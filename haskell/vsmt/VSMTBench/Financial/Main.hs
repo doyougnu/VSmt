@@ -10,9 +10,6 @@ import           Data.Text               (Text)
 import           Data.List               (delete)
 
 import qualified Data.ByteString         as BS (readFile)
-import qualified Data.SBV                as S
-import qualified Data.SBV.Control        as SC
-import qualified Data.SBV.Internals      as SI
 import qualified Data.Text.IO            as T (writeFile, appendFile)
 import           Text.Megaparsec         (parse)
 
@@ -353,5 +350,5 @@ main = do
 
   -- (satWith z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
   -- solveVerbose bProp Nothing defSettings
-  res <- solve bProp Nothing defSettings
+  res <- solve Nothing defSettings bProp
   putStrLn $ show res
