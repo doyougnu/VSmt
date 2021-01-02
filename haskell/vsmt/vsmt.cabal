@@ -217,7 +217,7 @@ benchmark busybox
 benchmark financial
   type            : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -O2 -threaded "-with-rtsopts=-qg -p -s -hC -L100 -A64m -AL128m -n8m"
+  ghc-options     : -O2 -threaded -rtsopts
   other-extensions: BangPatterns
                     DataKinds
                     DeriveAnyClass

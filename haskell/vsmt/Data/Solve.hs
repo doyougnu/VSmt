@@ -594,7 +594,7 @@ instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
   cached ref = do
     st <- reads bools
     case find ref st of
-      Just x -> logWith "Cache Hit" ref >> return (Ref x)
+      Just x -> return (Ref x)
       Nothing -> do
         logInProducerWith "Cache miss on" ref
         newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
@@ -1272,8 +1272,6 @@ alternative dim goLeft goRight =
        let !continueLeft = C.inNewAssertionStack $!
                            do logInProducerWith "Left Alternative of" dim
                               resetTo s
-                              reads config >>= logInProducerWith "ConfigL:"
-                              reads bools  >>= logInProducerWith "Bools:"
                               updateConfigs (bRef dim) (dim,True) newSConfigL
                               goLeft
        logInProducer "Writing to continue left"
@@ -1289,8 +1287,6 @@ alternative dim goLeft goRight =
        let !continueRight = C.inNewAssertionStack $
                             do logInProducerWith "Right Alternative of" dim
                                resetTo s
-                               reads config >>= logInProducerWith "ConfigR:"
-                               reads bools  >>= logInProducerWith "BoolsR:"
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
                                goRight
        continueRight
@@ -1303,8 +1299,7 @@ removeChoices ::
   ) => VarCore -> SolverT m ()
 {-# INLINE     removeChoices #-}
 {-# SPECIALIZE removeChoices :: VarCore -> Solver () #-}
-removeChoices (VarCore Unit) = reads bools >>= logInProducerWith "Core reduced to Unit" >>
-                               reads config >>= logInProducerWith "Core reduced to Unit with Context" >>
+removeChoices (VarCore Unit) = logInProducer "Core reduced to Unit" >>
                                reads vConfig >>= getResult >>= store
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
@@ -1332,7 +1327,6 @@ choose loc =
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
-        logInProducerWith "Choose Context" ctx
         let goLeft  = toIL cl >>= accumulate . snd >>= choose . findChoice . toLocWith ctx . snd
             goRight = toIL cr >>= accumulate . snd >>= choose . findChoice . toLocWith ctx . snd
 
