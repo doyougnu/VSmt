@@ -49,6 +49,7 @@ library
                , mtl
                , parser-combinators
                , z3
+               , sbv
                , stm
                , text
                , transformers >= 0.5.6.2
@@ -123,6 +124,7 @@ Test-Suite VSMTTest
                   , text
                   , QuickCheck
                   , z3
+                  , sbv
                   , unordered-containers
                   , vsmt
   Hs-Source-Dirs  : VSMTTestSuite
@@ -201,6 +203,7 @@ benchmark busybox
                , parser-combinators
                , text
                , z3
+               , sbv
                , vsmt
   hs-source-dirs: VSMTBench
                 , VSMTBench/Bench
@@ -245,6 +248,7 @@ benchmark financial
                , parser-combinators
                , text
                , z3
+               , sbv
                , vsmt
   hs-source-dirs: VSMTBench
                 , VSMTBench/Financial
@@ -287,6 +291,7 @@ benchmark auto
                , parser-combinators
                , text
                , z3
+               , sbv
                , vsmt
   hs-source-dirs: VSMTBench/
                   , VSMTBench/Automotive

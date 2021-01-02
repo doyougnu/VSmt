@@ -113,7 +113,7 @@ main = do
         | d == "D_14" = "D_9"
         | otherwise = d
 
-      !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (take 100 bPs)
+      !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
       -- dmapping = getDimMap $ autoAndJoin bPs
       -- !bPropOpts = applyOpts defConf bProp
 
@@ -350,5 +350,5 @@ main = do
 
   -- (satWith z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
   -- solveVerbose bProp Nothing defSettings
-  res <- solveVerbose Nothing defSettings bProp
-  putStrLn $ show res
+  res <- solve Nothing defSettings bProp
+  putStrLn $ show $ length res

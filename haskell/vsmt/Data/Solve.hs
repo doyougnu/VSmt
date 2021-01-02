@@ -12,6 +12,8 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE BangPatterns               #-}
 {-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE DeriveAnyClass             #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -53,6 +55,7 @@ import           Data.Maybe                            (fromJust)
 import qualified Z3.Monad                              as Z
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
+import           Control.DeepSeq                       (NFData)
 
 import           Data.Text.IO                          (putStrLn)
 import           System.Mem.StableName                 (StableName,makeStableName)
@@ -449,6 +452,9 @@ type ACache = Cache IL (V,IL)
 
 newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result, String))]) }
 
+deriving instance Generic Z.Result
+deriving anyclass instance NFData  Z.Result
+
 data Caches = Caches
               { accCache :: (STM.TVar ACache)
               }
@@ -532,10 +538,10 @@ freeze = do st       <- R.asks stores
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
 newtype SolverT m a = SolverT { runSolverT :: R.ReaderT State m a }
-  deriving ( Functor,Applicative,Monad,MonadIO
-           , MonadError e, MonadLogger, R.MonadReader State
-           , MonadTrans, Z.MonadZ3
-           )
+  deriving newtype ( Functor,Applicative,Monad,MonadIO
+                   , MonadError e, MonadLogger, R.MonadReader State
+                   , MonadTrans, Z.MonadZ3
+                   )
 
 -- mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
 mapSolverT :: R.MonadReader r m => (r -> r) -> SolverT m a -> SolverT m a
@@ -551,10 +557,10 @@ type PreSolver    = PreSolverT (NoLoggingT Z.Z3)
 -- is, it is a solver which doesn't understand async, nor incremental push/pops.
 -- Rather, it is the solver which generates the first core
 newtype PreSolverT m a = PreSolverT { runPreSolverT :: (R.ReaderT Stores m) a }
-  deriving ( Functor,Applicative,Monad,MonadIO
-           , MonadError e, MonadLogger, R.MonadReader Stores
-           , Z.MonadZ3
-           )
+  deriving newtype ( Functor,Applicative,Monad,MonadIO
+                   , MonadError e, MonadTrans, MonadLogger
+                   , R.MonadReader Stores , Z.MonadZ3
+                   )
 
 runPreSolverLog :: Stores -> PreSolverLog a -> Z.Z3 (a, Stores)
 runPreSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
@@ -584,6 +590,7 @@ instance Z.MonadZ3 z => Z.MonadZ3 (LoggingT z) where
 instance Z.MonadZ3 z => Z.MonadZ3 (NoLoggingT z) where
   getSolver  = lift Z.getSolver
   getContext = lift Z.getContext
+
 
 instance RunSolver SolverLog       where runSolver    = runSolverLog
 instance RunSolver Solver          where runSolver    = runSolverNoLog
@@ -835,11 +842,11 @@ dispatchDOp Eqv  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkEq
 dispatchDOp XOr  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkXor      l r
 
 dispatchOp :: Z.MonadZ3 z3 => BB_B -> SBool -> SBool -> z3 SBool
-dispatchOp And  (unSBool -> l) (unSBool -> r) = SBool <$> Z.mkAnd     [l,r]
-dispatchOp Or   (unSBool -> l) (unSBool -> r) = SBool <$> Z.mkOr      [l,r]
-dispatchOp Impl (unSBool -> l) (unSBool -> r) = SBool <$> Z.mkImplies  l r
-dispatchOp Eqv  (unSBool -> l) (unSBool -> r) = SBool <$> Z.mkEq       l r
-dispatchOp XOr  (unSBool -> l) (unSBool -> r) = SBool <$> Z.mkXor      l r
+dispatchOp And  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkAnd     [l,r]
+dispatchOp Or   (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkOr      [l,r]
+dispatchOp Impl (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkImplies  l r
+dispatchOp Eqv  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkEq       l r
+dispatchOp XOr  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkXor      l r
 
 dispatchUOp' :: Z.MonadZ3 z3 => N_N -> NRef -> z3 NRef
 dispatchUOp' Neg  (SI i) = SI . SInteger <$> Z.mkUnaryMinus (unSInteger i)
@@ -937,28 +944,28 @@ iAccumulate x@(IBOp _ (_,Chc' {}) (_,Chc' {})) = return (V, x)
 iAccumulate x@(IBOp _ (_,Ref' _) (_,Chc' {}))  = return (V, x)
 iAccumulate x@(IBOp _ (_,Chc' {}) (_,Ref' _))  = return (V, x)
  -- congruence rules
-iAccumulate (BOp Not (P, e)) = do (_,!e') <- iAccumulate e
-                                  let res = BOp Not (P,e')
-                                  iAccumulate res
-iAccumulate (BOp Not (V, e)) = do (_,!e') <- iAccumulate e
-                                  let res = BOp Not (V,e')
-                                  return (V,res)
-iAccumulate (BBOp op (P,l) (P,r)) = do (_,!l') <- iAccumulate l
-                                       (_,!r') <- iAccumulate r
-                                       let !res = BBOp op (P,l') (P,r')
-                                       iAccumulate res
-iAccumulate (BBOp op (_,l) (_,r)) = do (vl,!l') <- iAccumulate l
-                                       (vr,!r') <- iAccumulate r
-                                       let !res      = BBOp op (vl,l') (vr,r')
-                                       return (vl <@> vr, res)
-iAccumulate (IBOp op (P,l) (P,r)) = do (_,!l') <- iAccumulate' l
-                                       (_,!r') <- iAccumulate' r
-                                       let !res = IBOp op (P,l') (P,r')
-                                       iAccumulate res
-iAccumulate (IBOp op (_,l) (_,r)) = do x@(vl,_) <- iAccumulate' l
-                                       y@(vr,_) <- iAccumulate' r
-                                       let !res = IBOp op x y
-                                       return (vl <@> vr, res)
+iAccumulate (BOp Not (P, !e)) = do (_,!e') <- iAccumulate e
+                                   let !res = BOp Not (P,e')
+                                   iAccumulate res
+iAccumulate (BOp Not (V, !e)) = do (_,!e') <- iAccumulate e
+                                   let !res = BOp Not (V,e')
+                                   return (V,res)
+iAccumulate (BBOp op (P,!l) (P,!r)) = do (_,!l') <- iAccumulate l
+                                         (_,!r') <- iAccumulate r
+                                         let !res = BBOp op (P,l') (P,r')
+                                         iAccumulate res
+iAccumulate (BBOp op (_,!l) (_,!r)) = do (vl,!l') <- iAccumulate l
+                                         (vr,!r') <- iAccumulate r
+                                         let !res      = BBOp op (vl,l') (vr,r')
+                                         return (vl <@> vr, res)
+iAccumulate (IBOp op (P,!l) (P,!r)) = do (_,!l') <- iAccumulate' l
+                                         (_,!r') <- iAccumulate' r
+                                         let !res = IBOp op (P,l') (P,r')
+                                         iAccumulate res
+iAccumulate (IBOp op (_,!l) (_,!r)) = do x@(vl,_) <- iAccumulate' l
+                                         y@(vr,_) <- iAccumulate' r
+                                         let !res = IBOp op x y
+                                         return (vl <@> vr, res)
 
 iAccumulate' :: Z.MonadZ3 z3 => IL' -> z3 (V, IL')
   -- computation rules
