@@ -51,9 +51,7 @@ import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
 import           Data.Maybe                            (fromJust)
-import qualified Data.SBV.Internals                    as I
-import qualified Data.SBV.Trans                        as T
-import qualified Data.SBV.Trans.Control                as C
+import qualified Z3.Monad                              as Z
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 
