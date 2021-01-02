@@ -11,6 +11,7 @@ import qualified Data.Text.IO            as T (writeFile, appendFile)
 import           Text.Megaparsec         (parse)
 import           Data.Maybe              (fromJust)
 import Control.Monad
+import Control.DeepSeq                   (force)
 
 import           Bench.Core
 import           Settings
@@ -47,10 +48,10 @@ ds = toVariantContext . bRef . toDim <$> ["D_0","D_1","D_2","D_3"]
 
 -- dimConf' :: VProp Text String String
 -- encoding for 6 configs that make sure the inequalities encompass each other
-sumConf = (d0 &&& fromList (&&&) (bnot <$> tail ds)) -- <0
-          ||| ((bnot d0) &&& d2 &&& (bnot d4 &&& bnot d5))   -- <0 /\ <1
-          ||| ((bnot d0) &&& (bnot d2) &&& d4 &&& bnot d5) -- <0 /\ <1 /\
-          ||| ((bnot d0) &&& (bnot d2) &&& (bnot d4) &&& d5) -- <0 /\ <1 /\
+-- sumConf = (d0 &&& fromList (&&&) (bnot <$> tail ds)) -- <0
+--           ||| ((bnot d0) &&& d2 &&& (bnot d4 &&& bnot d5))   -- <0 /\ <1
+--           ||| ((bnot d0) &&& (bnot d2) &&& d4 &&& bnot d5) -- <0 /\ <1 /\
+--           ||| ((bnot d0) &&& (bnot d2) &&& (bnot d4) &&& d5) -- <0 /\ <1 /\
 
 -- | Configs that select only one version
 d0Conf :: VariantContext
@@ -83,7 +84,7 @@ main = do
       !bCs = constraints bAuto
       bPs' = parse langParser "" <$> bCs
       failed = lefts bPs'
-      bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ bPs'
+      !bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ bPs'
 
       -- | Hardcoding equivalencies in generated dimensions to reduce number of
       -- dimensions to 4
@@ -95,7 +96,7 @@ main = do
 
       bProp :: Proposition
       -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
-      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin bPs
+      !bProp = force $ (naiveEncode . autoToVSat) $ autoAndJoin bPs
 
   -- Convert the fmf's to actual configurations
   [ppV1]   <- fmap (fromJust . flip validateTotal (getVarFormula d0Conf)) <$> genConfigPool d0Conf
