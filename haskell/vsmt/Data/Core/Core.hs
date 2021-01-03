@@ -259,8 +259,8 @@ fromList :: Foldable f => (a -> a -> a) -> f a -> a
 fromList _ (null -> True) = error "Empty Foldable in fromList'"
 fromList f (toList -> xs) = foldl1' f xs
 
-conjoin :: Foldable f => f (Prop' a) -> Prop' a
-conjoin = fromList $ OpBB And
+conjoin :: (Boolean b, Foldable f) => f b -> b
+conjoin = fromList (&&&)
 
-disjoin :: Foldable f => f (Prop' a) -> Prop' a
-disjoin = fromList $ OpBB Or
+disjoin :: (Boolean b, Foldable f) => f b -> b
+disjoin = fromList (|||)

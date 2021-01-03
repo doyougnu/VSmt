@@ -26,23 +26,21 @@ module Core.Result where
 
 import           Control.Monad.IO.Class (MonadIO)
 
-import           Data.Hashable          (Hashable)
-import           Control.DeepSeq     (NFData,force)
-import           Data.Map               (toList)
-import qualified Data.SBV.Control       as C
-import qualified Data.SBV.Internals     as I
-import qualified Data.SBV.Trans         as S
-import qualified Data.SBV.Trans.Control as T
-import           Data.Text              (Text,unpack)
-import           Data.Maybe             (isJust)
-import qualified Data.HashMap.Strict    as M
-import           Data.String            (IsString, fromString)
-import           GHC.Generics           (Generic)
-import qualified Data.Sequence          as Seq
+-- import           Data.Hashable          (Hashable)
+-- import           Control.DeepSeq     (NFData,force)
+-- import           Data.Map               (toList)
+import qualified Z3.Monad               as Z
+import           Data.Text              (pack)
+-- import           Data.Maybe             (isJust)
+-- import qualified Data.HashMap.Strict    as M
+-- import           Data.String            (IsString, fromString)
+-- import           GHC.Generics           (Generic)
+-- import qualified Data.Sequence          as Seq
 
+import           Parser.Z3
 import           Core.Types
 
-import           Core.Pretty
+-- import           Core.Pretty
 
 -- | An SMT Result formula, spine strict, we leave values lazy because they may
 -- not be needed. We will be incrementally building these formulas through
@@ -52,139 +50,142 @@ import           Core.Pretty
 -- You should view this as an internal datatype, in the average case this will
 -- be transformed into a Map of "variable" -> SMTLIB2 program where the SMTLIB2
 -- program will dispatch the right value based on the values of dimensions
-newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext, I.CV))
-    deriving (Eq,Show,Semigroup,Monoid,Generic,NFData)
+-- newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext, Z.Model))
+--     deriving (Eq,Show,Semigroup,Monoid,Generic,NFData)
 
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
 -- cleaner implementation on our end.
-newtype VariableMap d = VariableMap {getVMap :: M.HashMap d ResultFormula }
-  deriving (Eq,Show,Generic,NFData)
+-- newtype VariableMap d = VariableMap {getVMap :: M.HashMap d ResultFormula }
+--   deriving (Eq,Show,Generic,NFData)
 
-instance (Eq d, Hashable d, NFData d) => Semigroup (VariableMap d) where
-  (VariableMap !l) <> (VariableMap !r) = VariableMap $! M.unionWith go l r
-    where go !l' !r' = l' <> r'
+-- instance (Eq d, Hashable d, NFData d) => Semigroup (VariableMap d) where
+--   (VariableMap !l) <> (VariableMap !r) = VariableMap $! M.unionWith go l r
+--     where go !l' !r' = l' <> r'
 
-deriving instance (Eq d, Hashable d, NFData d) => Monoid (VariableMap d)
+-- deriving instance (Eq d, Hashable d, NFData d) => Monoid (VariableMap d)
 
-instance Pretty (Result' Var) where
-  pretty r = "=: Model := " <> newline <>
-             pretty (variables r) <>
-             newline <>
-             "=: Sat_Model := " <>
-             newline <>
-             pretty (satResult r) <>
-             newline
+-- instance Pretty (Result' Var) where
+--   pretty r = "=: Model := " <> newline <>
+--              pretty (variables r) <>
+--              newline <>
+--              "=: Sat_Model := " <>
+--              newline <>
+--              pretty (satResult r) <>
+--              newline
 
 -- TODO: use Text.PrintF from base for better formatted output
-deriving instance Pretty d => Pretty (VariableMap d)
-instance Pretty (Seq.Seq (Maybe VariantContext, I.CV)) where pretty = prettyResultFormula
-instance Pretty d => Pretty (M.HashMap d ResultFormula) where
-  pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
+-- deriving instance Pretty d => Pretty (VariableMap d)
+-- instance Pretty (Seq.Seq (Maybe VariantContext, I.CV)) where pretty = prettyResultFormula
+-- instance Pretty d => Pretty (M.HashMap d ResultFormula) where
+--   pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
 
 -- | We use a Maybe to form the mempty for monoid, this leads to prettier pretty
 -- printing
-prettyResultFormula :: Seq.Seq (Maybe VariantContext, I.CV) -> Text
-prettyResultFormula Seq.Empty = mempty
-prettyResultFormula ((Nothing, !val) Seq.:<| Seq.Empty)  = pretty val
-prettyResultFormula ((Just !ctx, !val) Seq.:<| Seq.Empty) = parens $!
-  "ite" <> space <> pretty ctx <> space <> parens (pretty val) <> space <> done
-  where done = "Undefined"
-prettyResultFormula ((Nothing,!val) Seq.:<| xs) = parens $!
-                                     "ite " <>
-                                     parens "True :: Bool" <> space <>
-                                     parens (pretty val) <> space <>
-                                     pretty xs
-prettyResultFormula ((Just !ctx,!val) Seq.:<| xs) = parens $!
-                                          "ite " <>
-                                          pretty ctx <> space <>
-                                          parens (pretty val) <> space <>
-                                          pretty xs
+-- prettyResultFormula :: Seq.Seq (Maybe VariantContext, I.CV) -> Text
+-- prettyResultFormula Seq.Empty = mempty
+-- prettyResultFormula ((Nothing, !val) Seq.:<| Seq.Empty)  = pretty val
+-- prettyResultFormula ((Just !ctx, !val) Seq.:<| Seq.Empty) = parens $!
+--   "ite" <> space <> pretty ctx <> space <> parens (pretty val) <> space <> done
+--   where done = "Undefined"
+-- prettyResultFormula ((Nothing,!val) Seq.:<| xs) = parens $!
+--                                      "ite " <>
+--                                      parens "True :: Bool" <> space <>
+--                                      parens (pretty val) <> space <>
+--                                      pretty xs
+-- prettyResultFormula ((Just !ctx,!val) Seq.:<| xs) = parens $!
+--                                           "ite " <>
+--                                           pretty ctx <> space <>
+--                                           parens (pretty val) <> space <>
+--                                           pretty xs
 
-instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
+-- instance Pretty ResultFormula where pretty (ResultFormula x) = pretty x
 
 -- | newtype wrapper for better printing
-newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic,NFData)
+-- newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic,NFData)
 
-instance Semigroup Result where (Result !a) <> (Result !b) = Result (a <> b)
-deriving instance Monoid Result
+-- instance Semigroup Result where (Result !a) <> (Result !b) = Result (a <> b)
+-- deriving instance Monoid Result
 
-instance Show Result where show = unpack . pretty
+-- instance Show Result where show = unpack . pretty
 
-instance Pretty Result where pretty (Result r) = pretty r
+-- instance Pretty Result where pretty (Result r) = pretty r
 
-data Result' d = Result' { variables :: VariableMap d
-                         , satResult :: Maybe VariantContext
-                         } deriving (Eq, Show,Generic)
+-- data Result' d = Result' { variables :: VariableMap d
+--                          , satResult :: Maybe VariantContext
+--                          } deriving (Eq, Show,Generic)
 
-instance NFData d => NFData (Result' d)
+-- instance NFData d => NFData (Result' d)
 
-instance (Eq d, Hashable d, NFData d) => Semigroup (Result' d) where
-  (<>) Result' {variables=(!vl),satResult=(!sl)} Result'{variables=(!vr),satResult=(!sr)} =
-    Result' { variables = vl <> vr
-            , satResult = sl <> sr}
+-- instance (Eq d, Hashable d, NFData d) => Semigroup (Result' d) where
+--   (<>) Result' {variables=(!vl),satResult=(!sl)} Result'{variables=(!vr),satResult=(!sr)} =
+--     Result' { variables = vl <> vr
+--             , satResult = sl <> sr}
 
-instance (Eq d, Hashable d, NFData d) => Monoid (Result' d) where
-  mempty = Result'{variables=mempty
-                 ,satResult=mempty}
-  mappend !x !y = x <> y
+-- instance (Eq d, Hashable d, NFData d) => Monoid (Result' d) where
+--   mempty = Result'{variables=mempty
+--                  ,satResult=mempty}
+--   mappend !x !y = x <> y
 
-onVariables :: (VariableMap d -> VariableMap d) -> Result' d -> Result' d
-onVariables f Result'{..} = Result'{variables=f variables, satResult}
+-- onVariables :: (VariableMap d -> VariableMap d) -> Result' d -> Result' d
+-- onVariables f Result'{..} = Result'{variables=f variables, satResult}
 
-onSatResult :: (Maybe VariantContext -> Maybe VariantContext) -> Result' d -> Result' d
-onSatResult f Result'{..} = Result'{variables, satResult=f satResult}
+-- onSatResult :: (Maybe VariantContext -> Maybe VariantContext) -> Result' d -> Result' d
+-- onSatResult f Result'{..} = Result'{variables, satResult=f satResult}
 
-insertToVariables :: Var -> ResultFormula -> Result' Var -> Result' Var
-insertToVariables k v = onVariables (VariableMap . M.insertWith mappend k v . getVMap)
+-- insertToVariables :: Var -> ResultFormula -> Result' Var -> Result' Var
+-- insertToVariables k v = onVariables (VariableMap . M.insertWith mappend k v . getVMap)
 
--- | O(1) insert a result prop into the result entry for special Sat variable
-insertToSat :: (Ord d, IsString d) => Maybe VariantContext -> Result' d -> Result' d
-insertToSat v = onSatResult (v `mappend`)
+-- -- | O(1) insert a result prop into the result entry for special Sat variable
+-- insertToSat :: (Ord d, IsString d) => Maybe VariantContext -> Result' d -> Result' d
+-- insertToSat v = onSatResult (v `mappend`)
 
 -- | check if the current context is sat or not
-isSat :: C.Query Bool
-isSat = do cs <- C.checkSat
+isSat :: Z.MonadZ3 m => m Bool
+isSat = do cs <- Z.check
            return $! case cs of
-                       C.Sat -> True
+                       Z.Sat -> True
                        _     -> False
 
-wasSat :: Result -> Bool
-wasSat = isJust . satResult . unboxResult
+-- wasSat :: Result -> Bool
+-- wasSat = isJust . satResult . unboxResult
 
 -- | Generate a VSMT model
-getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
-getVSMTModel = force <$> T.getSMTResult
+getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result,[(Var,Value)])
+getResult = do (!r,!m) <- Z.getModel
+               m'    <- maybe (pure mempty) Z.modelToString m
+               let !ms = parseModel . pack $ m'
+               return (r, ms)
 
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
-getResult !vf =
-  do !model <- getVSMTModel
-     return $!
-       Result $!
-       case model of
-         m@(S.Satisfiable _ _)         ->
-        -- when satisfiable we get the model dictionary, turn it into a
-        -- result map and then insert the config proposition that created the
-        -- satisfiable result into the __Sat element of the map
-           let !gMD = S.getModelDictionary $! m
-               xs = toList gMD
-               res = toResMap xs
-               in res
-      -- (S.Unsatisfiable _ unsatCore) ->
-        -- we apply f to True here because in the case of an unsat we want to
-        -- save the proposition that produced the unsat, if we applied to
-        -- false then we would have the negation of that proposition for
-        -- unsat
-        -- unSatToResult (f True) $ fromMaybe mempty unsatCore
-         _                           -> mempty
- where
-   toResMap !m' =
-     -- Result' {variables = VariableMap $! M.foldMapWithKey
-     --          (\(!k) (!a) -> M.singleton (fromString k) (ResultFormula $! pure (vf, a))) m'
-     --         ,satResult=vf}
-     Result' {variables = VariableMap $!
-                          M.fromList $!
-                          fmap (\(!k,!v) -> (fromString k, ResultFormula $! pure (vf, v))) m'
-             ,satResult=vf}
+-- getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
+-- getResult !vf =
+--   do !model <- getVSMTModel
+--      return $!
+--        Result $!
+--        case model of
+--          m@(S.Satisfiable _ _)         ->
+--         -- when satisfiable we get the model dictionary, turn it into a
+--         -- result map and then insert the config proposition that created the
+--         -- satisfiable result into the __Sat element of the map
+--            let !gMD = S.getModelDictionary $! m
+--                xs = toList gMD
+--                res = toResMap xs
+--                in res
+--       -- (S.Unsatisfiable _ unsatCore) ->
+--         -- we apply f to True here because in the case of an unsat we want to
+--         -- save the proposition that produced the unsat, if we applied to
+--         -- false then we would have the negation of that proposition for
+--         -- unsat
+--         -- unSatToResult (f True) $ fromMaybe mempty unsatCore
+--          _                           -> mempty
+--  where
+--    toResMap !m' =
+--      -- Result' {variables = VariableMap $! M.foldMapWithKey
+--      --          (\(!k) (!a) -> M.singleton (fromString k) (ResultFormula $! pure (vf, a))) m'
+--      --         ,satResult=vf}
+--      Result' {variables = VariableMap $!
+--                           M.fromList $!
+--                           fmap (\(!k,!v) -> (fromString k, ResultFormula $! pure (vf, v))) m'
+--              ,satResult=vf}

@@ -13,7 +13,6 @@ import           Data.Bifunctor
 import           Data.Bitraversable
 import           Data.List          (delete)
 import           Data.Monoid        ((<>))
-import           Data.SBV           (EqSymbolic (..), literal)
 import           GHC.Generics
 import           Data.Text
 
@@ -134,52 +133,3 @@ instance Num ALang where
   negate = Neg
   signum = error "signum not supported in AutoLang"
   abs    = error "absolute value not supported in AutoLang"
-
--- instance EqSymbolic AutoLang where
---   (AutoLit b)      .== (AutoLit b')        = b .== b'
---   (AutoRef r)      .== (AutoRef r')        = r .== r'
---   (Ctx op a p)     .== (Ctx op' a' p')     = (op .== op') V.&&& (a .== a') V.&&&
---                                              (p .== p')
---   (AutoNot e)      .== (AutoNot e')        = e .== e'
---   (BBinary op l r) .== (BBinary op' l' r') = (op .== op') V.&&& (l .== l') V.&&&
---                                              (r .== r')
---   (RBinary op l r) .== (RBinary op' l' r') = (op .== op') V.&&&
---                                              (l .== l') V.&&& (r .== r')
---   _                .== _                   = V.false
-
--- instance EqSymbolic ALang where
---   (ALit i) .== (ALit i') = (literal i) .== (literal i')
---   (AVar a) .== (AVar b)  = a .== b
---   (ACtx a) .== (ACtx b)  = a .== b
---   (Neg a)  .== (Neg b)   = a .== b
---   (ABinary op l r) .== (ABinary op' l' r') = (op .== op') V.&&&
---                                              (l .== l') V.&&& (r .== r')
---   _                .==  _ = V.false
-
--- instance EqSymbolic AOp where
---   Add .== Add           = V.true
---   Subtract .== Subtract = V.true
---   Multiply .== Multiply = V.true
---   Divide .== Divide     = V.true
---   Modulus .== Modulus   = V.true
---   _       .== _         = V.false
-
--- instance EqSymbolic RBOp where
---   GRT .== GRT   = V.true
---   GRTE .== GRTE = V.true
---   EQL .== EQL   = V.true
---   LST .== LST   = V.true
---   LSTE .== LSTE = V.true
---   NEQL .== NEQL = V.true
---   _    .== _    = V.false
-
--- instance EqSymbolic BOp where
---   And .== And   = V.true
---   Or  .== Or    = V.true
---   Impl .== Impl = V.true
---   Eqv .== Eqv   = V.true
---   Xor .== Xor   = V.true
---   _   .== _     = V.false
-
--- instance EqSymbolic Text where
---   a .== b = unpack a .== unpack b

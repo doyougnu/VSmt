@@ -12,19 +12,19 @@ mkDerivation {
   libraryHaskellDepends = [
     base bifunctors containers deepseq hashable megaparsec monad-logger
     mtl parser-combinators sbv text transformers unordered-containers
-    unagi-chan async
+    unagi-chan async z3
   ];
   librarySystemDepends    = [ z3 zlib ];
   executableSystemDepends = [ z3 zlib ];
   testHaskellDepends = [
     base bytestring containers filepath QuickCheck sbv tasty
     tasty-golden tasty-hspec tasty-hunit tasty-quickcheck text
-    unordered-containers
+    unordered-containers z3
   ];
 
   benchmarkHaskellDepends = [ base deepseq gauge silently megaparsec text
                               parser-combinators sbv containers directory
-                              aeson
+                              aeson z3
                             ];
   homepage = "https://github.com/doyougnu/VSmt";
   description = "SMT Based Verification with first class variational programming capabilities";

@@ -21,11 +21,9 @@
 module Core.Types where
 
 import           Control.DeepSeq     (NFData)
-import           Control.Monad       (liftM2)
 import           Data.Fixed          (mod')
 import           Data.Hashable       (Hashable)
 import qualified Data.HashMap.Strict as M
-import qualified Data.SBV.Trans      as S
 import qualified Data.Sequence       as Seq
 import           Data.String         (IsString)
 import           Data.Text           (Text,pack,unpack)
@@ -115,7 +113,7 @@ data Type = TBool
           deriving (Eq,Generic,Show,Ord)
 
 
-data Value = N NPrim | B Bool deriving (Eq,Show,Ord)
+data Value = N NPrim | B Bool deriving (Eq,Show,Ord,Generic)
 
 
 newtype CheckableResult =
@@ -125,11 +123,6 @@ newtype CheckableResult =
 toCheckableResult :: [(Var, [(Maybe VariantContext, Value)])] -> CheckableResult
 toCheckableResult = CheckableResult . M.fromList
 
-
--- | Mirroring NPrim with Symbolic types for the solver
-data SymNum = SyI !S.SInt64
-            | SyD !S.SDouble
-          deriving (Eq, Generic,Show)
 
 data ExRefType a = ExRefTypeI a | ExRefTypeD a
   deriving (Eq,Generic,Show,Ord,Functor,Traversable,Foldable)
@@ -241,48 +234,6 @@ instance Prim (Prop' a) Double where
   (.>=) i j = OpIB GTE (LitI $ D i) (LitI $ D j)
   (.>)  i j = OpIB GT  (LitI $ D i) (LitI $ D j)
 
--- * SBV instances
-
--- | we'll need to mirror the NPrim data type in SBV via SymNum
-instance Num SymNum where
-  fromInteger = SyI . S.literal . fromInteger
-
-  abs (SyI i) = SyI $ abs i
-  abs (SyD d) = SyD $ S.fpAbs d
-
-  negate (SyI i) = SyI $ negate i
-  negate (SyD d) = SyD $ S.fpNeg d
-
-  signum (SyI i) = SyI $ signum i
-  signum (SyD d) = SyD $ signum (S.fromSDouble S.sRoundNearestTiesToAway d)
-
-  (SyI i) + (SyI i') = SyI $ i + i'
-  (SyD d) + (SyI i)  = SyD $ d + S.sFromIntegral i
-  (SyI i) + (SyD d)  = SyD $ S.sFromIntegral i + d
-  (SyD d) + (SyD d') = SyD $ d + d'
-
-  (SyI i) - (SyI i') = SyI $ i - i'
-  (SyD d) - (SyI i)  = SyD $ d - S.sFromIntegral i
-  (SyI i) - (SyD d)  = SyD $ S.sFromIntegral i - d
-  (SyD d) - (SyD d') = SyD $ d - d'
-
-  (SyI i) * (SyI i') = SyI $ i * i'
-  (SyD d) * (SyI i)  = SyD $ d * S.sFromIntegral i
-  (SyI i) * (SyD d)  = SyD $ d * S.sFromIntegral i
-  (SyD d) * (SyD d') = SyD $ d * d'
-
-instance PrimN SymNum where
-  (SyI i) ./ (SyI i') = SyI $ i ./ i'
-  (SyD d) ./ (SyI i)  = SyD $ d ./ S.sFromIntegral i
-  (SyI i) ./ (SyD d)  = SyD $ S.sFromIntegral i ./ d
-  (SyD d) ./ (SyD d') = SyD $ d ./ d'
-
-
-  (SyI i) .% (SyI i') = SyI $ i .% i'
-  (SyD d) .% (SyI i)  = SyI $ S.fromSDouble S.sRoundNearestTiesToAway d .% i
-  (SyI i) .% (SyD d)  = SyI $ i .% S.fromSDouble S.sRoundNearestTiesToAway d
-  (SyD d) .% (SyD d') = SyD $ S.fpRem d d'
-
 instance Num Value where
   fromInteger = N . I
 
@@ -352,152 +303,6 @@ instance Enum Value where
   fromEnum (N (D _)) = error "Enum on double"
   fromEnum (B b)     = fromEnum b
 
-instance PrimN S.SDouble where
-  (./)  = S.fpDiv S.sRoundNearestTiesToAway
-  (.%)  = undefined
-
-instance PrimN S.SInt8 where
-  (./)  = S.sDiv
-  (.%)  = S.sMod
-
-instance PrimN S.SInt16 where
-  (./)  = S.sDiv
-  (.%)  = S.sMod
-
-instance PrimN S.SInt32 where
-  (./)  = S.sDiv
-  (.%)  = S.sMod
-
-instance PrimN S.SInt64 where
-  (./)  = S.sDiv
-  (.%)  = S.sMod
-
-instance PrimN S.SInteger where
-  (./)  = S.sDiv
-  (.%)  = S.sMod
-
-instance S.Mergeable SymNum where
-  symbolicMerge _ b thn els
-    | Just result <- S.unliteral b = if result then thn else els
-    | otherwise = els
-
-instance S.EqSymbolic SymNum where
-  (.==) (SyI i) (SyI i') = (S..==) i i'
-  (.==) (SyD d) (SyI i') = (S..==) d (S.sFromIntegral i')
-  (.==) (SyI i) (SyD d)  = (S..==) (S.sFromIntegral i) d
-  (.==) (SyD d) (SyD d') = (S..==) d d'
-
-  (./=) (SyI i) (SyI i') = (S../=) i i'
-  (./=) (SyD d) (SyI i') = (S../=) d (S.sFromIntegral i')
-  (./=) (SyI i) (SyD d)  = (S../=) (S.sFromIntegral i) d
-  (./=) (SyD d) (SyD d') = (S../=) d d'
-
-instance S.OrdSymbolic SymNum where
-  (.<) (SyI i) (SyI i') = (S..<) i i'
-  (.<) (SyD d) (SyI i)  = (S..<) d (S.sFromIntegral i)
-  (.<) (SyI i) (SyD d)  = (S..<) (S.sFromIntegral i) d
-  (.<) (SyD d) (SyD d') = (S..<) d d'
-
-  (.<=) (SyI i) (SyI i') = (S..<=) i i'
-  (.<=) (SyD d) (SyI i)  = (S..<=) d (S.sFromIntegral i)
-  (.<=) (SyI i) (SyD d)  = (S..<=) (S.sFromIntegral i) d
-  (.<=) (SyD d) (SyD d') = (S..<=) d d'
-
-  (.>=) (SyI i) (SyI i') = (S..>=) i i'
-  (.>=) (SyD d) (SyI i)  = (S..>=) d (S.sFromIntegral i)
-  (.>=) (SyI i) (SyD d)  = (S..>=) (S.sFromIntegral i) d
-  (.>=) (SyD d) (SyD d') = (S..>=) d d'
-
-  (.>) (SyI i) (SyI i') = (S..>) i i'
-  (.>) (SyD d) (SyI i)  = (S..>) d (S.sFromIntegral i)
-  (.>) (SyI i) (SyD d)  = (S..>) (S.sFromIntegral i) d
-  (.>) (SyD d) (SyD d') = (S..>) d d'
-
-instance Prim S.SBool SymNum where
-  (.<) (SyI i) (SyI i') = (S..<) i i'
-  (.<) (SyD d) (SyI i)  = (S..<) d (S.sFromIntegral i)
-  (.<) (SyI i) (SyD d)  = (S..<) (S.sFromIntegral i) d
-  (.<) (SyD d) (SyD d') = (S..<) d d'
-
-  (.<=) (SyI i) (SyI i') = (S..<=) i i'
-  (.<=) (SyD d) (SyI i)  = (S..<=) d (S.sFromIntegral i)
-  (.<=) (SyI i) (SyD d)  = (S..<=) (S.sFromIntegral i) d
-  (.<=) (SyD d) (SyD d') = (S..<=) d d'
-
-  (.>=) (SyI i) (SyI i') = (S..>=) i i'
-  (.>=) (SyD d) (SyI i)  = (S..>=) d (S.sFromIntegral i)
-  (.>=) (SyI i) (SyD d)  = (S..>=) (S.sFromIntegral i) d
-  (.>=) (SyD d) (SyD d') = (S..>=) d d'
-
-  (.>) (SyI i) (SyI i') = (S..>) i i'
-  (.>) (SyD d) (SyI i)  = (S..>) d (S.sFromIntegral i)
-  (.>) (SyI i) (SyD d)  = (S..>) (S.sFromIntegral i) d
-  (.>) (SyD d) (SyD d') = (S..>) d d'
-
-  (.==) (SyI i) (SyI i') = (S..==) i i'
-  (.==) (SyD d) (SyI i') = (S..==) d (S.sFromIntegral i')
-  (.==) (SyI i) (SyD d)  = (S..==) (S.sFromIntegral i) d
-  (.==) (SyD d) (SyD d') = (S..==) d d'
-
-  (./=) (SyI i) (SyI i') = (S../=) i i'
-  (./=) (SyD d) (SyI i') = (S../=) d (S.sFromIntegral i')
-  (./=) (SyI i) (SyD d)  = (S../=) (S.sFromIntegral i) d
-  (./=) (SyD d) (SyD d') = (S../=) d d'
-
-instance Prim S.SBool S.SInt8 where
-  (.<)  = (S..<)
-  (.<=) = (S..<=)
-  (.==) = (S..==)
-  (./=) = (S../=)
-  (.>=) = (S..>=)
-  (.>)  = (S..>)
-
-instance Prim S.SBool S.SInt16 where
-  (.<)  = (S..<)
-  (.<=) = (S..<=)
-  (.==) = (S..==)
-  (./=) = (S../=)
-  (.>=) = (S..>=)
-  (.>)  = (S..>)
-
-instance Prim S.SBool S.SInt32 where
-  (.<)  = (S..<)
-  (.<=) = (S..<=)
-  (.==) = (S..==)
-  (./=) = (S../=)
-  (.>=) = (S..>=)
-  (.>)  = (S..>)
-
-instance Prim S.SBool S.SInt64 where
-  (.<)  = (S..<)
-  (.<=) = (S..<=)
-  (.==) = (S..==)
-  (./=) = (S../=)
-  (.>=) = (S..>=)
-  (.>)  = (S..>)
-
-instance Prim S.SBool S.SDouble where
-  (.<)  = (S..<)
-  (.<=) = (S..<=)
-  (.==) = (S..==)
-  (./=) = (S../=)
-  (.>=) = (S..>=)
-  (.>)  = (S..>)
-
-instance Prim S.SBool S.SInteger where
-  (.<)  = (S..<)
-  (.<=) = (S..<=)
-  (.==) = (S..==)
-  (./=) = (S../=)
-  (.>=) = (S..>=)
-  (.>)  = (S..>)
-
--- | make prop mergeable so choices can use symbolic conditionals
-instance S.Mergeable (Prop' a) where
-  symbolicMerge _ b thn els
-    | Just result <- S.unliteral b = if result then thn else els
-  symbolicMerge _ _ _ _ = undefined -- quite -WALL
-
 -- | We can treat a variational proposition as a boolean formulae
 class Boolean b where
   true  :: b
@@ -515,37 +320,12 @@ class Boolean b where
   (<+>) :: b -> b -> b
   a <+> b = (a ||| b) &&& bnot (a &&& b)
 
-instance Boolean S.SBool where
-  true  = S.sTrue
-  false = S.sFalse
-  bnot  = S.sNot
-  (&&&) = (S..&&)
-  (|||) = (S..||)
-  (<=>) = (S..<=>)
-  {-# INLINE true #-}
-  {-# INLINE false #-}
-  {-# INLINE (&&&) #-}
-  {-# INLINE (|||) #-}
-  {-# INLINE (<=>) #-}
-
 instance Boolean Bool where
   true  =  True
   false = False
   bnot  = not
   (&&&) = (&&)
   (|||) = (||)
-  {-# INLINE true  #-}
-  {-# INLINE false #-}
-  {-# INLINE bnot  #-}
-  {-# INLINE (&&&) #-}
-  {-# INLINE (|||) #-}
-
-instance Boolean b => Boolean (S.Symbolic b) where
-  true  = return true
-  false = return false
-  bnot  = fmap bnot
-  (&&&) = liftM2 (&&&)
-  (|||) = liftM2 (|||)
   {-# INLINE true  #-}
   {-# INLINE false #-}
   {-# INLINE bnot  #-}
@@ -614,6 +394,7 @@ instance Fractional (NExpr' a) where
 instance (NFData a) => NFData (Prop' a)
 instance (NFData a) => NFData (NExpr' a)
 instance NFData a => NFData (ExRefType a)
+instance NFData Value
 instance NFData NPrim
 instance NFData B_B
 instance NFData N_N

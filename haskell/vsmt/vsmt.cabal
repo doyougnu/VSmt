@@ -33,6 +33,7 @@ library
                  , Core.Result
                  , Core.Pretty
                  , Parser.Result
+                 , Parser.Z3
                  , Solve
                  , Settings
                  , Utils
@@ -48,6 +49,7 @@ library
                , monad-logger
                , mtl
                , parser-combinators
+               , z3
                , sbv
                , stm
                , text
@@ -122,6 +124,7 @@ Test-Suite VSMTTest
                   , tasty-hunit
                   , text
                   , QuickCheck
+                  , z3
                   , sbv
                   , unordered-containers
                   , vsmt
@@ -135,6 +138,7 @@ Test-Suite VSMTTest
                   , TestSuite.Solve.Arithmetic.Choices
                   , TestSuite.Solve.Sound
                   , TestSuite.Core.Parser.Result
+                  , TestSuite.Core.Parser.Z3
 
 -- Benchmark VSMTBench
 --   type            : exitcode-stdio-1.0
@@ -163,7 +167,6 @@ Test-Suite VSMTTest
 --                , megaparsec
 --                , parser-combinators
 --                , text
---                , sbv
 --                , unordered-containers
 --   hs-source-dirs: VSMTBench
 --   main-is: VSMTBench.hs
@@ -201,6 +204,7 @@ benchmark busybox
                , megaparsec
                , parser-combinators
                , text
+               , z3
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -245,6 +249,7 @@ benchmark financial
                , mtl
                , parser-combinators
                , text
+               , z3
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -287,6 +292,7 @@ benchmark auto
                , mtl
                , parser-combinators
                , text
+               , z3
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench/

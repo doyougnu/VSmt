@@ -10,20 +10,25 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
+{-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE TypeSynonymInstances #-}
 
 module Utils where
 
+import qualified Control.Monad.State as St
 import qualified Data.Map            as M
 import qualified Data.SBV            as S
-import qualified Control.Monad.State as St
+import           Data.SBV.Internals  (cvToBool)
 
-import           Data.SBV.Internals (cvToBool)
-import           Data.String        (IsString(..))
+import           Data.String         (IsString (..))
 
 import           Core.Types
-import           Solve
+
 
 type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
+
+renameDims :: (a -> b) -> Prop' a -> Prop' b
+renameDims = fmap
 
 genConfigPool :: VariantContext -> IO [PartialConfig]
 genConfigPool p =
@@ -50,10 +55,27 @@ evalPlain (RefB b)        = do st <- St.get
 evalPlain (OpB _ e)       = S.sNot <$> evalPlain e
 evalPlain (OpBB op l r)  = do l' <- evalPlain l
                               r' <- evalPlain r
-                              let o = dispatchOp op
+                              let o = udispatchop op
                               return $! o l' r'
 evalPlain (ChcB {}) = error "no choices here!"
 evalPlain (OpIB {}) = error "Type Chef throws smt problems?"
 
-renameDims :: (a -> b) -> Prop' a -> Prop' b
-renameDims = fmap
+udispatchop :: Boolean b => BB_B -> b -> b -> b
+udispatchop And  = (&&&)
+udispatchop Or   = (|||)
+udispatchop Impl = (==>)
+udispatchop Eqv  = (<=>)
+udispatchop XOr  = (<+>)
+
+instance Boolean S.SBool where
+  true  = S.sTrue
+  false = S.sFalse
+  bnot  = S.sNot
+  (&&&) = (S..&&)
+  (|||) = (S..||)
+  (<=>) = (S..<=>)
+  {-# INLINE true #-}
+  {-# INLINE false #-}
+  {-# INLINE (&&&) #-}
+  {-# INLINE (|||) #-}
+  {-# INLINE (<=>) #-}

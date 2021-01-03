@@ -7,13 +7,11 @@ import           Gauge
 import           Data.Aeson              (decodeStrict, encodeFile)
 import           Data.Either             (lefts, rights)
 import qualified Data.ByteString         as BS (readFile)
-import qualified Data.SBV                as S
-import qualified Data.SBV.Control        as SC
-import qualified Data.SBV.Internals      as SI
 import qualified Data.Text.IO            as T (writeFile, appendFile)
 import           Text.Megaparsec         (parse)
 import           Data.Maybe              (fromJust)
 import Control.Monad
+import Control.DeepSeq                   (force)
 
 import           Bench.Core
 import           Settings
@@ -50,10 +48,10 @@ ds = toVariantContext . bRef . toDim <$> ["D_0","D_1","D_2","D_3"]
 
 -- dimConf' :: VProp Text String String
 -- encoding for 6 configs that make sure the inequalities encompass each other
-sumConf = (d0 &&& fromList (&&&) (bnot <$> tail ds)) -- <0
-          ||| ((bnot d0) &&& d2 &&& (bnot d4 &&& bnot d5))   -- <0 /\ <1
-          ||| ((bnot d0) &&& (bnot d2) &&& d4 &&& bnot d5) -- <0 /\ <1 /\
-          ||| ((bnot d0) &&& (bnot d2) &&& (bnot d4) &&& d5) -- <0 /\ <1 /\
+-- sumConf = (d0 &&& fromList (&&&) (bnot <$> tail ds)) -- <0
+--           ||| ((bnot d0) &&& d2 &&& (bnot d4 &&& bnot d5))   -- <0 /\ <1
+--           ||| ((bnot d0) &&& (bnot d2) &&& d4 &&& bnot d5) -- <0 /\ <1 /\
+--           ||| ((bnot d0) &&& (bnot d2) &&& (bnot d4) &&& d5) -- <0 /\ <1 /\
 
 -- | Configs that select only one version
 d0Conf :: VariantContext
@@ -86,7 +84,7 @@ main = do
       !bCs = constraints bAuto
       bPs' = parse langParser "" <$> bCs
       failed = lefts bPs'
-      bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ take 2000 $ bPs'
+      !bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ bPs'
 
       -- | Hardcoding equivalencies in generated dimensions to reduce number of
       -- dimensions to 4
@@ -98,7 +96,7 @@ main = do
 
       bProp :: Proposition
       -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
-      !bProp = (naiveEncode . autoToVSat) $ autoAndJoin bPs
+      !bProp = force $ (naiveEncode . autoToVSat) $ autoAndJoin bPs
 
   -- Convert the fmf's to actual configurations
   [ppV1]   <- fmap (fromJust . flip validateTotal (getVarFormula d0Conf)) <$> genConfigPool d0Conf
@@ -204,20 +202,20 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  -- defaultMain $
-  --   [  bgroup "Z3" (benches defSettings)
-      -- bgroup "Z3" (compRatioBenches z3DefConf)
+  defaultMain $
+    [  bgroup "Z3" (benches defSettings)
+    --   bgroup "Z3" (compRatioBenches z3DefConf)
     -- , bgroup "CVC4" (benches cvc4DefConf)
     -- , bgroup "Yices" (benches yicesDefConf)
     -- , bgroup "Boolector" (benches boolectorDefConf)
-    -- ]
+    ]
 
   -- let t = bRef "one" &&& bRef "two" &&& bChc "AA" (bRef "a") (bRef "b") &&&  bChc "BB" (bRef "c") (bRef "d") &&&  bChc "CC" (bRef "e") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
-  -- let t = bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") ||| bChc "BB" (bRef "c") (bRef "d")
+  -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  !res <- solve Nothing defSettings bProp
+  -- !res <- solve Nothing defSettings t
   -- putStrLn $ show res
-  putStrLn $ show . length $ take 10 $ show res
+  -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing

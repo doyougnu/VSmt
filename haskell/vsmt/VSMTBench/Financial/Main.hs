@@ -3,29 +3,28 @@
 
 module Main where
 
+import           Data.Aeson      (decodeStrict, encodeFile)
+import           Data.Either     (lefts, rights)
+import           Data.List       (delete)
+import           Data.Text       (Text)
 import           Gauge
-import           Data.Aeson              (decodeStrict, encodeFile)
-import           Data.Either             (lefts, rights)
-import           Data.Text               (Text)
-import           Data.List               (delete)
 
-import qualified Data.ByteString         as BS (readFile)
-import qualified Data.SBV                as S
-import qualified Data.SBV.Control        as SC
-import qualified Data.SBV.Internals      as SI
-import qualified Data.Text.IO            as T (writeFile, appendFile)
-import           Text.Megaparsec         (parse)
+import           Control.DeepSeq (force)
+import qualified Data.ByteString as BS (readFile)
+import           Data.Maybe      (fromJust)
+import qualified Data.Text.IO    as T (appendFile, writeFile)
+import           Text.Megaparsec (parse)
 
 import           Bench.Core
-import           Settings
-import           Core.Types
 import           Core.Core
+import           Core.Types
+import           Settings
+import           Solve           (solve, solveVerbose)
 import           Utils
-import           Solve (solveVerbose,solve)
 
+import           Financial
 import           Lang
 import           Parser
-import           Financial
 
 dataFile :: FilePath
 dataFile = "VSMTBench/Financial/financial_merged.json"
@@ -41,25 +40,25 @@ dataFile = "VSMTBench/Financial/financial_merged.json"
 
 sliceAndNegate n xs = fromList (&&&) $ bnot <$> drop n xs
 
-ds :: [Proposition]
-ds = bRef <$> ["D_0", "D_1", "D_17", "D_13", "D_7", "D_3", "D_11", "D_5", "D_9", "D_15"]
+ds :: [VariantContext]
+ds = toVariantContext . bRef . toDim <$> ["D_0", "D_1", "D_17", "D_13", "D_7", "D_3", "D_11", "D_5", "D_9", "D_15"]
 
 [d0, d1, d17, d13, d7, d3, d11, d5, d9, d15] = ds
 
 mkCascadeConf n xs = conjoin $ (take n xs) ++ (bnot <$> drop n xs)
 
-mkMultConf :: Int -> [Proposition] -> Proposition
+mkMultConf :: Int -> [VariantContext] -> VariantContext
 mkMultConf n xs = conjoin (bnot <$> drop n xs)
 
--- justD0Conf         = mkMultConf 1 ds
--- justD01Conf        = mkMultConf 2 ds
--- justD012Conf       = mkMultConf 3 ds
--- justD0123Conf      = mkMultConf 4 ds
--- justD01234Conf     = mkMultConf 5 ds
--- justD012345Conf    = mkMultConf 6 ds
--- justD0123456Conf   = mkMultConf 7 ds
--- justD01234567Conf  = mkMultConf 8 ds
--- justD012345678Conf = mkMultConf 9 ds
+justD0Conf         = mkMultConf 1 ds
+justD01Conf        = mkMultConf 2 ds
+justD012Conf       = mkMultConf 3 ds
+justD0123Conf      = mkMultConf 4 ds
+justD01234Conf     = mkMultConf 5 ds
+justD012345Conf    = mkMultConf 6 ds
+justD0123456Conf   = mkMultConf 7 ds
+justD01234567Conf  = mkMultConf 8 ds
+justD012345678Conf = mkMultConf 9 ds
 
 -- pairs = mkPairs ds
 
@@ -86,10 +85,13 @@ mkMultConf n xs = conjoin (bnot <$> drop n xs)
 -- dimConf' :: VProp Text String String
 -- encoding for 6 configs that make sure the inequalities encompass each other
 
+mkConf :: VariantContext -> [VariantContext] -> VariantContext
 mkConf x xs = x &&& (conjoin $ bnot <$> (delete x xs))
 
+confs :: [VariantContext]
 confs = fmap (flip mkConf ds) ds
 
+d0Conf :: VariantContext
 [d0Conf, d1Conf, d2Conf, d3Conf, d4Conf, d5Conf, d6Conf, d7Conf, d8Conf, d9Conf] = confs
 
 -- run with stack bench --profile vsat:auto --benchmark-arguments='+RTS -S -RTS --output timings.html'
@@ -116,35 +118,33 @@ main = do
         | d == "D_14" = "D_9"
         | otherwise = d
 
-      !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (take 100 bPs)
+      !bProp = force $ ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
       -- dmapping = getDimMap $ autoAndJoin bPs
       -- !bPropOpts = applyOpts defConf bProp
 
-  -- | convert choice preserving fmfs to actual confs
-  -- [justV1]         <- genConfigPool justD0Conf
-  -- [justV2]         <- genConfigPool justD1Conf
-  -- [justV3]         <- genConfigPool justD2Conf
-  -- [justV4]         <- genConfigPool justD3Conf
-  -- [justV12']       <- genConfigPool justD01Conf
-  -- [justV123]       <- genConfigPool justD012Conf
-  -- [justV1234]      <- genConfigPool justD0123Conf
-  -- [justV12345]     <- genConfigPool justD01234Conf
-  -- [justV123456]    <- genConfigPool justD012345Conf
-  -- [justV1234567]   <- genConfigPool justD0123456Conf
-  -- [justV12345678]  <- genConfigPool justD01234567Conf
-  -- [justV123456789] <- genConfigPool justD012345678Conf
-  -- [ppVAll]       <- genConfigPool d0123456789Conf
+  -- | convert choice preserving vc's to actual confs
+  [justV1]         <- genConfigPool justD0Conf
+  [justV12]        <- genConfigPool justD01Conf
+  [justV123]       <- genConfigPool justD012Conf
+  [justV1234]      <- genConfigPool justD0123Conf
+  [justV12345]     <- genConfigPool justD01234Conf
+  [justV123456]    <- genConfigPool justD012345Conf
+  [justV1234567]   <- genConfigPool justD0123456Conf
+  [justV12345678]  <- genConfigPool justD01234567Conf
+  [justV123456789] <- genConfigPool justD012345678Conf
 
-  -- [ppV1]  <- genConfigPool d0Conf
-  -- [ppV2]  <- genConfigPool d1Conf
-  -- [ppV3]  <- genConfigPool d2Conf
-  -- [ppV4]  <- genConfigPool d3Conf
-  -- [ppV5]  <- genConfigPool d4Conf
-  -- [ppV6]  <- genConfigPool d5Conf
-  -- [ppV7]  <- genConfigPool d6Conf
-  -- [ppV8]  <- genConfigPool d7Conf
-  -- [ppV9]  <- genConfigPool d8Conf
-  -- [ppV10] <- genConfigPool d9Conf
+  -- for each total configuration we have to tell the type system teh config is
+  -- total to get the right configure instance
+  -- [ppV1]  <- fmap (fromJust . flip validateTotal (getVarFormula d0Conf)) <$> genConfigPool d0Conf
+  -- [ppV2]  <- fmap (fromJust . flip validateTotal (getVarFormula d1Conf)) <$> genConfigPool d1Conf
+  -- [ppV3]  <- fmap (fromJust . flip validateTotal (getVarFormula d2Conf)) <$> genConfigPool d2Conf
+  -- [ppV4]  <- fmap (fromJust . flip validateTotal (getVarFormula d3Conf)) <$> genConfigPool d3Conf
+  -- [ppV5]  <- fmap (fromJust . flip validateTotal (getVarFormula d4Conf)) <$> genConfigPool d4Conf
+  -- [ppV6]  <- fmap (fromJust . flip validateTotal (getVarFormula d5Conf)) <$> genConfigPool d5Conf
+  -- [ppV7]  <- fmap (fromJust . flip validateTotal (getVarFormula d6Conf)) <$> genConfigPool d6Conf
+  -- [ppV8]  <- fmap (fromJust . flip validateTotal (getVarFormula d7Conf)) <$> genConfigPool d7Conf
+  -- [ppV9]  <- fmap (fromJust . flip validateTotal (getVarFormula d8Conf)) <$> genConfigPool d8Conf
+  -- [ppV10] <- fmap (fromJust . flip validateTotal (getVarFormula d9Conf)) <$> genConfigPool d9Conf
 
   -- compression ratio pairs
   -- justV12  <- genConfigPool pD01Conf
@@ -162,56 +162,53 @@ main = do
 
   -- let
     -- | choice preserving props
-    -- justbPropV1         = selectVariant justV1 bProp
-    -- -- (Just justbPropV2)         = selectVariant justV2 bProp
-    -- -- (Just justbPropV3)         = selectVariant justV3 bProp
-    -- -- (Just justbPropV4)         = selectVariant justV4 bProp
-    -- justbPropV12        = selectVariant justV12' bProp
-    -- justbPropV123       = selectVariant justV123 bProp
-    -- justbPropV1234      = selectVariant justV1234 bProp
-    -- justbPropV12345     = selectVariant justV12345 bProp
-    -- justbPropV123456    = selectVariant justV123456 bProp
-    -- justbPropV1234567   = selectVariant justV1234567 bProp
-    -- justbPropV12345678  = selectVariant justV12345678 bProp
-    -- justbPropV123456789 = selectVariant justV123456789 bProp
+  let justbPropV1         = configure justV1 bProp
+      justbPropV12        = configure justV12 bProp
+      justbPropV123       = configure justV123 bProp
+      justbPropV1234      = configure justV1234 bProp
+      justbPropV12345     = configure justV12345 bProp
+      justbPropV123456    = configure justV123456 bProp
+      justbPropV1234567   = configure justV1234567 bProp
+      justbPropV12345678  = configure justV12345678 bProp
+      justbPropV123456789 = configure justV123456789 bProp
 
     -- | single version props
---     !bPropV1  = selectVariantTotal ppV1  bProp
---     !bPropV2  = selectVariantTotal ppV2  bProp
---     !bPropV3  = selectVariantTotal ppV3  bProp
---     !bPropV4  = selectVariantTotal ppV4  bProp
---     !bPropV5  = selectVariantTotal ppV5  bProp
---     !bPropV6  = selectVariantTotal ppV6  bProp
---     !bPropV7  = selectVariantTotal ppV7  bProp
---     !bPropV8  = selectVariantTotal ppV8  bProp
---     !bPropV9  = selectVariantTotal ppV9  bProp
---     !bPropV10 = selectVariantTotal ppV10 bProp
+      -- !bPropV1  = configure ppV1  bProp
+      -- !bPropV2  = configure ppV2  bProp
+      -- !bPropV3  = configure ppV3  bProp
+      -- !bPropV4  = configure ppV4  bProp
+      -- !bPropV5  = configure ppV5  bProp
+      -- !bPropV6  = configure ppV6  bProp
+      -- !bPropV7  = configure ppV7  bProp
+      -- !bPropV8  = configure ppV8  bProp
+      -- !bPropV9  = configure ppV9  bProp
+      -- !bPropV10 = configure ppV10 bProp
 
---     benches :: ReadableSMTConf Text -> [Benchmark]
---     benches solverConf =
---       [
---         mkBench "v-->v" "V1"  d0Conf (satWithConf (toDimProp d0Conf) solverConf) bProp
---       , mkBench "v-->v" "V2"  d1Conf (satWithConf (toDimProp d1Conf) solverConf) bProp
---       , mkBench "v-->v" "V3"  d2Conf (satWithConf (toDimProp d2Conf) solverConf) bProp
---       , mkBench "v-->v" "V4"  d3Conf (satWithConf (toDimProp d3Conf) solverConf) bProp
---       , mkBench "v-->v" "V5"  d4Conf (satWithConf (toDimProp d4Conf) solverConf) bProp
---       , mkBench "v-->v" "V6"  d5Conf (satWithConf (toDimProp d5Conf) solverConf) bProp
---       , mkBench "v-->v" "V7"  d6Conf (satWithConf (toDimProp d6Conf) solverConf) bProp
---       , mkBench "v-->v" "V8"  d7Conf (satWithConf (toDimProp d7Conf) solverConf) bProp
---       , mkBench "v-->v" "V9"  d8Conf (satWithConf (toDimProp d8Conf) solverConf) bProp
---       , mkBench "v-->v" "V10" d9Conf (satWithConf (toDimProp d9Conf) solverConf) bProp
--- --      -- , mkBench' "v-->v" "EvolutionAware" (satWithConf (toDimProp evoAwareConf) solverConf) bProp
+      benches :: Settings -> [Benchmark]
+      benches solverConf =
+        [
+        --   mkBench "v-->v" "V1"  d0Conf (solve (Just d0Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V2"  d1Conf (solve (Just d1Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V3"  d2Conf (solve (Just d2Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V4"  d3Conf (solve (Just d3Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V5"  d4Conf (solve (Just d4Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V6"  d5Conf (solve (Just d5Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V7"  d6Conf (solve (Just d6Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V8"  d7Conf (solve (Just d7Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V9"  d8Conf (solve (Just d8Conf) solverConf) bProp
+        -- , mkBench "v-->v" "V10" d9Conf (solve (Just d9Conf) solverConf) bProp
 
---       , mkBench "v-->v" "V1"                             justD0Conf (satWith solverConf)         justbPropV1
---       , mkBench "v-->v" "V1*V2"                          justD01Conf (satWith solverConf)        justbPropV12
---       , mkBench "v-->v" "V1*V2*V3"                       justD012Conf (satWith solverConf)       justbPropV123
---       , mkBench "v-->v" "V1*V2*V3*V4"                    justD0123Conf (satWith solverConf)      justbPropV1234
---       , mkBench "v-->v" "V1*V2*V3*V4*V5"                 justD01234Conf (satWith solverConf)     justbPropV12345
---       , mkBench "v-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf (satWith solverConf)    justbPropV123456
---       , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf (satWith solverConf)   justbPropV1234567
---       , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf (satWith solverConf)  justbPropV12345678
---       , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (satWith solverConf) justbPropV123456789
---       , mkBench' "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (satWith solverConf) bProp
+          mkBench "v-->v" "V1"                             justD0Conf         (solve (Just justD0Conf)         solverConf) justbPropV1
+        , mkBench "v-->v" "V1*V2"                          justD01Conf        (solve (Just justD01Conf)        solverConf) justbPropV12
+        , mkBench "v-->v" "V1*V2*V3"                       justD012Conf       (solve (Just justD012Conf)       solverConf) justbPropV123
+        , mkBench "v-->v" "V1*V2*V3*V4"                    justD0123Conf      (solve (Just justD0123Conf)      solverConf) justbPropV1234
+        , mkBench "v-->v" "V1*V2*V3*V4*V5"                 justD01234Conf     (solve (Just justD01234Conf)     solverConf) justbPropV12345
+        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf    (solve (Just justD012345Conf)    solverConf) justbPropV123456
+        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf   (solve (Just justD0123456Conf)   solverConf) justbPropV1234567
+        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf  (solve (Just justD01234567Conf)  solverConf) justbPropV12345678
+        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (solve (Just justD012345678Conf) solverConf) justbPropV123456789
+        , mkBench' "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (solve Nothing solverConf) bProp
+        ]
 -- --  -- p - v
 --       , mkBench "p-->v" "V1" d0Conf (pOnV solverConf) bPropV1
 --       , mkBench "p-->v" "V2" d1Conf (pOnV solverConf) bPropV2
@@ -342,16 +339,12 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnPWithConf (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
---   defaultMain
---     [ -- bgroup "ABC" (benches abcDefConf)
---     --   bgroup "Yices" (benches yicesDefConf)
---     -- , bgroup "CVC4" (benches cvc4DefConf)
---         bgroup "Z3" (benches z3DefConf)
---       -- , bgroup "Z3" (compRatioBenches z3DefConf)
---     -- , bgroup "Boolector" (benches boolectorDefConf)
---     ]
+  defaultMain $
+        [ bgroup "Z3" (benches defSettings)
+      -- , bgroup "Z3" (compRatioBenches z3DefConf)
+        ]
 
-  -- (satWith z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
-  -- solveVerbose bProp Nothing defSettings
-  res <- solveVerbose Nothing defSettings bProp
-  putStrLn $ show res
+  -- -- (solve z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
+  -- -- solveVerbose bProp Nothing defSettings
+  -- res <- solve Nothing defSettings bProp
+  -- putStrLn $ show $ length res
