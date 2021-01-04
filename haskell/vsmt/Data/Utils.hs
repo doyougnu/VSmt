@@ -109,17 +109,29 @@ instance Boolean S.SBool where
   {-# INLINE (|||) #-}
   {-# INLINE (<=>) #-}
 
+-- | Plain propositions on the variational solver
 pOnV :: Proposition -> IO [[(Maybe VariantContext, (Z.Result,[(Var,Value)]))]]
 pOnV p = do
   let configs = genConfigs p
       ps = fmap (`configure` p) configs
   mapM (Sl.solve Nothing defSettings) ps
 
-vOnP :: Proposition -> IO [(Z.Result, Maybe Z.Model)]
-vOnP p = do
+-- | Plain propositions on the plain solver
+pOnP :: Proposition -> IO [(Z.Result, Maybe Z.Model)]
+pOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
       go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
                    Z.assert s
                    Z.getModel
+  mapM (Z.evalZ3 . go) ps
+
+vOnP :: Proposition -> IO [(Z.Result, Maybe Z.Model)]
+vOnP p = do
+  let configs = genConfigs p
+      ps = fmap (Plain . (`configure` p)) configs
+      go prop = Z.local $
+        do s <- Sl.unSBool <$> runEvalZ3 prop
+           Z.assert s
+           Z.getModel
   mapM (Z.evalZ3 . go) ps
