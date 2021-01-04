@@ -226,8 +226,8 @@ refsAreDisjoint :: Proposition -> Bool
 refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop
 
 -- | True if the proposition lacks choices
-isPlain :: Proposition -> Maybe (Plain Proposition)
-isPlain p | choiceCount p /= 0 = Just $ Plain p
+validatePlain :: Proposition -> Maybe (Plain Proposition)
+validatePlain p | choiceCount p /= 0 = Just $ Plain p
           | otherwise          = Nothing
 
 validateTotal :: PartialConfig -> Prop' a -> Maybe (Total Config)
@@ -236,8 +236,8 @@ validateTotal c (toList . dimensions -> ds) =
                               _      -> Nothing
 
 isVariational :: Proposition -> Bool
-isVariational p = isPlain p & \case Nothing -> True
-                                    _       -> False
+isVariational p = validatePlain p & \case Nothing -> True
+                                          _       -> False
 
 -- | Propositions which only consist of mathematical relations
 onlyRelations :: Proposition -> Bool

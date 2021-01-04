@@ -533,7 +533,6 @@ freeze = do st       <- R.asks stores
             fdimensions <- read dimensions st
             return FrozenStores{..}
 
--- TODO remove the StateT dependency for ReaderT
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
@@ -573,9 +572,6 @@ runSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runSolverT
 
 runSolverLog :: State -> SolverLog a -> Z.Z3 (a, State)
 runSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
-
-type PreRun m a = Stores -> m a -> Z.Z3 (a, Stores)
-type Run m    a = State  -> SolverT m a -> Z.Z3 (a, State)
 
 class RunPreSolver s where
   runPreSolver :: Stores -> s a -> Z.Z3 (a, Stores)
@@ -1264,18 +1260,11 @@ removeChoices ::
   ( MonadLogger m
   , Z.MonadZ3   m
   ) => VarCore -> SolverT m ()
-<<<<<<< HEAD
-{-# INLINE     removeChoices #-}
-{-# SPECIALIZE removeChoices :: VarCore -> Solver () #-}
-removeChoices (VarCore Unit) = logInProducer "Core reduced to Unit" >>
-                               reads vConfig >>= getResult >>= store
-=======
 removeChoices (VarCore Unit) = reads bools >>= logInProducerWith "Core reduced to Unit" >>
                                reads config >>= logInProducerWith "Core reduced to Unit with Context" >>
                                do vC <- reads vConfig
                                   r  <- getResult
                                   store (vC, r)
->>>>>>> 7e92d5ffbc0273f2ea147c5335272f832ce1a5a1
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
@@ -1300,14 +1289,9 @@ choose loc =
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
-<<<<<<< HEAD
-        let goLeft  = toIL cl >>= accumulate . snd >>= choose . findChoice . toLocWith ctx . snd
-            goRight = toIL cr >>= accumulate . snd >>= choose . findChoice . toLocWith ctx . snd
-=======
         logInProducer "Choosing Context"
         let goLeft  = toIL cl >>= accumulate . snd >>= findChoice . toLocWith ctx . snd >>= choose
             goRight = toIL cr >>= accumulate . snd >>= findChoice . toLocWith ctx . snd >>= choose
->>>>>>> 7e92d5ffbc0273f2ea147c5335272f832ce1a5a1
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
