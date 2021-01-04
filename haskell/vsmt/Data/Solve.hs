@@ -52,6 +52,7 @@ import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
 import           Data.Maybe                            (fromJust)
+
 import qualified Z3.Monad                              as Z
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
@@ -453,7 +454,7 @@ type ACache = Cache IL (V,IL)
 newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]) }
 
 deriving instance Generic Z.Result
-deriving anyclass instance NFData  Z.Result
+deriving anyclass instance NFData Z.Result
 
 data Caches = Caches
               { accCache :: STM.TVar ACache

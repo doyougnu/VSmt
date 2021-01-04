@@ -117,21 +117,26 @@ pOnV p = do
   mapM (Sl.solve Nothing defSettings) ps
 
 -- | Plain propositions on the plain solver
-pOnP :: Proposition -> IO [(Z.Result, Maybe Z.Model)]
+pOnP :: Proposition -> IO [(Z.Result, String)]
 pOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
       go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
                    Z.assert s
-                   Z.getModel
+                   (r,m) <- Z.getModel
+                   m' <- maybe (pure "") Z.modelToString m
+                   return (r, m')
+
   mapM (Z.evalZ3 . go) ps
 
-vOnP :: Proposition -> IO [(Z.Result, Maybe Z.Model)]
+vOnP :: Proposition -> IO [(Z.Result, String)]
 vOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
       go prop = Z.local $
         do s <- Sl.unSBool <$> runEvalZ3 prop
            Z.assert s
-           Z.getModel
-  mapM (Z.evalZ3 . go) ps
+           (r,m) <- Z.getModel
+           m' <- maybe (pure "") Z.modelToString m
+           return (r, m')
+  Z.evalZ3 $ mapM go ps

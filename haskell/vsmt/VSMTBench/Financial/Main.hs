@@ -198,17 +198,16 @@ main = do
         -- , mkBench "v-->v" "V9"  d8Conf (solve (Just d8Conf) solverConf) bProp
         -- , mkBench "v-->v" "V10" d9Conf (solve (Just d9Conf) solverConf) bProp
 
-          mkBench "v-->v" "V1"                             justD0Conf         (solve (Just justD0Conf)         solverConf) justbPropV1
-        , mkBench "v-->v" "V1*V2"                          justD01Conf        (solve (Just justD01Conf)        solverConf) justbPropV12
-        , mkBench "v-->v" "V1*V2*V3"                       justD012Conf       (solve (Just justD012Conf)       solverConf) justbPropV123
-        , mkBench "v-->v" "V1*V2*V3*V4"                    justD0123Conf      (solve (Just justD0123Conf)      solverConf) justbPropV1234
-        , mkBench "v-->v" "V1*V2*V3*V4*V5"                 justD01234Conf     (solve (Just justD01234Conf)     solverConf) justbPropV12345
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf    (solve (Just justD012345Conf)    solverConf) justbPropV123456
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf   (solve (Just justD0123456Conf)   solverConf) justbPropV1234567
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf  (solve (Just justD01234567Conf)  solverConf) justbPropV12345678
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (solve (Just justD012345678Conf) solverConf) justbPropV123456789
-        , mkBench' "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (solve Nothing solverConf) bProp
-        ]
+        --   mkBench "v-->v" "V1"                             justD0Conf         (solve (Just justD0Conf)         solverConf) justbPropV1
+        -- , mkBench "v-->v" "V1*V2"                          justD01Conf        (solve (Just justD01Conf)        solverConf) justbPropV12
+        -- , mkBench "v-->v" "V1*V2*V3"                       justD012Conf       (solve (Just justD012Conf)       solverConf) justbPropV123
+          mkBench "v-->v" "V1*V2*V3*V4"                    justD0123Conf      (solve (Just justD0123Conf)      solverConf) justbPropV1234
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5"                 justD01234Conf     (solve (Just justD01234Conf)     solverConf) justbPropV12345
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf    (solve (Just justD012345Conf)    solverConf) justbPropV123456
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf   (solve (Just justD0123456Conf)   solverConf) justbPropV1234567
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf  (solve (Just justD01234567Conf)  solverConf) justbPropV12345678
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (solve (Just justD012345678Conf) solverConf) justbPropV123456789
+        -- , mkBench' "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (solve Nothing solverConf) bProp
 -- --  -- p - v
 --       , mkBench "p-->v" "V1" d0Conf (pOnV solverConf) bPropV1
 --       , mkBench "p-->v" "V2" d1Conf (pOnV solverConf) bPropV2
@@ -224,7 +223,7 @@ main = do
 --       , mkBench "p-->v" "V1"                             justD0Conf (pOnV solverConf) justbPropV1
 --       , mkBench "p-->v" "V1*V2"                          justD01Conf (pOnV solverConf) justbPropV12
 --       , mkBench "p-->v" "V1*V2*V3"                       justD012Conf (pOnV solverConf) justbPropV123
---       , mkBench "p-->v" "V1*V2*V3*V4"                    justD0123Conf (pOnV solverConf) justbPropV1234
+        , mkBench "p-->v" "V1*V2*V3*V4"                    justD0123Conf pOnV justbPropV1234
 --       , mkBench "p-->v" "V1*V2*V3*V4*V5"                 justD01234Conf (pOnV solverConf) justbPropV12345
 --       , mkBench "p-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf (pOnV solverConf) justbPropV123456
 --       , mkBench "p-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf (pOnV solverConf) justbPropV1234567
@@ -246,7 +245,7 @@ main = do
 --       , mkBench "p-->p" "V1"                             justD0Conf (bfWith solverConf) justbPropV1
 --       , mkBench "p-->p" "V1*V2"                          justD01Conf (bfWith solverConf) justbPropV12
 --       , mkBench "p-->p" "V1*V2*V3"                       justD012Conf (bfWith solverConf) justbPropV123
---       , mkBench "p-->p" "V1*V2*V3*V4"                    justD0123Conf (bfWith solverConf) justbPropV1234
+        , mkBench "p-->p" "V1*V2*V3*V4"                    justD0123Conf pOnP justbPropV1234
 --       , mkBench "p-->p" "V1*V2*V3*V4*V5"                 justD01234Conf (bfWith solverConf) justbPropV12345
 --       , mkBench "p-->p" "V1*V2*V3*V4*V5*V6"              justD012345Conf (bfWith solverConf) justbPropV123456
 --       , mkBench "p-->p" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf (bfWith solverConf) justbPropV1234567
@@ -268,14 +267,14 @@ main = do
 --       , mkBench "v-->p" "V1"                             justD0Conf (vOnPWith solverConf) justbPropV1
 --       , mkBench "v-->p" "V1*V2"                          justD01Conf (vOnPWith solverConf) justbPropV12
 --       , mkBench "v-->p" "V1*V2*V3"                       justD012Conf (vOnPWith solverConf) justbPropV123
---       , mkBench "v-->p" "V1*V2*V3*V4"                    justD0123Conf (vOnPWith solverConf) justbPropV1234
+        , mkBench "v-->p" "V1*V2*V3*V4"                    justD0123Conf vOnP justbPropV1234
 --       , mkBench "v-->p" "V1*V2*V3*V4*V5"                 justD01234Conf (vOnPWith solverConf) justbPropV12345
 --       , mkBench "v-->p" "V1*V2*V3*V4*V5*V6"              justD012345Conf (vOnPWith solverConf) justbPropV123456
 --       , mkBench "v-->p" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf (vOnPWith solverConf) justbPropV1234567
 --       , mkBench "v-->p" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf (vOnPWith solverConf) justbPropV12345678
 --       , mkBench "v-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (vOnPWith solverConf) justbPropV123456789
 --       , mkBench' "v-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (vOnPWith solverConf) bProp
---       ]
+         ]
 
 
 --     -- | Compression Ratio props, we start counting by 1 instead of 0 here
