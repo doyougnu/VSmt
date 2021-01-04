@@ -450,14 +450,10 @@ data State = State
 type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V,IL)
 
-<<<<<<< HEAD
-newtype Results = Results { unResult :: STM.TVar Result }
-=======
 newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]) }
 
 deriving instance Generic Z.Result
 deriving anyclass instance NFData  Z.Result
->>>>>>> 7e92d5ffbc0273f2ea147c5335272f832ce1a5a1
 
 data Caches = Caches
               { accCache :: STM.TVar ACache
