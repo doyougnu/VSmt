@@ -137,40 +137,40 @@ main = do
       benches :: Settings -> [Benchmark]
       benches ss = [
         -- v - v
-         mkBench "v-->v" "V1" d0Conf (solve (Just d0Conf) ss) bProp
-       , mkBench "v-->v" "V2" d2Conf (solve (Just d2Conf) ss) bProp
-       , mkBench "v-->v" "V3" d3Conf (solve (Just d3Conf) ss) bProp
-       , mkBench "v-->v" "V4" d4Conf (solve (Just d4Conf) ss) bProp
-       , mkBench "v-->v" "V1*V2"        justV12Conf  (solve (Just justV12Conf) ss) bPropJustV12
-       , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve (Just justV123Conf) ss) bPropJustV123
-       , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
+        mkBench "v-->v" "V1" d0Conf (solve (Just d0Conf) ss) bProp
+        , mkBench "v-->v" "V2" d2Conf (solve (Just d2Conf) ss) bProp
+        , mkBench "v-->v" "V3" d3Conf (solve (Just d3Conf) ss) bProp
+        , mkBench "v-->v" "V4" d4Conf (solve (Just d4Conf) ss) bProp
+        , mkBench "v-->v" "V1*V2"        justV12Conf  (solve (Just justV12Conf) ss) bPropJustV12
+        , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve (Just justV123Conf) ss) bPropJustV123
+        , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
 
        -- p - v
-       -- , mkBench "p-->v" "V1"  justV1Conf (pOnV vc) bPropV1
-       -- , mkBench "p-->v" "V2"  justV2Conf (pOnV vc) bPropV2
-       -- , mkBench "p-->v" "V3"  justV3Conf (pOnV vc) bPropV3
-       -- , mkBench "p-->v" "V4"  justV4Conf (pOnV vc) bPropV4
-       -- , mkBench "p-->v" "V1*V2"        justV12Conf (pOnV vc) bPropJustV12
-       -- , mkBench "p-->v" "V1*V2*V3"     justV123Conf (pOnV vc) bPropJustV123
-       -- , mkBench' "p-->v" "V1*V2*V3*V4"  (pOnV vc) bProp
+        , mkBench "p-->v" "V1"  justV1Conf pOnV bPropV1
+        , mkBench "p-->v" "V2"  justV2Conf pOnV bPropV2
+        , mkBench "p-->v" "V3"  justV3Conf pOnV bPropV3
+        , mkBench "p-->v" "V4"  justV4Conf pOnV bPropV4
+        , mkBench "p-->v" "V1*V2"        justV12Conf pOnV bPropJustV12
+        , mkBench "p-->v" "V1*V2*V3"     justV123Conf pOnV bPropJustV123
+        , mkBench' "p-->v" "V1*V2*V3*V4"  pOnV bProp
 
        -- p - p
-        -- , mkBench "p-->p" "V1"  justV1Conf (bfWith vc) bPropV1
-        -- , mkBench "p-->p" "V2"  justV2Conf (bfWith vc) bPropV2
-        -- , mkBench "p-->p" "V3"  justV3Conf (bfWith vc) bPropV3
-        -- , mkBench "p-->p" "V4"  justV4Conf (bfWith vc) bPropV4
-        -- , mkBench "p-->p" "V1*V2"        justV12Conf (bfWith vc) bPropJustV12
-        -- , mkBench "p-->p" "V1*V2*V3"     justV123Conf (bfWith vc) bPropJustV123
-        -- , mkBench' "p-->p" "V1*V2*V3*V4"  (bfWith vc) bProp
+        , mkBench "p-->p" "V1"  justV1Conf pOnP bPropV1
+        , mkBench "p-->p" "V2"  justV2Conf pOnP bPropV2
+        , mkBench "p-->p" "V3"  justV3Conf pOnP bPropV3
+        , mkBench "p-->p" "V4"  justV4Conf pOnP bPropV4
+        , mkBench "p-->p" "V1*V2"        justV12Conf pOnP bPropJustV12
+        , mkBench "p-->p" "V1*V2*V3"     justV123Conf pOnP bPropJustV123
+        , mkBench' "p-->p" "V1*V2*V3*V4"  pOnP bProp
 
         -- v - p
-        -- , mkBench "v-->p" "V1"  justV1Conf (vOnPWithConf (toDimProp d0Conf) vc) bPropV1
-        -- , mkBench "v-->p" "V2"  justV2Conf (vOnPWithConf (toDimProp d2Conf) vc) bPropV2
-        -- , mkBench "v-->p" "V3"  justV3Conf (vOnPWithConf (toDimProp d3Conf) vc) bPropV3
-        -- , mkBench "v-->p" "V4"  justV4Conf (vOnPWithConf (toDimProp d4Conf) vc) bPropV4
-        -- , mkBench "v-->p" "V1*V2"        justV12Conf (vOnPWith vc) bPropJustV12
-        -- , mkBench "v-->p" "V1*V2*V3"     justV123Conf (vOnPWith vc) bPropJustV123
-        -- , mkBench' "v-->p" "V1*V2*V3*V4"  (vOnPWith vc) bProp
+        , mkBench "v-->p" "V1"  justV1Conf vOnP bPropV1
+        , mkBench "v-->p" "V2"  justV2Conf vOnP bPropV2
+        , mkBench "v-->p" "V3"  justV3Conf vOnP bPropV3
+        , mkBench "v-->p" "V4"  justV4Conf vOnP bPropV4
+        , mkBench "v-->p" "V1*V2"        justV12Conf vOnP bPropJustV12
+        , mkBench "v-->p" "V1*V2*V3"     justV123Conf vOnP bPropJustV123
+        , mkBench' "v-->p" "V1*V2*V3*V4"  vOnP bProp
         ]
 
     -- | Compression Ratio props

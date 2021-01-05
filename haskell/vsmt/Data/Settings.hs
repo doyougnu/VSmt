@@ -42,7 +42,7 @@ defSettings :: Settings
 defSettings = Settings{ seed            = Nothing
                       , generateModels  = True
                       , verboseMode     = False
-                      , vcBufSize       = 250
+                      , vcBufSize       = 25000
                       , producerBufSize = 250
                       , consumerBufSize = 250
                       , numResults      = Nothing
