@@ -11,7 +11,6 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-{-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE DerivingVia           #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
