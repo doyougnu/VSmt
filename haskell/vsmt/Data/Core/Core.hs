@@ -11,7 +11,6 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
-{-# LANGUAGE AllowAmbiguousTypes   #-}
 {-# LANGUAGE DerivingVia           #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
@@ -181,9 +180,25 @@ genConfigs (toList . dimensions -> ds) = (Map.!) . Map.fromList <$> booleanCombi
       fmap ((d, True) :) cs ++ fmap ((d, False) :) cs
       where cs = booleanCombinations dims
 
+-------------------------- Manipulation ------------------------------------------
+
+-- | Alter the name of all dimensions by a function in a proposition
+renameDims :: (Dim -> Dim) -> Prop' a -> Prop' a
+renameDims f (ChcB d l r) = ChcB (f d) (renameDims f l)  (renameDims f r)
+renameDims f (OpIB o l r) = OpIB   o   (renameDims' f l) (renameDims' f r)
+renameDims f (OpB o e)    = OpB    o   (renameDims f e)
+renameDims f (OpBB o l r) = OpBB   o   (renameDims f l)  (renameDims f r)
+renameDims _ x            = x
+
+-- | Alter the name of all dimensions by a function in a numeric proposition
+renameDims' :: (Dim -> Dim) -> NExpr' a -> NExpr' a
+renameDims' f (ChcI d l r) = ChcI (f d) (renameDims' f l) (renameDims' f r)
+renameDims' f (OpII o l r) = OpII   o   (renameDims' f l) (renameDims' f r)
+renameDims' f (OpI o e)    = OpI    o   (renameDims' f e)
+renameDims' _ x            = x
 
 -------------------------- Diagnostics ------------------------------------------
-compressionRatio :: (Configurable Config p, p ~ (Prop' a)) => p -> Float
+compressionRatio :: (Configurable Config p, p ~ Prop' a) => p -> Float
 compressionRatio prop
   | total == 0 = 0
   | otherwise = fromIntegral numerator / fromIntegral total
@@ -219,6 +234,8 @@ plainCount' (OpII _ l r) = choiceCount' l + choiceCount' r
 plainCount' (OpI _ e)    = choiceCount' e
 plainCount' _            = 1
 
+dimensionCount :: Prop' a -> Int
+dimensionCount = Set.size . dimensions
 
 -------------------------- Predicates ------------------------------------------
 -- | False if there is a numeric variable with the same name as a boolean variable
