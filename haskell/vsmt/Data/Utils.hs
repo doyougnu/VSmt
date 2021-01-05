@@ -34,9 +34,6 @@ import           Settings            (defSettings)
 type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
 type SimpleZCache a m b = St.StateT (M.Map a Sl.SBool) m b
 
-renameDims :: (a -> b) -> Prop' a -> Prop' b
-renameDims = fmap
-
 genConfigPool :: VariantContext -> IO [PartialConfig]
 genConfigPool p =
   do

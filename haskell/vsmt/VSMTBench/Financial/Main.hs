@@ -6,18 +6,19 @@ module Main where
 import           Data.Aeson      (decodeStrict, encodeFile)
 import           Data.Either     (lefts, rights)
 import           Data.List       (delete)
-import           Data.Text       (Text)
+import           Data.Text       (Text,pack)
 import           Gauge
 
 import           Control.DeepSeq (force)
 import qualified Data.ByteString as BS (readFile)
 import           Data.Maybe      (fromJust)
-import qualified Data.Text.IO    as T (appendFile, writeFile)
+import qualified Data.Text.IO    as T (putStrLn,appendFile, writeFile)
 import           Text.Megaparsec (parse)
 
 import           Bench.Core
 import           Core.Core
 import           Core.Types
+import           Core.Pretty
 import           Settings
 import           Solve           (solve, solveVerbose)
 import           Utils
@@ -41,7 +42,7 @@ dataFile = "VSMTBench/Financial/financial_merged.json"
 sliceAndNegate n xs = fromList (&&&) $ bnot <$> drop n xs
 
 ds :: [VariantContext]
-ds = toVariantContext . bRef . toDim <$> ["D_0", "D_1", "D_17", "D_13", "D_7", "D_3", "D_11", "D_5", "D_9", "D_15"]
+ds = toVariantContext . bRef . toDim <$> ["D_0", "D_16", "D_12", "D_6", "D_2", "D_10", "D_4", "D_8", "D_14", "D_15"]
 
 [d0, d1, d17, d13, d7, d3, d11, d5, d9, d15] = ds
 
@@ -65,25 +66,40 @@ justD012345678Conf = mkMultConf 9 ds
 -- [pD01Conf, pD12Conf, pD23Conf, pD34Conf, pD45Conf, pD56Conf, pD67Conf, pD78Conf, pD89Conf] = mkCompRatioPairs ds pairs
 
 -- ((<,0), = "D_0"})
--- ((<,1), = "D_16"})
--- ((<,2), = "D_12"})
--- ((<,3), = "D_6"})
--- ((<,4), = "D_2"})
--- ((<,5), = "D_10"})
--- ((<,6), = "D_4"})
--- ((<,7), = "D_8"})
--- ((<,8), = "D_14"})
 -- ((≤,0), = "D_1"})
+-- ((<,1), = "D_16"})
 -- ((≤,1), = "D_17"})
+-- ((<,2), = "D_12"})
 -- ((≤,2), = "D_13"})
+-- ((<,3), = "D_6"})
 -- ((≤,3), = "D_7"})
+-- ((<,4), = "D_2"})
 -- ((≤,4), = "D_3"})
+-- ((<,5), = "D_10"})
 -- ((≤,5), = "D_11"})
+-- ((<,6), = "D_4"})
 -- ((≤,6), = "D_5"})
+-- ((<,7), = "D_8"})
 -- ((≤,7), = "D_9"})
 -- ((≤,8), = "D_15"})
+-- ((<,8), = "D_14"})
 -- dimConf' :: VProp Text String String
 -- encoding for 6 configs that make sure the inequalities encompass each other
+
+-- | Hardcoding equivalencies in generated dimensions to reduce number of
+-- dimensions to 10, this was manually done by inspecting parser results
+-- sameDims :: Text -> Text
+sameDims d
+  | d == "D_1"  = "D_16"    -- <= 0 === < 1
+  | d == "D_17" = "D_12"    -- <= 1 === < 2
+  | d == "D_13" = "D_6"
+  | d == "D_7"  = "D_2"
+  | d == "D_3"  = "D_10"
+  | d == "D_11" = "D_4"
+  | d == "D_5"  = "D_8"
+  | d == "D_9"  = "D_14"
+  | otherwise = d
+
 
 mkConf :: VariantContext -> [VariantContext] -> VariantContext
 mkConf x xs = x &&& (conjoin $ bnot <$> (delete x xs))
@@ -103,20 +119,6 @@ main = do
 
       bPs' = parse langParser "" <$> bCs
       bPs = rights bPs'
-
-      -- | Hardcoding equivalencies in generated dimensions to reduce number of
-      -- dimensions to 4, this was manually done by inspecting parser results
-      sameDims :: Text -> Text
-      sameDims d
-        | d == "D_16" = "D_1"
-        | d == "D_12" = "D_17"
-        | d == "D_6" = "D_13"
-        | d == "D_2" = "D_7"
-        | d == "D_10" = "D_3"
-        | d == "D_4" = "D_11"
-        | d == "D_8" = "D_5"
-        | d == "D_14" = "D_9"
-        | otherwise = d
 
       !bProp = force $ ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
       -- dmapping = getDimMap $ autoAndJoin bPs
@@ -338,12 +340,13 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnPWithConf (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
-  defaultMain $
-        [ bgroup "Z3" (benches defSettings)
-      -- , bgroup "Z3" (compRatioBenches z3DefConf)
-        ]
+  -- defaultMain $
+  --       [ bgroup "Z3" (benches defSettings)
+  --     -- , bgroup "Z3" (compRatioBenches z3DefConf)
+  --       ]
 
-  -- -- (solve z3DefConf) bProp >>= encodeFile "data/fin_vmodel.json"
-  -- -- solveVerbose bProp Nothing defSettings
-  -- res <- solve Nothing defSettings bProp
-  -- putStrLn $ show $ length res
+
+  T.putStrLn $ pretty $ show $ dimensions bProp
+  T.putStrLn $ pretty $ show $ dimensionCount bProp
+  T.putStrLn $ pretty $ justD01Conf
+  T.putStrLn $ pretty $ justD012Conf
