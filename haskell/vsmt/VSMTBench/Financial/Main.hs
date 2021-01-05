@@ -343,13 +343,7 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnP (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
-  -- defaultMain $
-  --       [ bgroup "Z3" (benches defSettings)
-  --     -- , bgroup "Z3" (compRatioBenches z3DefConf)
-  --       ]
-
-
-  T.putStrLn $ pretty $ show $ dimensions bProp
-  T.putStrLn $ pretty $ show $ dimensionCount bProp
-  T.putStrLn $ pretty $ justD01Conf
-  T.putStrLn $ pretty $ justD012Conf
+  defaultMain $
+        [ bgroup "Z3" (benches defSettings)
+      -- , bgroup "Z3" (compRatioBenches z3DefConf)
+        ]
