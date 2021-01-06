@@ -20,6 +20,7 @@
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE StandaloneDeriving         #-}
+{-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE BangPatterns               #-}
 
 module Core.Result where
@@ -39,6 +40,7 @@ import           Data.Text              (pack)
 
 import           Parser.Z3
 import           Core.Types
+import           Core.Utils ((:/\)(..))
 
 -- import           Core.Pretty
 
@@ -151,11 +153,11 @@ isSat = do cs <- Z.check
 -- wasSat = isJust . satResult . unboxResult
 
 -- | Generate a VSMT model
-getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result,[(Var,Value)])
+getResult :: (Z.MonadZ3 m, MonadIO m) => m (Z.Result :/\ [(Var :/\ Value)])
 getResult = do (!r,!m) <- Z.getModel
                m'    <- maybe (pure mempty) Z.modelToString m
                let !ms = parseModel . pack $ m'
-               return (r, ms)
+               return (r :/\ ms)
 
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.

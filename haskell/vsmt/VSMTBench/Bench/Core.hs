@@ -88,7 +88,7 @@ mkBench :: NFData a =>
      -> (Proposition -> IO a)
      -> Proposition
      -> Benchmark
-mkBench alg confDesc conf !f prop = run desc f prop
+mkBench alg confDesc conf f !prop = run desc f prop
   where
     confPool = unsafePerformIO $ genConfigPool conf --just call out to the
                                                       --solver, this should

@@ -28,6 +28,7 @@
 {-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeFamilies               #-}
+{-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ViewPatterns               #-}
 
 module Solve where
@@ -67,6 +68,7 @@ import           Prelude                               hiding (EQ, GT, LT, log,
 import           Core.Pretty
 import           Core.Result
 import           Core.Types
+import           Core.Utils                            ((:/\)(..),sSnd)
 
 import           Settings
 
@@ -167,16 +169,16 @@ logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
 findVCore :: ( MonadLogger m
-             , Cachable    m IL (V,IL)
+             , Cachable    m IL (V :/\ IL)
              , Z.MonadZ3   m
              ) => IL -> m VarCore
 findVCore = evaluate
 
-solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]
+solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]
 solveVerbose = internalSolver runPreSolverLog runSolverLog
 
 
-solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]
+solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]
 solve = internalSolver runPreSolverNoLog runSolverNoLog
 
 -- TODO fix this horrendous type signature
@@ -187,8 +189,8 @@ internalSolver :: (MonadLogger m
                   , Z.MonadZ3 m
                   , Z.MonadZ3 f
                   ) =>
-  (Stores -> f IL -> Z.Z3 (IL, Stores))
-  -> (State -> SolverT m [(Maybe VariantContext, (Z.Result,[(Var,Value)]))] -> Z.Z3 (b1, b2))
+  (Stores -> f IL -> Z.Z3 (IL :/\  Stores))
+  -> (State -> SolverT m [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))] -> Z.Z3 (b1 :/\  b2))
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
@@ -212,7 +214,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
                          , caches   = initialCache
                          , results  = initialResults
                          }
-      seasoning = preSlvr initialStore (snd <$> il)
+      seasoning = preSlvr initialStore (sSnd <$> il)
 
       runVCWorkers =
         A.mapConcurrently_ (vcWorker conf startState slvr)
@@ -222,7 +224,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
       -- chans. If the IL is a unit then it'll be caught by evaluate and
       -- placed on a result chan anyway
       populateChans = Z.evalZ3 $
-        do (il', st) <- seasoning
+        do (il' :/\ st) <- seasoning
            slvr startState{stores=st} $
              do void $ findVCore il' >>= removeChoices
                 readWith (unResult . results)
@@ -230,13 +232,13 @@ internalSolver preSlvr slvr conf Settings{..} i = do
   -- kick off
   !aWorkers  <- A.async runVCWorkers
 
-  (results, _) <- populateChans
+  (results :/\  _) <- populateChans
 
   A.cancel aWorkers
 
   return results
 
-solveForCore :: Proposition -> IO (VarCore, State)
+solveForCore :: Proposition -> IO (VarCore :/\ State)
 solveForCore i = do
   (toMain, fromVC)   <- U.newChan 1
   (toVC,   fromMain) <- U.newChan 1
@@ -254,10 +256,10 @@ solveForCore i = do
                          , caches   = initialCache
                          , results  = initialResults
                          }
-      seasoning = runPreSolverNoLog initialStore (snd <$> il)
+      seasoning = runPreSolverNoLog initialStore (sSnd <$> il)
 
       populateChans = Z.evalZ3 $
-        do (il', st) <- seasoning
+        do (il' :/\ st) <- seasoning
            runSolverNoLog startState{stores=st} $ findVCore il'
 
   populateChans
@@ -287,7 +289,7 @@ vcWorker (Just vc) s@State{..} slvr tid =
   Z.evalZ3 $ do
   -- season the solver
   let (fromMain, toMain) = getVcChans . vcChans $ channels
-  (b,st) <- runPreSolverLog stores $ contextToSBool vc
+  (b :/\ st) <- runPreSolverLog stores $ contextToSBool vc
   Z.assert (unSDimension b)
   -- now run the helper
   vcHelper fromMain toMain s{stores=st} slvr tid
@@ -449,9 +451,9 @@ data State = State
   }
 
 type Cache a b = Map.HashMap (StableName a) b
-type ACache = Cache IL (V,IL)
+type ACache = Cache IL (V :/\ IL)
 
-newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext, (Z.Result,[(Var,Value)]))]) }
+newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]) }
 
 deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
@@ -562,23 +564,23 @@ newtype PreSolverT m a = PreSolverT { runPreSolverT :: (R.ReaderT Stores m) a }
                    , R.MonadReader Stores , Z.MonadZ3
                    )
 
-runPreSolverLog :: Stores -> PreSolverLog a -> Z.Z3 (a, Stores)
-runPreSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
+runPreSolverLog :: Stores -> PreSolverLog a -> Z.Z3 (a :/\ Stores)
+runPreSolverLog s = fmap ( :/\ s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
 
-runPreSolverNoLog :: Stores -> PreSolver a -> Z.Z3 (a, Stores)
-runPreSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runPreSolverT
+runPreSolverNoLog :: Stores -> PreSolver a -> Z.Z3 (a :/\ Stores)
+runPreSolverNoLog s = fmap ( :/\ s) . runNoLoggingT . flip R.runReaderT s . runPreSolverT
 
-runSolverNoLog :: State -> Solver a -> Z.Z3 (a, State)
-runSolverNoLog s = fmap (,s) . runNoLoggingT . flip R.runReaderT s . runSolverT
+runSolverNoLog :: State -> Solver a -> Z.Z3 (a :/\ State)
+runSolverNoLog s = fmap ( :/\ s) . runNoLoggingT . flip R.runReaderT s . runSolverT
 
-runSolverLog :: State -> SolverLog a -> Z.Z3 (a, State)
-runSolverLog s = fmap (,s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
+runSolverLog :: State -> SolverLog a -> Z.Z3 (a :/\ State)
+runSolverLog s = fmap ( :/\ s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
 
 class RunPreSolver s where
-  runPreSolver :: Stores -> s a -> Z.Z3 (a, Stores)
+  runPreSolver :: Stores -> s a -> Z.Z3 (a :/\  Stores)
 
 class RunSolver s where
-  runSolver :: State -> s a -> Z.Z3 (a, State)
+  runSolver :: State -> s a -> Z.Z3 (a :/\  State)
 
 instance Z.MonadZ3 z => Z.MonadZ3 (LoggingT z) where
   getSolver  = lift Z.getSolver
@@ -681,7 +683,7 @@ instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
 -- collision ~32k per 2^24. I leave this completely unhandled as it is so rare I
 -- doubt it'll ever actually occur
 instance (Monad m, MonadIO m, MonadLogger m, Z.MonadZ3 m) =>
-  Cachable (SolverT m) IL (V,IL) where
+  Cachable (SolverT m) IL (V :/\ IL) where
   cached !il = do ch <- readCache accCache
                   sn <- liftIO $! il `seq` makeStableName il
                   case find sn ch of
@@ -697,7 +699,6 @@ data NRef = SI SInteger
           | SD SDouble
     deriving (Generic,Show,Eq)
 
-
 -- | The intermediate language, we express negation but negation will not exist
 -- in a variational core. The IL language is intermediate and used to collapse
 -- the input program to it's essential variational structure. We exploit the
@@ -706,57 +707,11 @@ data NRef = SI SInteger
 -- references and choices
 data IL = Unit
     | Ref !BRef
-    | BOp   B_B (V, IL)
-    | BBOp BB_B (V, IL)  (V, IL)
-    | IBOp NN_B (V, IL') (V, IL')
+    | BOp   B_B (V :/\ IL)
+    | BBOp BB_B (V :/\ IL)  (V :/\ IL)
+    | IBOp NN_B (V :/\ IL') (V :/\ IL')
     | Chc Dim Proposition Proposition
     deriving (Generic, Show, Eq)
-
-vCoreSize :: IL -> Int
-vCoreSize (BBOp _ (_,l) (_,r)) = vCoreSize l + vCoreSize r
-vCoreSize (BOp _ (_,e))    = vCoreSize e
-vCoreSize (IBOp _ (_,l) (_,r)) = vCoreSize' l + vCoreSize' r
-vCoreSize _            = 1
-
-vCoreSize' :: IL' -> Int
-vCoreSize' (IOp _ (_,e))    = vCoreSize' e
-vCoreSize' (IIOp _ (_,l) (_,r)) = vCoreSize' l + vCoreSize' r
-vCoreSize' _            = 1
-
-vCoreNumPlain :: IL -> Int
-vCoreNumPlain Chc {}               = 0
-vCoreNumPlain (BOp _ (_,e))        = vCoreNumPlain e
-vCoreNumPlain (BBOp _ (_,l) (_,r)) = vCoreNumPlain  l + vCoreNumPlain r
-vCoreNumPlain (IBOp _ (_,l) (_,r)) = vCoreNumPlain' l + vCoreNumPlain' r
-vCoreNumPlain _                    = 1
-
-vCoreNumPlain' :: IL' -> Int
-vCoreNumPlain' Chc' {}      = 0
-vCoreNumPlain' (IOp _ (_,e))    = vCoreNumPlain' e
-vCoreNumPlain' (IIOp _ (_,l) (_,r)) = vCoreNumPlain' l + vCoreNumPlain' r
-vCoreNumPlain' _            = 1
-
-vCoreNumVar :: IL -> Int
-vCoreNumVar Chc {}       = 0
-vCoreNumVar (BOp _ (_,e))    = vCoreNumVar e
-vCoreNumVar (BBOp _ (_,l) (_,r)) = vCoreNumVar  l + vCoreNumVar r
-vCoreNumVar (IBOp _ (_,l) (_,r)) = vCoreNumVar' l + vCoreNumVar' r
-vCoreNumVar _            = 1
-
-vCoreNumVar' :: IL' -> Int
-vCoreNumVar' Chc' {}      = 0
-vCoreNumVar' (IOp _ (_,e))    = vCoreNumVar' e
-vCoreNumVar' (IIOp _ (_,l) (_,r)) = vCoreNumVar' l + vCoreNumVar' r
-vCoreNumVar'  _           = 1
-
-vCoreMetrics :: Prop' Var -> IO (Int,Int,Int)
-vCoreMetrics i = do (core,_) <- solveForCore i
-                    let il = getCore core
-                        sz  = vCoreSize il
-                        nPl = vCoreNumPlain il
-                        nVr = vCoreNumVar il
-                    return (sz,nPl,nVr)
-
 
 -- | tags which describes where in the tree there is variation
 data V = P | V deriving (Generic, Show, Eq)
@@ -770,10 +725,57 @@ P <@> P = P
 
 
 data IL' = Ref' !NRef
-    | IOp   N_N (V, IL')
-    | IIOp NN_N (V, IL') (V, IL')
+    | IOp   N_N (V :/\ IL')
+    | IIOp NN_N (V :/\ IL') (V :/\ IL')
     | Chc' Dim NExpression NExpression
     deriving (Generic, Show, Eq)
+
+
+vCoreSize :: IL -> Int
+vCoreSize (BBOp _ (_ :/\ l) (_:/\ r)) = vCoreSize l + vCoreSize r
+vCoreSize (BOp _ (_ :/\ e))           = vCoreSize e
+vCoreSize (IBOp _ (_:/\ l) (_ :/\ r)) = vCoreSize' l + vCoreSize' r
+vCoreSize _            = 1
+
+vCoreSize' :: IL' -> Int
+vCoreSize' (IOp _ (_ :/\ e))    = vCoreSize' e
+vCoreSize' (IIOp _ (_ :/\ l) (_ :/\ r)) = vCoreSize' l + vCoreSize' r
+vCoreSize' _            = 1
+
+vCoreNumPlain :: IL -> Int
+vCoreNumPlain Chc {}               = 0
+vCoreNumPlain (BOp _ (_ :/\ e))        = vCoreNumPlain e
+vCoreNumPlain (BBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain  l + vCoreNumPlain r
+vCoreNumPlain (IBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain' l + vCoreNumPlain' r
+vCoreNumPlain _                    = 1
+
+vCoreNumPlain' :: IL' -> Int
+vCoreNumPlain' Chc' {}      = 0
+vCoreNumPlain' (IOp _ (_ :/\ e))    = vCoreNumPlain' e
+vCoreNumPlain' (IIOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain' l + vCoreNumPlain' r
+vCoreNumPlain' _            = 1
+
+vCoreNumVar :: IL -> Int
+vCoreNumVar Chc {}       = 0
+vCoreNumVar (BOp _ (_ :/\ e))    = vCoreNumVar e
+vCoreNumVar (BBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar  l + vCoreNumVar r
+vCoreNumVar (IBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar' l + vCoreNumVar' r
+vCoreNumVar _            = 1
+
+vCoreNumVar' :: IL' -> Int
+vCoreNumVar' Chc' {}      = 0
+vCoreNumVar' (IOp _ (_ :/\ e))    = vCoreNumVar' e
+vCoreNumVar' (IIOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar' l + vCoreNumVar' r
+vCoreNumVar'  _           = 1
+
+vCoreMetrics :: Prop' Var -> IO (Int,Int,Int)
+vCoreMetrics i = do (core :/\ _) <- solveForCore i
+                    let il = getCore core
+                        sz  = vCoreSize il
+                        nPl = vCoreNumPlain il
+                        nVr = vCoreNumVar il
+                    return (sz,nPl,nVr)
+
 
 -- TODO: factor out the redundant cases into a type class
 -- | Convert a proposition into the intermediate language to generate a
@@ -783,32 +785,32 @@ toIL ::
   , Cachable    m (ExRefType Var) IL'
   , Cachable    m Var IL
   , Z.MonadZ3   m
-  ) => Prop' Var -> m (V, IL)
-toIL (LitB True)   = sTrue  >>= return . (P,) . Ref
-toIL (LitB False)  = sFalse >>= return . (P,) . Ref
-toIL (RefB ref)    = (P,) <$> cached ref
-toIL (OpB op e)      = do (v,e') <- toIL e; return (v, BOp op (v, e'))
-toIL (OpBB op l r) = do l'@(vl, _) <- toIL l
-                        r'@(vr, _) <- toIL r
-                        return (vl <@> vr, BBOp op l' r')
-toIL (OpIB op l r) = do l'@(vl,_)  <- toIL' l
-                        r'@(vr,_) <- toIL' r
-                        return (vl <@> vr, IBOp op l' r')
-toIL (ChcB d l r)  = return (V, Chc d l r)
+  ) => Prop' Var -> m (V :/\ IL)
+toIL (LitB True)   = sTrue  >>= return . (P :/\) . Ref
+toIL (LitB False)  = sFalse >>= return . (P :/\) . Ref
+toIL (RefB ref)    = (P :/\) <$> cached ref
+toIL (OpB op e)      = do (v :/\ e') <- toIL e; return (v :/\  BOp op (v :/\ e'))
+toIL (OpBB op l r) = do l'@(vl :/\ _) <- toIL l
+                        r'@(vr :/\ _) <- toIL r
+                        return (vl <@> vr :/\ BBOp op l' r')
+toIL (OpIB op l r) = do l'@(vl :/\ _) <- toIL' l
+                        r'@(vr :/\ _) <- toIL' r
+                        return (vl <@> vr :/\ IBOp op l' r')
+toIL (ChcB d l r)  = return (V :/\ Chc d l r)
 
 toIL' :: ( Cachable    m (ExRefType Var) IL'
          , MonadLogger m
          , Z.MonadZ3   m
          ) =>
-         NExpr' Var -> m (V, IL')
-toIL' (LitI (I i))  = return . (P,) . Ref' . SI =<< literalInt i
-toIL' (LitI (D d))  = return . (P,) . Ref' . SD =<< literalReal d
-toIL' (RefI a)      = (P,) <$> cached a
-toIL' (OpI op e)    = do e'@(v,_) <- toIL' e; return (v, IOp op e')
-toIL' (OpII op l r) = do l'@(vl,_) <- toIL' l
-                         r'@(vr,_) <- toIL' r
-                         return (vl <@> vr, IIOp op l' r')
-toIL' (ChcI d l r)  = return (V, Chc' d l r)
+         NExpr' Var -> m (V :/\ IL')
+toIL' (LitI (I i))  = return . (P :/\ ) . Ref' . SI =<< literalInt i
+toIL' (LitI (D d))  = return . (P :/\ ) . Ref' . SD =<< literalReal d
+toIL' (RefI a)      = (P :/\ ) <$> cached a
+toIL' (OpI op e)    = do e'@(v :/\ _) <- toIL' e; return (v :/\  IOp op e')
+toIL' (OpII op l r) = do l'@(vl :/\ _) <- toIL' l
+                         r'@(vr :/\ _) <- toIL' r
+                         return (vl <@> vr :/\ IIOp op l' r')
+toIL' (ChcI d l r)  = return (V :/\ Chc' d l r)
 
 -------------------------------- Accumulation -----------------------------------
 -- For both evaluation and accumulation we implement the functions in a verbose
@@ -917,85 +919,88 @@ dispatchOp' GTE (SI l) (SD r) = SBool <$> Z.mkGe (unSInteger l)  (unSDouble  r)
 dispatchOp' GTE (SD l) (SD r) = SBool <$> Z.mkGe (unSDouble  l)  (unSDouble  r)
 
 
-accumulate :: (Cachable m IL (V, IL), Z.MonadZ3 m) => IL -> m (V, IL)
+accumulate :: (Cachable m IL (V :/\ IL), Z.MonadZ3 m) => IL -> m (V :/\ IL)
 accumulate = cached
 
 -- | Unmemoized internal Accumulation: we purposefully are verbose to provide
 -- the optimizer better opportunities. Accumulation seeks to combine as much as
 -- possible the plain terms in the AST into symbolic references
-iAccumulate :: Z.MonadZ3 z3 => IL -> z3 (V, IL)
+iAccumulate :: Z.MonadZ3 z3 => IL -> z3 (V :/\ IL)
  -- computation rules
-iAccumulate Unit    = return (P,Unit)
-iAccumulate x@Ref{} = return (P,x)
-iAccumulate x@Chc{} = return (V,x)
+iAccumulate Unit    = return (P :/\ Unit)
+iAccumulate x@Ref{} = return (P :/\ x)
+iAccumulate x@Chc{} = return (V :/\ x)
   -- bools
-iAccumulate (BOp Not (_,Ref r))            = (P,) . Ref <$> sNot r
-iAccumulate (BBOp op (_,Ref l) (_,Ref r))  = (P,) . Ref <$> dispatchOp op l r
+iAccumulate (BOp Not (_ :/\ Ref r))                = (P :/\ ) . Ref <$> sNot r
+iAccumulate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r))  = (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-iAccumulate (IBOp op (_,Ref' l) (_,Ref' r)) = (P,) . Ref <$> dispatchOp' op l r
+iAccumulate (IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
-iAccumulate x@(BBOp _ (_,Chc {}) (_,Chc {}))   = return (V, x)
-iAccumulate x@(BBOp _ (_,Ref _) (_,Chc {}))    = return (V, x)
-iAccumulate x@(BBOp _ (_,Chc {}) (_,Ref _))    = return (V, x)
-iAccumulate x@(IBOp _ (_,Chc' {}) (_,Chc' {})) = return (V, x)
-iAccumulate x@(IBOp _ (_,Ref' _) (_,Chc' {}))  = return (V, x)
-iAccumulate x@(IBOp _ (_,Chc' {}) (_,Ref' _))  = return (V, x)
+iAccumulate x@(BBOp _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
+iAccumulate x@(BBOp _ (_ :/\ Ref _)   (_ :/\ Chc {}))  = return (V :/\ x)
+iAccumulate x@(BBOp _ (_ :/\ Chc {})  (_ :/\ Ref _))   = return (V :/\ x)
+iAccumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
+iAccumulate x@(IBOp _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
+iAccumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-iAccumulate (BOp Not (P, !e)) = do (_,!e') <- iAccumulate e
-                                   let !res = BOp Not (P,e')
-                                   iAccumulate res
-iAccumulate (BOp Not (V, !e)) = do (_,!e') <- iAccumulate e
-                                   let !res = BOp Not (V,e')
-                                   return (V,res)
-iAccumulate (BBOp op (P,!l) (P,!r)) = do (_,!l') <- iAccumulate l
-                                         (_,!r') <- iAccumulate r
-                                         let !res = BBOp op (P,l') (P,r')
-                                         iAccumulate res
-iAccumulate (BBOp op (_,!l) (_,!r)) = do (vl,!l') <- iAccumulate l
-                                         (vr,!r') <- iAccumulate r
-                                         let !res      = BBOp op (vl,l') (vr,r')
-                                         return (vl <@> vr, res)
-iAccumulate (IBOp op (P,!l) (P,!r)) = do (_,!l') <- iAccumulate' l
-                                         (_,!r') <- iAccumulate' r
-                                         let !res = IBOp op (P,l') (P,r')
-                                         iAccumulate res
-iAccumulate (IBOp op (_,!l) (_,!r)) = do x@(vl,_) <- iAccumulate' l
-                                         y@(vr,_) <- iAccumulate' r
-                                         let !res = IBOp op x y
-                                         return (vl <@> vr, res)
+iAccumulate (BOp Not (P :/\ e)) = do (_ :/\ e') <- iAccumulate e
+                                     let !res = BOp Not (P :/\ e')
+                                     iAccumulate res
+iAccumulate (BOp Not (V :/\ e)) = do (_ :/\ e') <- iAccumulate e
+                                     let !res = BOp Not (V :/\ e')
+                                     return (V :/\ res)
+iAccumulate (BBOp op (P :/\ l) (P :/\ r)) = do (_ :/\ l') <- iAccumulate l
+                                               (_ :/\ r') <- iAccumulate r
+                                               let !res = BBOp op (P :/\ l') (P :/\ r')
+                                               iAccumulate res
 
-iAccumulate' :: Z.MonadZ3 z3 => IL' -> z3 (V, IL')
+iAccumulate (BBOp op (_ :/\ l) (_ :/\ r)) = do (vl :/\ l') <- iAccumulate l
+                                               (vr :/\ r') <- iAccumulate r
+                                               let !res  = BBOp op (vl :/\ l') (vr :/\ r')
+                                               return (vl <@> vr :/\ res)
+
+iAccumulate (IBOp op (P :/\ l) (P :/\ r)) = do (_ :/\ l') <- iAccumulate' l
+                                               (_ :/\ r') <- iAccumulate' r
+                                               let !res = IBOp op (P :/\ l') (P :/\ r')
+                                               iAccumulate res
+
+iAccumulate (IBOp op (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
+                                               y@(vr :/\ _) <- iAccumulate' r
+                                               let !res = IBOp op x y
+                                               return (vl <@> vr :/\  res)
+
+iAccumulate' :: Z.MonadZ3 z3 => IL' -> z3 (V :/\ IL')
   -- computation rules
-iAccumulate' x@(Ref' _)          = return (P, x)
-iAccumulate' (IOp op (_,Ref' n)) = (P,) . Ref' <$> dispatchUOp' op n
-iAccumulate' (IIOp op (_,Ref' l) (_,Ref' r))  = (P,) . Ref' <$> dispatchIOp' op l r
+iAccumulate' x@(Ref' _)              = return (P :/\  x)
+iAccumulate' (IOp op (_ :/\ Ref' n)) = (P :/\ ) . Ref' <$> dispatchUOp' op n
+iAccumulate' (IIOp op (_ :/\ Ref' l) (_ :/\ Ref' r))  = (P :/\) . Ref' <$> dispatchIOp' op l r
   -- choices
-iAccumulate' x@Chc' {}                          = return (V, x)
-iAccumulate' x@(IIOp _ (_,Chc' {}) (_,Chc' {})) = return (V, x)
-iAccumulate' x@(IIOp _ (_,Ref' _) (_,Chc' {}))  = return (V, x)
-iAccumulate' x@(IIOp _ (_,Chc' {}) (_,Ref' _))  = return (V, x)
-iAccumulate' (IIOp op c@(_,Chc'{}) (P,r)) = do r' <- iAccumulate' r
-                                               return (V,IIOp op c r')
-iAccumulate' (IIOp op (P,l) c@(_,Chc'{})) = do l' <- iAccumulate' l
-                                               return (V,IIOp op l' c)
+iAccumulate' x@Chc' {}                                  = return (V :/\ x)
+iAccumulate' x@(IIOp _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
+iAccumulate' x@(IIOp _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
+iAccumulate' x@(IIOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
+iAccumulate' (IIOp op c@(_ :/\ Chc'{}) (P :/\ r)) = do r' <- iAccumulate' r
+                                                       return (V :/\ IIOp op c r')
+iAccumulate' (IIOp op (P :/\ l) c@(_ :/\ Chc'{})) = do l' <- iAccumulate' l
+                                                       return (V :/\ IIOp op l' c)
   -- congruence rules
-iAccumulate' (IIOp o (P,l) (P,r)) = do x <- iAccumulate' l
-                                       y <- iAccumulate' r
-                                       let !res = IIOp o x y
-                                       iAccumulate' res
+iAccumulate' (IIOp o (P :/\ l) (P :/\ r)) = do x <- iAccumulate' l
+                                               y <- iAccumulate' r
+                                               let !res = IIOp o x y
+                                               iAccumulate' res
 
-iAccumulate' (IOp o (P, e))  = do !e' <- iAccumulate' e
-                                  let !res = IOp o e'
-                                  iAccumulate' res
+iAccumulate' (IOp o (P :/\  e))  = do !e' <- iAccumulate' e
+                                      let !res = IOp o e'
+                                      iAccumulate' res
 
-iAccumulate' (IOp o (_, e))  = do (v,!e') <- iAccumulate' e
-                                  let res = IOp o (v,e')
-                                  return (v,res)
+iAccumulate' (IOp o (_ :/\  e))  = do (v :/\ e') <- iAccumulate' e
+                                      let res = IOp o (v :/\ e')
+                                      return (v :/\ res)
 
-iAccumulate' (IIOp o (_,l) (_,r)) = do x@(vl,_) <- iAccumulate' l
-                                       y@(vr,_) <- iAccumulate' r
-                                       let !res = IIOp o x y
-                                       return (vl <@> vr, res)
+iAccumulate' (IIOp o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
+                                               y@(vr :/\ _) <- iAccumulate' r
+                                               let !res = IIOp o x y
+                                               return (vl <@> vr :/\  res)
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, Z.MonadZ3 m) => SBool -> m VarCore
@@ -1017,62 +1022,62 @@ isValue' _        = False
   -- computation rules
 evaluate :: ( MonadLogger m
             , Z.MonadZ3   m
-            , Cachable    m IL (V,IL)
+            , Cachable    m IL (V :/\ IL)
             ) => IL -> m VarCore
 evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
-evaluate (BOp Not   (_,Ref r))         = sNot r >>= toSolver
-evaluate (BBOp op (_,Ref l) (_,Ref r)) = toSolver =<< dispatchOp op l r
+evaluate (BOp Not   (_ :/\ Ref r))         = sNot r >>= toSolver
+evaluate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = toSolver =<< dispatchOp op l r
   -- numerics
-evaluate (IBOp op  (_,Ref' l) (_,Ref' r)) = toSolver =<< dispatchOp' op l r
+evaluate (IBOp op  (_ :/\ Ref' l) (_ :/\ Ref' r)) = toSolver =<< dispatchOp' op l r
   -- choices
-evaluate x@(BBOp _ (V,_) (V,_)) = return $! intoCore x
-evaluate x@(IBOp _ (V,_) (V,_)) = return $! intoCore x
+evaluate x@(BBOp _ (V :/\ _) (V :/\ _)) = return $! intoCore x
+evaluate x@(IBOp _ (V :/\ _) (V :/\ _)) = return $! intoCore x
   -- congruence cases
-evaluate (BBOp And (_,l) (_,Unit))      = evaluate l
-evaluate (BBOp And (_,Unit) (_,r))      = evaluate r
-evaluate (BBOp And (_,l) (_,x@(Ref _))) = do _ <- evaluate x; evaluate l
-evaluate (BBOp And (_,x@(Ref _)) (_,r)) = do _ <- evaluate x; evaluate r
-evaluate (IBOp op (P,l) (P,r))        = do !l' <- iAccumulate' l
-                                           !r' <- iAccumulate' r
-                                           let !res = IBOp op l' r'
-                                           evaluate res
+evaluate (BBOp And (_ :/\ l) (_ :/\ Unit))      = evaluate l
+evaluate (BBOp And (_ :/\ Unit) (_ :/\ r))      = evaluate r
+evaluate (BBOp And (_ :/\ l) (_ :/\ x@(Ref _))) = do _ <- evaluate x; evaluate l
+evaluate (BBOp And (_ :/\ x@(Ref _)) (_ :/\ r)) = do _ <- evaluate x; evaluate r
+evaluate (IBOp op (P :/\ l) (P :/\ r))        = do !l' <- iAccumulate' l
+                                                   !r' <- iAccumulate' r
+                                                   let !res = IBOp op l' r'
+                                                   evaluate res
 
-evaluate (IBOp op (_,l) (_,r))        = do l' <- iAccumulate' l
-                                           r' <- iAccumulate' r
-                                           let res = IBOp op l' r'
-                                           return $! intoCore res
+evaluate (IBOp op (_ :/\ l) (_ :/\ r))        = do l' <- iAccumulate' l
+                                                   r' <- iAccumulate' r
+                                                   let res = IBOp op l' r'
+                                                   return $! intoCore res
 
   -- accumulation cases
-evaluate x@(BOp Not (P,_))  = accumulate x >>= evaluate . snd
-evaluate x@(BOp Not (V,_))  = intoCore . snd <$> accumulate x
-evaluate (BBOp And (P,l) (P,r)) = log "[Eval P P] And case" >>
+evaluate x@(BOp Not (P :/\ _))  = accumulate x >>= evaluate . sSnd
+evaluate x@(BOp Not (V :/\ _))  = intoCore . sSnd <$> accumulate x
+evaluate (BBOp And (P :/\ l) (P :/\ r)) = log "[Eval P P] And case" >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
-     let !res = BBOp And (P,l') (P,r')
+     let !res = BBOp And (P :/\ l') (P :/\ r')
      evaluate res
-evaluate (BBOp And (V,l) (P,r)) = log "[Eval V P] And case" >>
+evaluate (BBOp And (V :/\ l) (P :/\ r)) = log "[Eval V P] And case" >>
   do (VarCore r') <- evaluate r
-     let !res = BBOp And (V,l) (P,r')
+     let !res = BBOp And (V :/\ l) (P :/\ r')
      evaluate res
-evaluate (BBOp And (P,l) (V,r)) = log "[Eval P V] And case" >>
+evaluate (BBOp And (P :/\ l) (V :/\ r)) = log "[Eval P V] And case" >>
   do (VarCore l') <- evaluate l
-     let !res = BBOp And (P,l') (V,r)
+     let !res = BBOp And (P :/\ l') (V :/\ r)
      evaluate res
-evaluate (BBOp op (P,l) (P,r)) = log "[Eval P P] General Case" >>
-  do (_,l') <- accumulate l
-     (_,r') <- accumulate r
-     let res = BBOp op (P,l') (P,r')
+evaluate (BBOp op (P :/\ l) (P :/\ r)) = log "[Eval P P] General Case" >>
+  do (_ :/\ l') <- accumulate l
+     (_ :/\ r') <- accumulate r
+     let res = BBOp op (P :/\ l') (P :/\ r')
      evaluate res
-evaluate (BBOp op (V,l) (P,r)) = log "[Eval V P] General Case" >>
-  do (_,r') <- accumulate r
-     let res = BBOp op (V,l) (P,r')
+evaluate (BBOp op (V :/\ l) (P :/\ r)) = log "[Eval V P] General Case" >>
+  do (_ :/\ r') <- accumulate r
+     let res = BBOp op (V :/\ l) (P :/\ r')
      return $! intoCore res
-evaluate (BBOp op (P,l) (V,r)) = log "[Eval P V] General Case" >>
-  do (_,l') <- accumulate l
-     let res = BBOp op (P,l') (V,r)
+evaluate (BBOp op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
+  do (_ :/\ l') <- accumulate l
+     let res = BBOp op (P :/\ l') (V :/\ r)
      return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
@@ -1109,7 +1114,7 @@ toLocWith' :: Ctx -> IL' -> Loc
 toLocWith' = flip InNum
 
 findChoice :: ( Z.MonadZ3 z3
-              , Cachable  z3 IL (V, IL)
+              , Cachable  z3 IL (V :/\ IL)
               ) => Loc -> z3 Loc
   -- base cases
 findChoice x@(InBool Ref{} Top) = return x
@@ -1117,33 +1122,33 @@ findChoice x@(InBool Unit Top)  = return x
 findChoice x@(InBool Chc {} _)  = return x
 findChoice x@(InNum Chc' {} _)  = return x
   -- discharge two references
-findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   = do (_,n) <- accumulate $ BBOp op (P,l) (P,r)
+findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   = do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
                                                              findChoice (InBool n parent)
-findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) = do (_,n) <- accumulate  $ IBOp op (P,l) (P,r)
+findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) = do (_ :/\ n) <- accumulate  $ IBOp op (P :/\ l) (P :/\ r)
                                                              findChoice (InBool n parent)
-findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) = do (_,n) <- iAccumulate' $ IIOp op (P,l) (P,r)
+findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) = do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ l) (P :/\ r)
                                                              findChoice (InNum n parent)
   -- fold
-findChoice (InBool r@Ref{} (InU o e))   = do (_,n) <- accumulate $ BOp o (P,r)
+findChoice (InBool r@Ref{} (InU o e))   = do (_ :/\ n) <- accumulate $ BOp o (P :/\ r)
                                              findChoice (InBool n e)
-findChoice (InNum r@Ref'{}  (InU' o e)) = do (_,n) <- iAccumulate' $ IOp o (P,r)
+findChoice (InNum r@Ref'{}  (InU' o e)) = do (_ :/\ n) <- iAccumulate' $ IOp o (P :/\ r)
                                              findChoice (InNum n e)
-findChoice (InBool r@Ref {} (InR acc op parent)) = do (_,n) <- accumulate $ BBOp op (P,Ref acc) (P,r)
+findChoice (InBool r@Ref {} (InR acc op parent)) = do (_ :/\ n) <- accumulate $ BBOp op (P :/\ Ref acc) (P :/\ r)
                                                       findChoice (InBool n parent)
-findChoice (InNum r@Ref' {} (InRB acc op parent)) = do (_,n) <- accumulate $ IBOp op (P,Ref' acc) (P,r)
+findChoice (InNum r@Ref' {} (InRB acc op parent)) = do (_ :/\ n) <- accumulate $ IBOp op (P :/\ Ref' acc) (P :/\ r)
                                                        findChoice (InBool n parent)
-findChoice (InNum r@Ref' {} (InR' acc op parent)) = do (_,n) <- iAccumulate' $ IIOp op (P,Ref' acc) (P,r)
+findChoice (InNum r@Ref' {} (InR' acc op parent)) = do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ Ref' acc) (P :/\ r)
                                                        findChoice (InNum n parent)
   -- switch
 findChoice (InBool (Ref l) (InL parent op r))   = findChoice (InBool r $ InR l op parent)
 findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
 findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
   -- recur
-findChoice (InBool (BBOp op (_,l) (_,r)) ctx) = findChoice (InBool l $ InL ctx op r)
-findChoice (InBool (IBOp op (_,l) (_,r)) ctx) = findChoice (InNum  l $ InLB ctx op r)
-findChoice (InBool (BOp o (_,e)) ctx)     = findChoice (InBool e $ InU o ctx)
-findChoice (InNum (IOp o (_,e)) ctx)      = findChoice (InNum e  $ InU' o ctx)
-findChoice (InNum (IIOp op (_,l) (_,r)) ctx)  = findChoice (InNum  l $ InL' ctx op r)
+findChoice (InBool (BBOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InBool l $ InL ctx op r)
+findChoice (InBool (IBOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InLB ctx op r)
+findChoice (InBool (BOp  o  (_ :/\ e))           ctx) = findChoice (InBool e $ InU o ctx)
+findChoice (InNum  (IOp  o  (_ :/\ e))           ctx) = findChoice (InNum  e $ InU' o ctx)
+findChoice (InNum  (IIOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
 findChoice (InBool Unit (InL parent And r))   = do t <- sTrue
                                                    findChoice (InBool r $ InR t And parent)
@@ -1167,7 +1172,7 @@ store ::
   ( R.MonadReader State io
   ,  MonadIO            io
   , Z.MonadZ3           io
-  ) => (Maybe VariantContext, (Z.Result,[(Var,Value)])) -> io ()
+  ) => (Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)])) -> io ()
 -- if we use update like this we get the following ghc bug:
 {- Running 1 benchmarks...
 Benchmark auto: RUNNING...
@@ -1265,7 +1270,7 @@ removeChoices (VarCore Unit) = reads bools >>= logInProducerWith "Core reduced t
                                reads config >>= logInProducerWith "Core reduced to Unit with Context" >>
                                do vC <- reads vConfig
                                   r  <- getResult
-                                  store (vC, r)
+                                  store (vC :/\ r)
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
@@ -1276,7 +1281,7 @@ choose ::
 choose (InBool Unit Top)  = logInProducer "Choosing all done" >>
                                do vC <- reads vConfig
                                   r  <- getResult
-                                  store (vC, r)
+                                  store (vC :/\ r)
 choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
                               evaluate l >>= removeChoices
 choose loc =
@@ -1291,8 +1296,8 @@ choose loc =
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
         logInProducer "Choosing Context"
-        let goLeft  = toIL cl >>= accumulate . snd >>= findChoice . toLocWith ctx . snd >>= choose
-            goRight = toIL cr >>= accumulate . snd >>= findChoice . toLocWith ctx . snd >>= choose
+        let goLeft  = toIL cl >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
+            goRight = toIL cr >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
 
         case find d conf of
           Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
@@ -1305,8 +1310,8 @@ choose loc =
       (InNum (Chc' d cl cr) ctx) -> do
         logInProducer "Got choice in context InNum"
         conf <- reads config
-        let goLeft  = toIL' cl >>= iAccumulate' . snd >>= findChoice . toLocWith' ctx . snd >>= choose
-            goRight = toIL' cr >>= iAccumulate' . snd >>= findChoice . toLocWith' ctx . snd >>= choose
+        let goLeft  = toIL' cl >>= iAccumulate' . sSnd >>= findChoice . toLocWith' ctx . sSnd >>= choose
+            goRight = toIL' cr >>= iAccumulate' . sSnd >>= findChoice . toLocWith' ctx . sSnd >>= choose
 
         case find d conf of
           Just True  -> logInProducer "Cache hit --- Left Selected"  >> goLeft
@@ -1340,11 +1345,13 @@ instance Pretty V where
 
 instance Pretty Z.AST where pretty = Text.pack . show
 instance Pretty SBool where pretty (unSBool -> b) = pretty b
+instance (Pretty a, Pretty b) => Pretty (a :/\ b) where
+  pretty (a :/\ b) = "(" <> pretty a <> "," <> pretty b <> ")"
 
 instance Pretty IL where
   pretty Unit = "unit"
   pretty (Ref b)      = pretty b
-  pretty (BOp Not r@(_,Ref _))   = "~" <> pretty r
+  pretty (BOp Not r@(_ :/\ Ref _))   = "~" <> pretty r
   pretty (BOp o e)   = pretty o <> parens (pretty e)
   pretty (BBOp op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
   pretty (IBOp op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
@@ -1356,7 +1363,7 @@ instance Pretty NRef where
 
 instance Pretty IL' where
   pretty (Ref' b)     = pretty b
-  pretty (IOp o x@(_,Ref' _))  = pretty o <> pretty x
+  pretty (IOp o x@(_ :/\ Ref' _))  = pretty o <> pretty x
   pretty (IOp Abs e)  = between "|" (pretty e) "|"
   pretty (IOp o e)    = pretty o <> parens (pretty e)
   pretty (IIOp o l r) = parens $ mconcat [pretty l, " ", pretty o, " ", pretty r]

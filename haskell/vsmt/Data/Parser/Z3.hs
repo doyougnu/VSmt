@@ -12,6 +12,7 @@
 {-# OPTIONS_GHC -Wall -Werror #-}
 
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeOperators     #-}
 
 module Parser.Z3 where
 
@@ -24,16 +25,17 @@ import           Data.Text hiding               (empty)
 import           Data.Void                      (Void)
 import           Control.Monad                  (void)
 import           Core.Types  (Var,Value(..))
+import           Core.Utils  ((:/\)(..))
 
 type Parser = Parsec Void Text
 
-parseModel :: Text -> [(Var,Value)]
+parseModel :: Text -> [(Var :/\ Value)]
 parseModel s = case run of
                  Left _  -> mempty -- This should never error so throw away the either
                  Right a -> a
   where run =  parse go "" s
 
-go :: Parser [(Var,Value)]
+go :: Parser [(Var :/\ Value)]
 go = between sc eof (row `sepEndBy` C.newline)
 
 sc :: Parser ()
@@ -67,9 +69,9 @@ false = pKeyword "false" *> pure (B False)
 bool :: Parser Value
 bool = true <|> false
 
-row :: Parser (Var, Value)
+row :: Parser (Var :/\  Value)
 row = do v <- lexeme variable
          void $ skipManyTill C.digitChar C.space1
          void arrow
          val <- bool
-         return (v,val)
+         return (v :/\ val)
