@@ -11,6 +11,7 @@
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances    #-}
+{-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns         #-}
 
@@ -27,6 +28,7 @@ import           Z3.Monad            as Z
 
 import           Core.Types
 import           Core.Core
+import           Core.Utils
 import qualified Solve               as Sl
 import           Settings            (defSettings)
 
@@ -107,14 +109,14 @@ instance Boolean S.SBool where
   {-# INLINE (<=>) #-}
 
 -- | Plain propositions on the variational solver
-pOnV :: Proposition -> IO [[(Maybe VariantContext, (Z.Result,[(Var,Value)]))]]
+pOnV :: Proposition -> IO [[(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]]
 pOnV p = do
   let configs = genConfigs p
       ps = fmap (`configure` p) configs
   mapM (Sl.solve Nothing defSettings) ps
 
 -- | Plain propositions on the plain solver
-pOnP :: Proposition -> IO [(Z.Result, String)]
+pOnP :: Proposition -> IO [(Z.Result :/\  String)]
 pOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
@@ -122,11 +124,11 @@ pOnP p = do
                    Z.assert s
                    (r,m) <- Z.getModel
                    m' <- maybe (pure "") Z.modelToString m
-                   return (r, m')
+                   return (r :/\  m')
 
   mapM (Z.evalZ3 . go) ps
 
-vOnP :: Proposition -> IO [(Z.Result, String)]
+vOnP :: Proposition -> IO [(Z.Result :/\  String)]
 vOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
@@ -135,5 +137,5 @@ vOnP p = do
            Z.assert s
            (r,m) <- Z.getModel
            m' <- maybe (pure "") Z.modelToString m
-           return (r, m')
+           return (r :/\  m')
   Z.evalZ3 $ mapM go ps
