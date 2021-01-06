@@ -931,8 +931,8 @@ iAccumulate Unit    = return (P :/\ Unit)
 iAccumulate x@Ref{} = return (P :/\ x)
 iAccumulate x@Chc{} = return (V :/\ x)
   -- bools
-iAccumulate (BOp Not (_ :/\ Ref r))                = (P :/\ ) . Ref <$> sNot r
-iAccumulate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r))  = (P :/\ ) . Ref <$> dispatchOp op l r
+iAccumulate (BOp Not (_ :/\ Ref r))                 = (P :/\ ) . Ref <$> sNot r
+iAccumulate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r))   = (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
 iAccumulate (IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
@@ -946,9 +946,11 @@ iAccumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
 iAccumulate (BOp Not (P :/\ e)) = do (_ :/\ e') <- iAccumulate e
                                      let !res = BOp Not (P :/\ e')
                                      iAccumulate res
+
 iAccumulate (BOp Not (V :/\ e)) = do (_ :/\ e') <- iAccumulate e
                                      let !res = BOp Not (V :/\ e')
                                      return (V :/\ res)
+
 iAccumulate (BBOp op (P :/\ l) (P :/\ r)) = do (_ :/\ l') <- iAccumulate l
                                                (_ :/\ r') <- iAccumulate r
                                                let !res = BBOp op (P :/\ l') (P :/\ r')
@@ -971,21 +973,21 @@ iAccumulate (IBOp op (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
 
 iAccumulate' :: Z.MonadZ3 z3 => IL' -> z3 (V :/\ IL')
   -- computation rules
-iAccumulate' x@(Ref' _)              = return (P :/\  x)
-iAccumulate' (IOp op (_ :/\ Ref' n)) = (P :/\ ) . Ref' <$> dispatchUOp' op n
+iAccumulate' x@(Ref' _)                               = return (P :/\  x)
+iAccumulate' (IOp op (_ :/\ Ref' n))                  = (P :/\ ) . Ref' <$> dispatchUOp' op n
 iAccumulate' (IIOp op (_ :/\ Ref' l) (_ :/\ Ref' r))  = (P :/\) . Ref' <$> dispatchIOp' op l r
   -- choices
 iAccumulate' x@Chc' {}                                  = return (V :/\ x)
 iAccumulate' x@(IIOp _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 iAccumulate' x@(IIOp _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 iAccumulate' x@(IIOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
-iAccumulate' (IIOp op c@(_ :/\ Chc'{}) (P :/\ r)) = do r' <- iAccumulate' r
+iAccumulate' (IIOp op c@(_ :/\ Chc'{}) (P :/\ r)) = do !r' <- iAccumulate' r
                                                        return (V :/\ IIOp op c r')
-iAccumulate' (IIOp op (P :/\ l) c@(_ :/\ Chc'{})) = do l' <- iAccumulate' l
+iAccumulate' (IIOp op (P :/\ l) c@(_ :/\ Chc'{})) = do !l' <- iAccumulate' l
                                                        return (V :/\ IIOp op l' c)
   -- congruence rules
-iAccumulate' (IIOp o (P :/\ l) (P :/\ r)) = do x <- iAccumulate' l
-                                               y <- iAccumulate' r
+iAccumulate' (IIOp o (P :/\ l) (P :/\ r)) = do !x <- iAccumulate' l
+                                               !y <- iAccumulate' r
                                                let !res = IIOp o x y
                                                iAccumulate' res
 
@@ -1028,8 +1030,8 @@ evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
-evaluate (BOp Not   (_ :/\ Ref r))         = sNot r >>= toSolver
-evaluate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = toSolver =<< dispatchOp op l r
+evaluate (BOp Not (_ :/\ Ref r))                  = sNot r >>= toSolver
+evaluate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r))    = toSolver =<< dispatchOp op l r
   -- numerics
 evaluate (IBOp op  (_ :/\ Ref' l) (_ :/\ Ref' r)) = toSolver =<< dispatchOp' op l r
   -- choices
@@ -1040,15 +1042,15 @@ evaluate (BBOp And (_ :/\ l) (_ :/\ Unit))      = evaluate l
 evaluate (BBOp And (_ :/\ Unit) (_ :/\ r))      = evaluate r
 evaluate (BBOp And (_ :/\ l) (_ :/\ x@(Ref _))) = do _ <- evaluate x; evaluate l
 evaluate (BBOp And (_ :/\ x@(Ref _)) (_ :/\ r)) = do _ <- evaluate x; evaluate r
-evaluate (IBOp op (P :/\ l) (P :/\ r))        = do !l' <- iAccumulate' l
-                                                   !r' <- iAccumulate' r
-                                                   let !res = IBOp op l' r'
-                                                   evaluate res
+evaluate (IBOp op (P :/\ l) (P :/\ r))          = do !l' <- iAccumulate' l
+                                                     !r' <- iAccumulate' r
+                                                     let !res = IBOp op l' r'
+                                                     evaluate res
 
-evaluate (IBOp op (_ :/\ l) (_ :/\ r))        = do l' <- iAccumulate' l
-                                                   r' <- iAccumulate' r
-                                                   let res = IBOp op l' r'
-                                                   return $! intoCore res
+evaluate (IBOp op (_ :/\ l) (_ :/\ r))          = do l' <- iAccumulate' l
+                                                     r' <- iAccumulate' r
+                                                     let res = IBOp op l' r'
+                                                     return $! intoCore res
 
   -- accumulation cases
 evaluate x@(BOp Not (P :/\ _))  = accumulate x >>= evaluate . sSnd
@@ -1069,15 +1071,15 @@ evaluate (BBOp And (P :/\ l) (V :/\ r)) = log "[Eval P V] And case" >>
 evaluate (BBOp op (P :/\ l) (P :/\ r)) = log "[Eval P P] General Case" >>
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
-     let res = BBOp op (P :/\ l') (P :/\ r')
+     let !res = BBOp op (P :/\ l') (P :/\ r')
      evaluate res
 evaluate (BBOp op (V :/\ l) (P :/\ r)) = log "[Eval V P] General Case" >>
   do (_ :/\ r') <- accumulate r
-     let res = BBOp op (V :/\ l) (P :/\ r')
+     let !res = BBOp op (V :/\ l) (P :/\ r')
      return $! intoCore res
 evaluate (BBOp op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
   do (_ :/\ l') <- accumulate l
-     let res = BBOp op (P :/\ l') (V :/\ r)
+     let !res = BBOp op (P :/\ l') (V :/\ r)
      return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
@@ -1122,23 +1124,37 @@ findChoice x@(InBool Unit Top)  = return x
 findChoice x@(InBool Chc {} _)  = return x
 findChoice x@(InNum Chc' {} _)  = return x
   -- discharge two references
-findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   = do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
-                                                             findChoice (InBool n parent)
-findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) = do (_ :/\ n) <- accumulate  $ IBOp op (P :/\ l) (P :/\ r)
-                                                             findChoice (InBool n parent)
-findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) = do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ l) (P :/\ r)
-                                                             findChoice (InNum n parent)
-  -- fold
-findChoice (InBool r@Ref{} (InU o e))   = do (_ :/\ n) <- accumulate $ BOp o (P :/\ r)
-                                             findChoice (InBool n e)
-findChoice (InNum r@Ref'{}  (InU' o e)) = do (_ :/\ n) <- iAccumulate' $ IOp o (P :/\ r)
-                                             findChoice (InNum n e)
-findChoice (InBool r@Ref {} (InR acc op parent)) = do (_ :/\ n) <- accumulate $ BBOp op (P :/\ Ref acc) (P :/\ r)
-                                                      findChoice (InBool n parent)
-findChoice (InNum r@Ref' {} (InRB acc op parent)) = do (_ :/\ n) <- accumulate $ IBOp op (P :/\ Ref' acc) (P :/\ r)
-                                                       findChoice (InBool n parent)
-findChoice (InNum r@Ref' {} (InR' acc op parent)) = do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ Ref' acc) (P :/\ r)
-                                                       findChoice (InNum n parent)
+findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   =
+  do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
+     findChoice (InBool n parent)
+
+findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
+  do (_ :/\ n) <- accumulate  $ IBOp op (P :/\ l) (P :/\ r)
+     findChoice (InBool n parent)
+
+findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) =
+  do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ l) (P :/\ r)
+     findChoice (InNum n parent)
+
+  -- folds
+findChoice (InBool r@Ref{} (InU o e))   =
+  do (_ :/\ n) <- accumulate $! BOp o (P :/\ r)
+     findChoice (InBool n e)
+findChoice (InNum r@Ref'{}  (InU' o e)) =
+  do (_ :/\ n) <- iAccumulate' $! IOp o (P :/\ r)
+     findChoice (InNum n e)
+
+findChoice (InBool r@Ref {} (InR acc op parent)) =
+  do (_ :/\ n) <- accumulate $! BBOp op (P :/\ Ref acc) (P :/\ r)
+     findChoice (InBool n parent)
+
+findChoice (InNum r@Ref' {} (InRB acc op parent)) =
+  do (_ :/\ n) <- accumulate $! IBOp op (P :/\ Ref' acc) (P :/\ r)
+     findChoice (InBool n parent)
+
+findChoice (InNum r@Ref' {} (InR' acc op parent)) =
+  do (_ :/\ n) <- iAccumulate' $! IIOp op (P :/\ Ref' acc) (P :/\ r)
+     findChoice (InNum n parent)
   -- switch
 findChoice (InBool (Ref l) (InL parent op r))   = findChoice (InBool r $ InR l op parent)
 findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
