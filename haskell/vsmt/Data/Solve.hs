@@ -726,20 +726,10 @@ instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
 class Cacheable m a b where
   hashCons    :: a -> m b -> m b
 
--- instance (Monad m, MonadIO m, MonadLogger m, Z.MonadZ3 m) =>
---   Constrainable (SolverT m) IL (V :/\ IL) where
---   constrain !il = do ch <- readCache accCache
---                      sn <- liftIO $! il `seq` makeStableName il
---                      case find sn ch of
---                        Just x  -> logInProducerWith "Acc Cache Hit on" il >> return x
---                        Nothing -> do val <- accumulate il
---                                      val `seq` updateCache accCache (add sn val)
---                                      return val
-
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) IL (V :/\ IL) where
   hashCons !a go = do acc <- readCache accCache
-                      i <- liftIO $ hashStableName <$>  makeStableName a
+                      i <- liftIO $ hashStableName <$> makeStableName a
                       case IMap.lookup i acc of
                         Just b -> logInProducerWith "Acc Cache Hit on " a >> return b
                         Nothing -> do !b <- go
