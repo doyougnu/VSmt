@@ -17,9 +17,10 @@
 
 module Core.Utils where
 
-import           Data.Bifunctor      (Bifunctor(..))
-import  GHC.Generics (Generic)
-import Control.DeepSeq (NFData)
+import           Control.DeepSeq (NFData)
+import           Data.Bifunctor  (Bifunctor (..))
+import           Data.Hashable   (Hashable)
+import           GHC.Generics    (Generic)
 
 -- | strict pairs
 infix 2 :/\
@@ -27,6 +28,7 @@ data a :/\ b = !a :/\ !b
   deriving stock (Eq, Ord,Generic)
 
 instance (NFData a, NFData b) => NFData ((:/\) a b)
+instance (Hashable a, Hashable b) => Hashable ((:/\) a b)
 
 sFst :: a :/\ b -> a
 {-# INLINE sFst #-}

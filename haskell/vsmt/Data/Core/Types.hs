@@ -1,3 +1,4 @@
+{-# LANGUAGE StandaloneDeriving #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : Core.Types
@@ -11,8 +12,10 @@
 
 {-# OPTIONS_GHC -Wall -Werror #-}
 
+{-# LANGUAGE DeriveAnyClass             #-}
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE DerivingStrategies         #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
@@ -33,7 +36,8 @@ import           Prelude             hiding (EQ, GT, LT, lookup)
 
 -- | A feature is a named, boolean configuration option.
 type Var = Text
-newtype Dim = Dim { getDim :: Text} deriving (Eq,Ord,NFData,Hashable,IsString)
+newtype Dim = Dim { getDim :: Text}
+  deriving newtype (Eq,Ord,NFData,Hashable,IsString)
 
 type Config  = Dim -> Bool
 
@@ -55,7 +59,8 @@ newtype Plain a = Plain { unPlain :: a}
 -- \in prop they describe but this artificially restricts the expressiveness of
 -- the system and is best left to the end-user
 newtype VariantContext = VariantContext { getVarFormula :: Prop' Dim }
-  deriving (Eq,Generic,Ord,Show,NFData)
+                       deriving stock (Eq,Generic,Ord,Show)
+                       deriving newtype NFData
 
 toVariantContext :: Prop' Dim -> VariantContext
 toVariantContext = VariantContext
@@ -95,7 +100,9 @@ data Prop' a
    -- we leave choices to be lazy for performance in selection/configuration. It
    -- may be the case that one alternative is never selected for
    | ChcB !Dim (Prop' a) (Prop' a)       -- ^ Choices
-  deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
+  deriving stock (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
+
+deriving instance Hashable a => Hashable (Prop' a)
 
 -- | Numerical Expressions with Choices
 data NExpr' a
@@ -104,7 +111,9 @@ data NExpr' a
   | OpI  N_N  !(NExpr' a)             -- ^ Unary Operators
   | OpII NN_N !(NExpr' a) !(NExpr' a) -- ^ Binary Operators
   | ChcI !Dim  (NExpr' a) (NExpr' a)  -- ^ SMT Choices
-  deriving (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
+  deriving stock (Eq,Generic,Show,Functor,Traversable,Foldable,Ord)
+
+deriving instance Hashable a => Hashable (NExpr' a)
 
 -- | Types of references
 data Type = TBool
@@ -113,38 +122,53 @@ data Type = TBool
           deriving (Eq,Generic,Show,Ord)
 
 
-data Value = N NPrim | B Bool deriving (Eq,Show,Ord,Generic)
+data Value = N NPrim | B Bool
+  deriving stock (Eq,Show,Ord,Generic)
+  deriving anyclass Hashable
 
 
 newtype CheckableResult =
   CheckableResult { getChkResult :: M.HashMap Var [(Maybe VariantContext, Value)] }
-  deriving (Eq,Show,Semigroup,Monoid)
+  deriving newtype (Eq,Show,Semigroup,Monoid)
 
 toCheckableResult :: [(Var, [(Maybe VariantContext, Value)])] -> CheckableResult
 toCheckableResult = CheckableResult . M.fromList
 
 
 data ExRefType a = ExRefTypeI a | ExRefTypeD a
-  deriving (Eq,Generic,Show,Ord,Functor,Traversable,Foldable)
+  deriving stock (Eq,Generic,Show,Ord,Functor,Traversable,Foldable)
+
+deriving instance Hashable a => Hashable (ExRefType a)
 
 -- | data constructor for Numeric operations
 data NPrim = I !Integer | D {-# UNPACK #-} !Double
-  deriving (Eq,Generic,Ord,Show)
+  deriving stock (Eq,Generic,Ord,Show)
+  deriving anyclass Hashable
 
 -- | Unary Numeric Operator
-data N_N = Neg | Abs | Sign deriving (Eq,Generic,Ord,Show)
+data N_N = Neg | Abs | Sign
+  deriving stock (Eq,Generic,Ord,Show)
+  deriving anyclass Hashable
 
 -- | Binary Boolean operators
-data B_B = Not deriving (Eq,Generic,Ord,Show)
+data B_B = Not
+  deriving stock (Eq,Generic,Ord,Show)
+  deriving anyclass Hashable
 
 -- | Binary Numeric Operators
-data NN_N = Add | Sub | Mult | Div | Mod deriving (Eq,Generic,Ord,Show)
+data NN_N = Add | Sub | Mult | Div | Mod
+  deriving stock (Eq,Generic,Ord,Show)
+  deriving anyclass Hashable
 
 -- | Binary Boolean operators
-data BB_B = And | Or | Impl | Eqv | XOr deriving (Eq,Generic,Ord,Show)
+data BB_B = And | Or | Impl | Eqv | XOr
+  deriving stock (Eq,Generic,Ord,Show)
+  deriving anyclass Hashable
 
 -- | Binary Numeric predicate operators
-data NN_B = LT | LTE | GT | GTE | EQ | NEQ deriving (Eq,Generic,Ord,Show)
+data NN_B = LT | LTE | GT | GTE | EQ | NEQ
+  deriving stock (Eq,Generic,Ord,Show)
+  deriving anyclass Hashable
 
 -- | add div and mod to num
 class Num n => PrimN n where
