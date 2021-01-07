@@ -735,7 +735,6 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
                         Nothing -> do !b <- go
                                       logInProducerWith "Acc Cache miss on " a
                                       updateCache accCache (IMap.insert i b)
-                                      readWith (bools . stores) >>= logInProducerWith "Bools "
                                       return b
 
 
