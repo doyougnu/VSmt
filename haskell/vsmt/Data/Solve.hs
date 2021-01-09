@@ -493,7 +493,7 @@ data State = State
 type Cache b = IMap.IntMap b
 type ACache = Cache (V :/\ IL)
 
-newtype Results = Results { unResult :: (STM.TVar Result) }
+newtype Results = Results { unResult :: STM.TVar Result }
 
 deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
@@ -503,13 +503,13 @@ data Caches = Caches
               }
 
 data Stores = Stores
-    { vConfig    :: (STM.TVar (Maybe VariantContext))  -- the formula representation of the config
-    , sConfig    :: (STM.TVar SVariantContext) -- symbolic representation of a config
-    , config     :: (STM.TVar Context)                 -- a map or set representation of the config
-    , ints       :: (STM.TVar Ints)
-    , doubles    :: (STM.TVar Doubles)
-    , bools      :: (STM.TVar Bools)
-    , dimensions :: (STM.TVar Dimensions)
+    { vConfig    :: STM.TVar (Maybe VariantContext)  -- the formula representation of the config
+    , sConfig    :: STM.TVar SVariantContext -- symbolic representation of a config
+    , config     :: STM.TVar Context                 -- a map or set representation of the config
+    , ints       :: STM.TVar Ints
+    , doubles    :: STM.TVar Doubles
+    , bools      :: STM.TVar Bools
+    , dimensions :: STM.TVar Dimensions
     }
 
 data FrozenStores = FrozenStores
