@@ -724,18 +724,18 @@ instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
 -- doubt it'll ever actually occur
 -- TODO use Type Families to abstract over the monad and cache
 class Cacheable m a b where
-  hashCons    :: a -> m b -> m b
+  memo    :: a -> m b -> m b
 
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) IL (V :/\ IL) where
-  hashCons !a go = do acc <- readCache accCache
-                      i <- liftIO $ hashStableName <$> makeStableName a
-                      case IMap.lookup i acc of
-                        Just b -> logInProducerWith "Acc Cache Hit on " a >> return b
-                        Nothing -> do !b <- go
-                                      logInProducerWith "Acc Cache miss on " a
-                                      updateCache accCache (IMap.insert i b)
-                                      return b
+  memo !a go = do acc <- readCache accCache
+                  i <- liftIO $ hashStableName <$> makeStableName a
+                  case IMap.lookup i acc of
+                    Just b -> logInProducerWith "Acc Cache Hit on " a >> return b
+                    Nothing -> do !b <- go
+                                  logInProducerWith "Acc Cache miss on " a
+                                  updateCache accCache (IMap.insert i b)
+                                  return b
 
 
 ----------------------------------- IL -----------------------------------------
@@ -976,11 +976,11 @@ accumulate Unit    = return (P :/\ Unit)
 accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
-accumulate x@(BOp Not (_ :/\ Ref r))  = hashCons x $! (P :/\ ) . Ref <$> sNot r
-accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = hashCons x $!
+accumulate x@(BOp Not (_ :/\ Ref r))  = memo x $! (P :/\ ) . Ref <$> sNot r
+accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = memo x $!
   (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate x@(IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = hashCons x $ (P :/\ ) . Ref <$> dispatchOp' op l r
+accumulate x@(IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo x $ (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
 accumulate x@(BBOp _ (_ :/\ Ref _)   (_ :/\ Chc {}))  = return (V :/\ x)
@@ -989,35 +989,35 @@ accumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-accumulate x@(BOp Not (P :/\ e)) = hashCons x $!
+accumulate x@(BOp Not (P :/\ e)) = memo x $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp Not (P :/\ e')
      accumulate res
 
-accumulate x@(BOp Not (V :/\ e)) = hashCons x $!
+accumulate x@(BOp Not (V :/\ e)) = memo x $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp Not (V :/\ e')
      return (V :/\ res)
 
-accumulate x@(BBOp op (P :/\ l) (P :/\ r)) = hashCons x $!
+accumulate x@(BBOp op (P :/\ l) (P :/\ r)) = memo x $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
      let !res = BBOp op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate x@(BBOp op (_ :/\ l) (_ :/\ r)) = hashCons x $!
+accumulate x@(BBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
      let !res  = BBOp op (vl :/\ l') (vr :/\ r')
      return (vl <@> vr :/\ res)
 
-accumulate x@(IBOp op (P :/\ l) (P :/\ r)) = hashCons x $!
+accumulate x@(IBOp op (P :/\ l) (P :/\ r)) = memo x $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
      let !res = IBOp op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate x@(IBOp op (_ :/\ l) (_ :/\ r)) = hashCons x $!
+accumulate x@(IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp op a b
@@ -1058,7 +1058,7 @@ iAccumulate' (IIOp o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
 
 -------------------------------- Evaluation -----------------------------------
 toSolver :: (Monad m, Z.MonadZ3 m) => SBool -> m VarCore
--- {-# INLINE toSolver #-}
+{-# INLINE toSolver #-}
 toSolver (unSBool -> a) = do Z.assert a; return $! intoCore Unit
 
 isValue :: IL -> Bool
@@ -1241,16 +1241,6 @@ store ::
   ,  MonadIO            io
   , Z.MonadZ3           io
   ) => Result -> io ()
--- if we use update like this we get the following ghc bug:
-{- Running 1 benchmarks...
-Benchmark auto: RUNNING...
-auto: internal error: PAP object (0x4200b2c8d8) entered!
-    (GHC version 8.10.2 for x86_64_unknown_linux)
-    Please report this as a GHC bug:  https://www.haskell.org/ghc/reportabug
-Benchmark auto: ERROR
-cabal: Benchmarks failed for bench:auto from vsmt-0.0.1.
-store !r = update results (r <>)
--}
 store r = asks (unResult . results)
           >>= liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
@@ -1334,8 +1324,10 @@ removeChoices ::
   ( MonadLogger m
   , Z.MonadZ3   m
   ) => VarCore -> SolverT m ()
-removeChoices (VarCore Unit) = reads bools >>= logInProducerWith "Core reduced to Unit" >>
-                               reads config >>= logInProducerWith "Core reduced to Unit with Context" >>
+removeChoices (VarCore Unit) = reads bools >>=
+                               logInProducerWith "Core reduced to Unit" >>
+                               reads config >>=
+                               logInProducerWith "Core reduced to Unit with Context" >>
                                do !vC <- reads vConfig
                                   !r  <- getResult vC
                                   store r
@@ -1368,10 +1360,8 @@ choose loc =
             goRight = toIL cr >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
 
         case find d conf of
-          Just True  -> -- logInProducer "Cache hit --- Left Selected"  >>
-                        goLeft
-          Just False -> -- logInProducer "Cache hit --- Right Selected" >>
-                        goRight
+          Just True  -> goLeft
+          Just False -> goRight
           Nothing    -> do logInProducer "Cache miss running alt";
                            alternative d goLeft goRight
 
