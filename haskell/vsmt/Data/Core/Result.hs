@@ -53,11 +53,11 @@ newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext :/\ Value))
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
 -- cleaner implementation on our end.
-newtype VariableMap d = VariableMap {getVMap :: M.HashMap d ResultFormula }
+newtype VariableMap d = VariableMap { getVMap :: M.HashMap d ResultFormula }
   deriving (Eq,Show,Generic,NFData)
 
 -- | newtype wrapper for better printing
-newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic)
+newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic,NFData)
 
 
 data Result' d = Result' { variables      :: VariableMap d
@@ -116,7 +116,7 @@ instance Show Result where show = unpack . pretty
 
 instance Pretty Result where pretty (Result r) = pretty r
 
--- instance NFData d => NFData (Result' d)
+instance NFData d => NFData (Result' d)
 
 instance (Eq d, Hashable d, NFData d) => Semigroup (Result' d) where
   (<>) Result' {variables=(!vl),satisfiableVCs=(!sl)} Result'{variables=(!vr),satisfiableVCs=(!sr)}
@@ -132,9 +132,6 @@ isSat = do cs <- Z.check
            return $! case cs of
                        Z.Sat -> True
                        _     -> False
-
--- wasSat :: Result -> Bool
--- wasSat = isJust . satisfiableVCs . unboxResult
 
 -- | Generate a VSMT model
 getResult :: (Z.MonadZ3 m, MonadIO m) => Maybe VariantContext -> m Result
