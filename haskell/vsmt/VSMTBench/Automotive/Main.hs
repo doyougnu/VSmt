@@ -202,20 +202,21 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  defaultMain $
-    [  bgroup "Z3" (benches defSettings)
-    --   bgroup "Z3" (compRatioBenches z3DefConf)
-    -- , bgroup "CVC4" (benches cvc4DefConf)
-    -- , bgroup "Yices" (benches yicesDefConf)
-    -- , bgroup "Boolector" (benches boolectorDefConf)
-    ]
+  -- defaultMain $
+  --   [  bgroup "Z3" (benches defSettings)
+  --   --   bgroup "Z3" (compRatioBenches z3DefConf)
+  --   -- , bgroup "CVC4" (benches cvc4DefConf)
+  --   -- , bgroup "Yices" (benches yicesDefConf)
+  --   -- , bgroup "Boolector" (benches boolectorDefConf)
+  --   ]
 
   -- let t = bRef "one" &&& bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  -- !res <- solveVerbose Nothing defSettings t
-  -- putStrLn $ show res
+  let t = bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one" &&& bRef "two"
+  !res <- solve Nothing defSettings t
+  putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing
