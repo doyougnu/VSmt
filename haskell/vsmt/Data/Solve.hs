@@ -209,11 +209,11 @@ findVCore :: ( MonadLogger z3
              ) => IL -> z3 VarCore
 findVCore = evaluate
 
-solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]
+solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO Result
 solveVerbose = internalSolver runPreSolverLog runSolverLog
 
 
-solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]
+solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO Result
 solve = internalSolver runPreSolverNoLog runSolverNoLog
 
 -- TODO fix this horrendous type signature
@@ -226,7 +226,7 @@ internalSolver ::
   , Z.MonadZ3 f
   ) =>
   (Stores -> f IL -> Z.Z3 (IL :/\ Stores))
-  -> (State -> SolverT m [Maybe VariantContext :/\ (Z.Result :/\ [Var :/\ Value])] -> Z.Z3 (b1 :/\ b2))
+  -> (State -> SolverT m Result -> Z.Z3 (b1 :/\ b2))
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
@@ -493,7 +493,7 @@ data State = State
 type Cache b = IMap.IntMap b
 type ACache = Cache (V :/\ IL)
 
-newtype Results = Results { unResult :: (STM.TVar [(Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)]))]) }
+newtype Results = Results { unResult :: (STM.TVar Result) }
 
 deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
@@ -1240,7 +1240,7 @@ store ::
   ( R.MonadReader State io
   ,  MonadIO            io
   , Z.MonadZ3           io
-  ) => (Maybe VariantContext :/\  (Z.Result :/\ [(Var :/\ Value)])) -> io ()
+  ) => Result -> io ()
 -- if we use update like this we get the following ghc bug:
 {- Running 1 benchmarks...
 Benchmark auto: RUNNING...
@@ -1252,7 +1252,7 @@ cabal: Benchmarks failed for bench:auto from vsmt-0.0.1.
 store !r = update results (r <>)
 -}
 store r = asks (unResult . results)
-          >>= liftIO . STM.atomically . flip STM.modifyTVar' (pure r <>)
+          >>= liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1336,9 +1336,9 @@ removeChoices ::
   ) => VarCore -> SolverT m ()
 removeChoices (VarCore Unit) = reads bools >>= logInProducerWith "Core reduced to Unit" >>
                                reads config >>= logInProducerWith "Core reduced to Unit with Context" >>
-                               do vC <- reads vConfig
-                                  r  <- getResult
-                                  store (vC :/\ r)
+                               do !vC <- reads vConfig
+                                  !r  <- getResult vC
+                                  store r
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
 
@@ -1347,9 +1347,9 @@ choose ::
   , Z.MonadZ3   m
   ) => Loc -> SolverT m ()
 choose (InBool Unit Top)  = logInProducer "Choosing all done" >>
-                               do vC <- reads vConfig
-                                  r  <- getResult
-                                  store (vC :/\ r)
+                               do !vC <- reads vConfig
+                                  !r  <- getResult vC
+                                  store r
 choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
                               evaluate l >>= removeChoices
 choose loc =
