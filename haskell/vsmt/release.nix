@@ -30,6 +30,7 @@ let
   };
 
   pkgs = import <nixpkgs> { inherit config; };
+  unstable = import <unstable> { };
 
 in
   rec {
@@ -38,18 +39,21 @@ in
     vsmt-shell = pkgs.haskell.packages.${compiler}.shellFor {
       packages = p: [vsmt];
       withIDe = true;
-      buildInputs = with pkgs; [ haskellPackages.hlint
-                                 haskellPackages.stylish-haskell
-                                 haskellPackages.hasktags
-                                 haskellPackages.apply-refact
-                                 # haskellPackages.hindent
-                                 haskellPackages.ghcide
-                                 haskellPackages.ghc-prof-flamegraph
-                                 haskellPackages.profiteur
-                                 zlib
-                                 z3
-                                 cabal-install
-                               ];
+      buildInputs = [ pkgs.haskellPackages.hlint
+                      pkgs.haskellPackages.stylish-haskell
+                      pkgs.haskellPackages.hasktags
+                      pkgs.haskellPackages.apply-refact
+                      # pkgs.haskellPackages.hindent
+                      pkgs.haskellPackages.ghcide
+                      pkgs.haskellPackages.ghc-prof-flamegraph
+                      pkgs.haskellPackages.profiteur
+                      pkgs.zlib
+                      pkgs.z3
+                      pkgs.R
+                      pkgs.cabal-install
+                      # unstable.julia_13
+                      unstable.julia
+                    ];
     };
   }
 
