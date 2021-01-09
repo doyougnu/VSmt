@@ -24,18 +24,19 @@ import qualified Text.Megaparsec.Char.Lexer     as L
 import           Data.Text hiding               (empty)
 import           Data.Void                      (Void)
 import           Control.Monad                  (void)
+import           Data.Functor                   (($>))
 import           Core.Types  (Var,Value(..))
 import           Core.Utils  ((:/\)(..))
 
 type Parser = Parsec Void Text
 
-parseModel :: Text -> [(Var :/\ Value)]
+parseModel :: Text -> [Var :/\ Value]
 parseModel s = case run of
                  Left _  -> mempty -- This should never error so throw away the either
                  Right a -> a
   where run =  parse go "" s
 
-go :: Parser [(Var :/\ Value)]
+go :: Parser [Var :/\ Value]
 go = between sc eof (row `sepEndBy` C.newline)
 
 sc :: Parser ()
@@ -57,13 +58,13 @@ variable :: Parser Text
 variable = pack <$> lexeme ((:) <$> C.letterChar <*> manyTill C.alphaNumChar exclamation <?> "variable")
 
 pKeyword :: Text -> Parser Text
-pKeyword keyword = (C.string keyword <* notFollowedBy C.alphaNumChar)
+pKeyword keyword = C.string keyword <* notFollowedBy C.alphaNumChar
 
 true :: Parser Value
-true = pKeyword "true" *> pure (B True)
+true = pKeyword "true" $> B True
 
 false :: Parser Value
-false = pKeyword "false" *> pure (B False)
+false = pKeyword "false" $> B False
 
 -- TODO instances for integers and float
 bool :: Parser Value
