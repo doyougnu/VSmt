@@ -24,6 +24,7 @@ import           Data.SBV.Internals  (cvToBool)
 
 import           Data.String         (IsString (..))
 import           Data.Text           (pack)
+import           Data.Maybe          (fromJust)
 import           Z3.Monad            as Z
 
 import           Core.Types
@@ -45,6 +46,13 @@ genConfigPool p =
     let resMaps = S.getModelDictionary <$> allRes
         maps = M.foldMapWithKey (\k a -> M.singleton (Dim $ fromString k) (cvToBool a)) <$> resMaps
     return (fmap (flip M.lookup) maps)
+
+-- | Given a total variant context return all variants
+genVariants :: Proposition -> IO [Plain Proposition]
+genVariants p =
+  do let totalConfs = genConfigs p
+     -- we know the props have to be plain because of the total vcs
+     return $! fmap (fromJust . validatePlain . (`configure` p)) totalConfs
 
 evalSBVPlain :: (Show a, Ord a) => Plain (Prop' a) -> S.Symbolic S.SBool
 evalSBVPlain = flip St.evalStateT mempty . evalSBV . unPlain
@@ -109,27 +117,25 @@ instance Boolean S.SBool where
   {-# INLINE (|||) #-}
   {-# INLINE (<=>) #-}
 
--- | Plain propositions on the variational solver
-pOnV :: Proposition -> IO R.Result
-pOnV p = do
-  let configs = genConfigs p
-      ps = fmap (`configure` p) configs
-  mconcat <$> mapM (Sl.solve Nothing defSettings) ps
+-- | Plain propositions on the variational solver testing the overhead of
+-- accumulate/evaluate
+pOnV :: [Plain Proposition] -> IO R.Result
+pOnV =  fmap mconcat . mapM (Sl.solve Nothing defSettings) . fmap unPlain
 
--- | Plain propositions on the plain solver
-pOnP :: Proposition -> IO [Z.Result :/\  String]
-pOnP p = do
-  let configs = genConfigs p
-      ps = fmap (Plain . (`configure` p)) configs
-      go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
+-- | Plain propositions on the plain solver the brute force position
+pOnP :: [Plain Proposition] -> IO [Z.Result :/\  String]
+pOnP ps = do
+  let go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
                    Z.assert s
                    (r,m) <- Z.getModel
                    m' <- maybe (pure "") Z.modelToString m
                    return (r :/\  m')
-
   mapM (Z.evalZ3 . go) ps
 
-vOnP :: Proposition -> IO [Z.Result :/\  String]
+-- | vOnP tests the performance of configuration. That is it should input a
+-- variational formula, then configure to all its variants, then run them each
+-- on a plain solver
+vOnP :: Proposition -> IO [Z.Result :/\ String]
 vOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs

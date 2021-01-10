@@ -106,6 +106,18 @@ mkCompBench alg confDesc !f prop = run desc f prop
     desc = mkDescription alg confDesc (pure prop)
 
 
+-- | A version of mkBench suited for the p-->v and p-->p where we have to test a
+-- set of plain propositions either on the brute force solver or a plain solver
+mkBench'' :: NFData a =>
+             String
+          -> String
+          -> ([Plain Proposition] -> IO a)
+          -> [Plain Proposition]
+          -> Benchmark
+mkBench'' alg confDesc !f props = run desc f props
+  where
+    desc = mkDescription alg confDesc (fmap unPlain props)
+
 -- | a version of mkBench that doesn't require the actual configuration. This is
 -- used for instances where the proposition under consideration will be solved
 -- projected to a plain term many times, such as in the case of running an

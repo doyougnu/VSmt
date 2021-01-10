@@ -244,8 +244,8 @@ refsAreDisjoint prop = Set.null $ booleans prop `Set.intersection` numerics prop
 
 -- | True if the proposition lacks choices
 validatePlain :: Proposition -> Maybe (Plain Proposition)
-validatePlain p | choiceCount p /= 0 = Just $ Plain p
-          | otherwise          = Nothing
+validatePlain p | choiceCount p == 0 = Just $ Plain p
+                | otherwise          = Nothing
 
 validateTotal :: PartialConfig -> Prop' a -> Maybe (Total Config)
 validateTotal c (toList . dimensions -> ds) =

@@ -45,10 +45,10 @@ type Config  = Dim -> Bool
 type PartialConfig = Dim -> Maybe Bool
 
 -- | empty type to represent when an 'a' is total
-newtype Total a = Total a
+newtype Total a = Total { unTotal :: a }
 
 -- | an type to represent that an 'a' is plain
-newtype Plain a = Plain { unPlain :: a}
+newtype Plain a = Plain { unPlain :: a }
 
 --
 -- * Syntax

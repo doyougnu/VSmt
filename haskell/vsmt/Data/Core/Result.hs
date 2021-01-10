@@ -145,11 +145,9 @@ getResult vc =
        Z.Undef -> return (False, mempty)
        _       ->
          do m' <- maybe (pure mempty) Z.modelToString m
-            liftIO $ putStrLn $! "Raw model: " ++ m'
             let !ms  = parseModel . pack $ m'
                 bindings = VariableMap $!
                            M.fromList $!
                            fmap (\(k :/\ v) ->
                                    (k, ResultFormula $! pure (vc :/\ v))) ms
-            liftIO $ putStrLn $! "Parsed model: " ++ show ms
             return $ (True,) . Result $! Result' {variables = bindings, satisfiableVCs = vc}
