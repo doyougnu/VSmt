@@ -94,7 +94,7 @@ import qualified Z3.Monad                              as Z ( AST
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 import           Control.DeepSeq                       (NFData)
-import           Data.Monoid                           (Sum(..))
+
 
 import           Data.Text.IO                          (putStrLn)
 import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
@@ -501,6 +501,7 @@ data State = State
   , caches   :: Caches
   , results  :: Results
   , diagnostics :: Diagnostics
+  , constants :: Constants
   }
 
 type Cache b = IMap.IntMap b
@@ -511,9 +512,12 @@ deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
 
 -- | A counter for the diagnostics portion of the state
-newtype Counter = Counter { unCounter :: Int }
-  deriving (Num, Enum)         via Int
-  deriving (Semigroup, Monoid) via Sum Int
+type Counter = Int
+  -- deriving (Num, Enum)         via Int
+  -- deriving (Semigroup, Monoid) via Sum Int
+
+data Constants = Constants { genModels :: STM.TVar Bool
+                           }
 
 data Diagnostics = Diagnostics
                  { satCnt       :: STM.TVar Counter
@@ -567,9 +571,9 @@ newStore = do vConfig    <- STM.newTVarIO mempty
               return Stores{..}
 
 newDiagnostics :: IO Diagnostics
-newDiagnostics = do satCnt       <- STM.newTVarIO mempty
-                    unSatCnt     <- STM.newTVarIO mempty
-                    accCacheHits <- STM.newTVarIO mempty
+newDiagnostics = do satCnt       <- STM.newTVarIO 0
+                    unSatCnt     <- STM.newTVarIO 0
+                    accCacheHits <- STM.newTVarIO 0
                     return Diagnostics{..}
 
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
@@ -1385,7 +1389,10 @@ removeChoices (VarCore Unit) = reads bools >>=
                                reads config >>=
                                logInProducerWith "Core reduced to Unit with Context" >>
                                do !vC <- reads vConfig
-                                  (b, !r)  <- getResult vC
+                                  wantModels <- readWith (genModels . constants)
+                                  (!b :/\ !r) <- if wantModels
+                                                 then getResult vC
+                                                 else isSat     vC
                                   if b then succSatCnt else succUnSatCnt
                                   store r
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
@@ -1395,11 +1402,7 @@ choose ::
   ( MonadLogger m
   , Z.MonadZ3   m
   ) => Loc -> SolverT m ()
-choose (InBool Unit Top)  = logInProducer "Choosing all done" >>
-                               do !vC <- reads vConfig
-                                  (b, !r)  <- getResult vC
-                                  if b then succSatCnt else succUnSatCnt
-                                  store r
+choose (InBool Unit Top)  = removeChoices (VarCore Unit)
 choose (InBool l@Ref{} _) = logInProducer "Choosing all done Removing choices" >>
                               evaluate l >>= removeChoices
 choose loc =

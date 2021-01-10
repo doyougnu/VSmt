@@ -129,24 +129,26 @@ instance (Eq d, Hashable d, NFData d) => Monoid (Result' d) where
   mappend !x !y = x <> y
 
 -- | check if the current context is sat or not
-isSat :: Z.MonadZ3 m => m Bool
-isSat = do cs <- Z.check
-           return $! case cs of
-                       Z.Sat -> True
-                       _     -> False
+isSat :: Z.MonadZ3 m => Maybe VariantContext -> m (Bool :/\ Result)
+isSat vcs = do cs <- Z.check
+               return $! case cs of
+                           Z.Sat -> (True :/\) $ Result $! Result' {variables=mempty
+                                                                   ,satisfiableVCs=vcs
+                                                                   }
+                           _     -> (False :/\ mempty)
 
 -- | Generate a VSMT model
-getResult :: (Z.MonadZ3 m, MonadIO m, MonadLogger m) => Maybe VariantContext -> m (Bool, Result)
-getResult vc =
+getResult :: (Z.MonadZ3 m, MonadIO m, MonadLogger m) => Maybe VariantContext -> m (Bool :/\ Result)
+getResult !vc =
   do (!r,!m) <- Z.getModel
      case r of
-       Z.Unsat -> return (False, mempty)
-       Z.Undef -> return (False, mempty)
+       Z.Unsat -> return (False :/\ mempty)
+       Z.Undef -> return (False :/\ mempty)
        _       ->
          do m' <- maybe (pure mempty) Z.modelToString m
-            let !ms  = parseModel . pack $ m'
+            let !ms  = parseModel . pack $! m'
                 bindings = VariableMap $!
                            M.fromList $!
                            fmap (\(k :/\ v) ->
                                    (k, ResultFormula $! pure (vc :/\ v))) ms
-            return $ (True,) . Result $! Result' {variables = bindings, satisfiableVCs = vc}
+            return $ (True :/\) . Result $! Result' {variables = bindings, satisfiableVCs = vc}
