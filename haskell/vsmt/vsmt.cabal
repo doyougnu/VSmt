@@ -242,6 +242,7 @@ benchmark financial
                , base >= 4.11
                , bytestring
                , containers
+               , cassava
                , deepseq
                , directory
                , gauge
@@ -285,6 +286,7 @@ benchmark auto
                , base >= 4.11
                , bytestring
                , containers
+               , cassava
                , deepseq
                , directory
                , gauge

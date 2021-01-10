@@ -525,8 +525,9 @@ deriving anyclass instance NFData Z.Result
 
 -- | A counter for the diagnostics portion of the state
 newtype Counter = Counter { unCounter :: Int }
-  deriving (Num, Enum)         via Int
+  deriving (Num, Enum, Show)   via Int
   deriving (Semigroup, Monoid) via Sum Int
+  deriving Generic
 
 data Constants = Constants { genModels :: STM.TVar Bool
                            }
@@ -542,7 +543,7 @@ data FrozenDiags = FrozenDiags
                    { fSatCnt       :: Counter
                    , fUnSatCnt     :: Counter
                    , fAccCacheHits :: Counter
-                   }
+                   } deriving (Generic, Show)
 
 data Caches = Caches
               { accCache :: STM.TVar ACache

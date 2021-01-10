@@ -1,20 +1,30 @@
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE BangPatterns               #-}
+{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 
 module Bench.Core where
 
 import           Data.List
 import           Gauge
 
-import qualified Data.Set   as Set
+import qualified Data.Set                as Set
 
-import           System.IO.Unsafe  (unsafePerformIO)
-import           Data.Function (on)
-import           Control.DeepSeq (NFData)
+import           Control.DeepSeq         (NFData)
+import           Data.Function           (on)
+import           System.IO.Unsafe        (unsafePerformIO)
 
 import           Core.Core
 import           Core.Types
-import           Utils (genConfigPool)
-import           Solve (vCoreMetrics)
+import qualified Data.ByteString.Builder as Bl (stringUtf8, toLazyByteString)
+import qualified Data.ByteString.Lazy    as BS (appendFile)
+import           Data.Csv                (DefaultOrdered, ToField,
+                                          ToNamedRecord,
+                                          encodeDefaultOrderedByName)
+import           Settings
+import           Solve                   (Counter (..), FrozenDiags (..),
+                                          solveGetDiag, vCoreMetrics)
+import           Utils                   (genConfigPool)
 
 
 run :: NFData a => String -> (t -> IO a) -> t -> Benchmark
@@ -22,6 +32,16 @@ run !desc !f prop = bench desc $! nfIO (f prop)
 
 average :: (Real a, Fractional b) => [a] -> b
 average xs = realToFrac (sum xs) / genericLength xs
+
+instance DefaultOrdered FrozenDiags
+instance ToNamedRecord  FrozenDiags
+deriving newtype instance ToField Counter
+runDiagnostics :: FilePath -> String -> String -> Settings -> Proposition -> IO ()
+runDiagnostics fn alg variant ss p = do let a = Bl.toLazyByteString . Bl.stringUtf8 $ alg
+                                            v = Bl.toLazyByteString . Bl.stringUtf8 $ variant
+                                        res <- solveGetDiag Nothing ss p
+                                        BS.appendFile fn $ a <> v <> encodeDefaultOrderedByName (pure res)
+
 
 -- | make a description for the benchmark, we input pass through variables alg,
 -- and confDesc that are hand written names for the algorithm being used and the

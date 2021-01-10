@@ -6,11 +6,11 @@ module Main where
 import           Gauge
 import           Data.Aeson              (decodeStrict, encodeFile)
 import           Data.Either             (lefts, rights)
-import qualified Data.ByteString         as BS (readFile)
+import qualified Data.ByteString         as BS (readFile, writeFile)
 import qualified Data.Text.IO            as T (writeFile, appendFile)
 import           Text.Megaparsec         (parse)
 import           Data.Maybe              (fromJust)
-import Control.Monad
+-- import Control.Monad
 import Control.DeepSeq                   (force)
 
 import           Bench.Core
@@ -134,10 +134,10 @@ main = do
       bPropJustV12 = configure justV12 bProp
       bPropJustV123 = configure justV123 bProp
 
-  !v1Variants    <- genVariants bPropJustV1
-  !v12Variants   <- genVariants bPropJustV12
-  !v123Variants  <- genVariants bPropJustV123
-  !allVariants   <- genVariants bProp
+  !v1Variants   <- genVariants bPropJustV1
+  !v12Variants  <- genVariants bPropJustV12
+  !v123Variants <- genVariants bPropJustV123
+  !allVariants  <- genVariants bProp
 
   let benches :: Settings -> [Benchmark]
       benches ss = [
@@ -146,6 +146,7 @@ main = do
         , mkBench "v-->v" "V2" d2Conf (solve Nothing ss) (unPlain bPropV2)
         , mkBench "v-->v" "V3" d3Conf (solve Nothing ss) (unPlain bPropV3)
         , mkBench "v-->v" "V4" d4Conf (solve Nothing ss) (unPlain bPropV4)
+        , mkBench "v-->v" "V1"           justV1Conf   (solve Nothing ss) bPropJustV1
         , mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
         , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve Nothing ss) bPropJustV123
         , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
@@ -178,6 +179,12 @@ main = do
         , mkBench' "v-->p" "V1*V2*V3*V4"  vOnP bProp
         ]
 
+  let diagnostics :: FilePath -> Settings -> IO ()
+      diagnostics fn ss =
+        do runDiagnostics fn "v-->v" "V1*V2"        ss bPropJustV12
+           runDiagnostics fn "v-->v" "V1*V2*V3"     ss bPropJustV12
+           runDiagnostics fn "v-->v" "V1*V2*V3*V4"  ss bProp
+
     -- | Compression Ratio props
       -- justbPropV12  = selectVariant v01Conf bProp
       -- justbPropV23  = selectVariant v12Conf bProp
@@ -207,10 +214,12 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  defaultMain $
-    [  bgroup "Z3" (benches defSettings)
-    --   bgroup "Z3" (compRatioBenches z3DefConf)
-    ]
+  diagnostics "raw_data/auto_diagnostics.csv" defSettings
+
+  -- defaultMain $
+  --   [  bgroup "Z3" (benches defSettings)
+  --   --   bgroup "Z3" (compRatioBenches z3DefConf)
+  --   ]
 
   -- let t = bRef "one" &&& bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
