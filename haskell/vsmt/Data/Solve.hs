@@ -107,7 +107,7 @@ import           Prelude                               hiding (EQ, GT, LT, log,
 import           Core.Pretty
 import           Core.Result
 import           Core.Types
-import           Core.Utils                            ((:/\)(..),sSnd)
+import           Core.Utils                            ((:/\)(..),sSnd,sFst)
 
 import           Settings
 
@@ -222,27 +222,31 @@ findVCore :: ( MonadLogger z3
 findVCore = evaluate
 
 solveVerbose :: Maybe VariantContext -> Settings -> Proposition -> IO Result
-solveVerbose = internalSolver runPreSolverLog runSolverLog
-
+solveVerbose v s p = sFst <$> internalSolver runPreSolverLog runSolverLog v s p
 
 solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO Result
-solve = internalSolver runPreSolverNoLog runSolverNoLog
+solve v s p = sFst <$> internalSolver runPreSolverNoLog runSolverNoLog v s p
+
+-- | the solve but return the diagnostics
+solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
+solveGetDiag vc s p = readDiagnostics . sSnd =<<
+                      internalSolver runPreSolverNoLog runSolverNoLog vc s p
+
 
 -- TODO fix this horrendous type signature
 internalSolver ::
-  (MonadLogger m
+  ( MonadLogger m
   , MonadLogger f
   , Constrainable f (ExRefType Var) IL'
   , Constrainable f Var IL
   , Z.MonadZ3 m
   , Z.MonadZ3 f
-  ) =>
-  (Stores -> f IL -> Z.Z3 (IL :/\ Stores))
-  -> (State -> SolverT m Result -> Z.Z3 (b1 :/\ b2))
+  ) => (Stores -> f IL -> Z.Z3 (IL :/\ Stores))
+  -> (State -> SolverT m Result -> Z.Z3 b)
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
-  -> IO b1
+  -> IO b
 internalSolver preSlvr slvr conf s@Settings{..} i = do
   (toMain, fromVC)   <- U.newChan vcBufSize
   (toVC,   fromMain) <- U.newChan vcBufSize
@@ -284,7 +288,7 @@ internalSolver preSlvr slvr conf s@Settings{..} i = do
   -- kick off
   !aWorkers  <- A.async runVCWorkers
 
-  (results :/\  _) <- populateChans
+  results <- populateChans
 
   A.cancel aWorkers
 
@@ -533,6 +537,13 @@ data Diagnostics = Diagnostics
                  , accCacheHits :: STM.TVar Counter
                  }
 
+-- TODO abstract frozen into a type class or type family?
+data FrozenDiags = FrozenDiags
+                   { fSatCnt       :: Counter
+                   , fUnSatCnt     :: Counter
+                   , fAccCacheHits :: Counter
+                   }
+
 data Caches = Caches
               { accCache :: STM.TVar ACache
               }
@@ -559,7 +570,7 @@ data FrozenStores = FrozenStores
 
 data Channels = Channels { vcChans   :: VCChannels
                          , mainChans :: MainChannels
-                         , threadId  :: !ThreadID
+                         , threadId  :: ThreadID
                          }
 newCaches :: IO Caches
 newCaches = do accCache <- STM.newTVarIO mempty
@@ -587,6 +598,12 @@ newDiagnostics = do satCnt       <- STM.newTVarIO mempty
                     unSatCnt     <- STM.newTVarIO mempty
                     accCacheHits <- STM.newTVarIO mempty
                     return Diagnostics{..}
+
+readDiagnostics :: State -> IO FrozenDiags
+readDiagnostics s = do fSatCnt       <- read (satCnt       . diagnostics) s
+                       fUnSatCnt     <- read (unSatCnt     . diagnostics) s
+                       fAccCacheHits <- read (accCacheHits . diagnostics) s
+                       return FrozenDiags{..}
 
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
 update field = updateWith (field . stores)
