@@ -134,10 +134,10 @@ main = do
       bPropJustV12 = configure justV12 bProp
       bPropJustV123 = configure justV123 bProp
 
-  v1Variants    <- genVariants bPropJustV1
-  v12Variants   <- genVariants bPropJustV12
-  v123Variants  <- genVariants bPropJustV123
-  allVariants   <- genVariants bProp
+  !v1Variants    <- genVariants bPropJustV1
+  !v12Variants   <- genVariants bPropJustV12
+  !v123Variants  <- genVariants bPropJustV123
+  !allVariants   <- genVariants bProp
 
   let benches :: Settings -> [Benchmark]
       benches ss = [
