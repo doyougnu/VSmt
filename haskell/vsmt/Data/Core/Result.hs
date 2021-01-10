@@ -25,7 +25,6 @@
 module Core.Result where
 
 import           Control.Monad.IO.Class (MonadIO)
-import           Control.Monad.IO.Class (liftIO)
 
 import           Control.Monad.Logger   (MonadLogger)
 import           Control.DeepSeq        (NFData)
