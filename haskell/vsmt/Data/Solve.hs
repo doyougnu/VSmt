@@ -21,6 +21,7 @@
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE NamedFieldPuns             #-}
+{-# LANGUAGE MagicHash                  #-}
 {-# LANGUAGE OverloadedStrings          #-}
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
@@ -56,6 +57,7 @@ import qualified Data.HashMap.Strict                   as Map
 import qualified Data.IntMap.Strict                    as IMap
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
+import           Data.Monoid                           (Sum(..))
 
 import qualified Z3.Monad                              as Z ( AST
                                                             , MonadZ3
@@ -195,6 +197,8 @@ logInProducerWith :: (R.MonadReader State m, MonadLogger m, Show a) =>
 logInProducerWith msg value = do tid <- R.asks (threadId . channels)
                                  logInThreadWith "Producer" tid msg value
 
+-- | This will cause a memory leak so make sure it is not used when benchmarking
+-- looks like the monadlogger instance logs this even for NoLogger!
 logInZ3AST :: (R.MonadReader State m, MonadLogger m, Z.MonadZ3 m) =>
   Text.Text -> SBool -> m ()
 logInZ3AST msg (unSBool -> value) = do tid <- R.asks (threadId . channels)
@@ -516,9 +520,9 @@ deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
 
 -- | A counter for the diagnostics portion of the state
-type Counter = Int
-  -- deriving (Num, Enum)         via Int
-  -- deriving (Semigroup, Monoid) via Sum Int
+newtype Counter = Counter { unCounter :: Int }
+  deriving (Num, Enum)         via Int
+  deriving (Semigroup, Monoid) via Sum Int
 
 data Constants = Constants { genModels :: STM.TVar Bool
                            }
@@ -579,9 +583,9 @@ newConstants Settings{..} = do genModels <- STM.newTVarIO generateModels
                                return Constants{..}
 
 newDiagnostics :: IO Diagnostics
-newDiagnostics = do satCnt       <- STM.newTVarIO 0
-                    unSatCnt     <- STM.newTVarIO 0
-                    accCacheHits <- STM.newTVarIO 0
+newDiagnostics = do satCnt       <- STM.newTVarIO mempty
+                    unSatCnt     <- STM.newTVarIO mempty
+                    accCacheHits <- STM.newTVarIO mempty
                     return Diagnostics{..}
 
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
@@ -782,7 +786,7 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
                   i <- liftIO $ hashStableName <$> makeStableName a
                   case IMap.lookup i acc of
                     Just b -> logInProducerWith "Acc Cache Hit on " a >>
-                              succAccCacheHits >>
+                              -- succAccCacheHits >>
                               return b
                     Nothing -> do !b <- go
                                   logInProducerWith "Acc Cache miss on " a
@@ -1031,11 +1035,7 @@ accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
 accumulate x@(BOp Not (_ :/\ Ref r))  = memo x $! (P :/\ ) . Ref <$> sNot r
-accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = memo x $!
-  logInProducerWith "Accumulate: Discharging Refs" x >>
-  logInZ3AST "left side" l >>
-  logInZ3AST "right side" r >>
-  (P :/\ ) . Ref <$> dispatchOp op l r
+accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = memo x $! (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
 accumulate x@(IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo x $ (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
