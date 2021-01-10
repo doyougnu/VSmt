@@ -181,8 +181,9 @@ main = do
 
   let diagnostics :: FilePath -> Settings -> IO ()
       diagnostics fn ss =
-        do runDiagnostics fn "v-->v" "V1*V2"        ss bPropJustV12
-           runDiagnostics fn "v-->v" "V1*V2*V3"     ss bPropJustV12
+        do runDiagnostics fn "v-->v" "V1"           ss bPropJustV1
+           runDiagnostics fn "v-->v" "V1*V2"        ss bPropJustV12
+           runDiagnostics fn "v-->v" "V1*V2*V3"     ss bPropJustV123
            runDiagnostics fn "v-->v" "V1*V2*V3*V4"  ss bProp
 
     -- | Compression Ratio props

@@ -39,8 +39,11 @@ deriving newtype instance ToField Counter
 runDiagnostics :: FilePath -> String -> String -> Settings -> Proposition -> IO ()
 runDiagnostics fn alg variant ss p = do let a = Bl.toLazyByteString . Bl.stringUtf8 $ alg
                                             v = Bl.toLazyByteString . Bl.stringUtf8 $ variant
+                                            sep = Bl.toLazyByteString . Bl.stringUtf8 $ ","
                                         res <- solveGetDiag Nothing ss p
-                                        BS.appendFile fn $ a <> v <> encodeDefaultOrderedByName (pure res)
+                                        BS.appendFile fn $
+                                          a <> sep <> v <> sep <>
+                                          encodeDefaultOrderedByName (pure res)
 
 
 -- | make a description for the benchmark, we input pass through variables alg,

@@ -1,0 +1,12 @@
+v-->vV1*V2fSatCnt,fUnSatCnt,fAccCacheHits
+4,0,0
+v-->vV1*V2*V3fSatCnt,fUnSatCnt,fAccCacheHits
+4,0,0
+v-->vV1*V2*V3*V4fSatCnt,fUnSatCnt,fAccCacheHits
+16,0,0
+v-->v,V1*V2,fSatCnt,fUnSatCnt,fAccCacheHits
+4,0,196516
+v-->v,V1*V2*V3,fSatCnt,fUnSatCnt,fAccCacheHits
+4,0,196886
+v-->v,V1*V2*V3*V4,fSatCnt,fUnSatCnt,fAccCacheHits
+16,0,794967

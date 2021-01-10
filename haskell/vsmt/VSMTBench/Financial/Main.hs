@@ -295,6 +295,18 @@ main = do
         , mkBench' "v-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" vOnP bProp
         ]
 
+  let diagnostics :: FilePath -> Settings -> IO ()
+      diagnostics fn ss =
+        do runDiagnostics fn  "v-->v" "V1"                             ss justbPropV1
+           runDiagnostics fn  "v-->v" "V1*V2"                          ss justbPropV12
+           runDiagnostics fn  "v-->v" "V1*V2*V3"                       ss justbPropV123
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4"                    ss justbPropV1234
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5"                 ss justbPropV12345
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6"              ss justbPropV123456
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7"           ss justbPropV1234567
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        ss justbPropV12345678
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     ss justbPropV123456789
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" ss bProp
 
 --     -- | Compression Ratio props, we start counting by 1 instead of 0 here
 --     justbPropV12'  = selectVariant v01Conf bProp
@@ -357,7 +369,9 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnP (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
-  defaultMain $
-        [ bgroup "Z3" (benches defSettings)
-      -- , bgroup "Z3" (compRatioBenches z3DefConf)
-        ]
+  diagnostics "raw_data/financial_diagnostics.csv" defSettings
+
+  -- defaultMain $
+  --       [ bgroup "Z3" (benches defSettings)
+  --     -- , bgroup "Z3" (compRatioBenches z3DefConf)
+  --       ]

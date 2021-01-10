@@ -804,7 +804,7 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
                   i <- liftIO $ hashStableName <$> makeStableName a
                   case IMap.lookup i acc of
                     Just b -> logInProducerWith "Acc Cache Hit on " a >>
-                              -- succAccCacheHits >>
+                              succAccCacheHits >>
                               return b
                     Nothing -> do !b <- go
                                   logInProducerWith "Acc Cache miss on " a
