@@ -15,6 +15,7 @@
 module Settings
   ( Settings(..)
   , defSettings
+  , defWithModels
   , defSettingsOnlySat
   , minSettings
   , debugSettings
@@ -40,7 +41,7 @@ data Settings = Settings { seed             :: Maybe Integer
 -- | A default configuration uses z3 and tries to shrink propositions
 defSettings :: Settings
 defSettings = Settings{ seed            = Nothing
-                      , generateModels  = True
+                      , generateModels  = False
                       , verboseMode     = False
                       , vcBufSize       = 25000
                       , producerBufSize = 250
@@ -72,3 +73,6 @@ minAsyncSettings = minSettings{numProducers = 1, numConsumers = 1, numVCWorkers 
 
 debugSettings :: Settings
 debugSettings = minSettings{verboseMode=True}
+
+defWithModels :: Settings
+defWithModels = defSettings{generateModels=True}
