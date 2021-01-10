@@ -214,8 +214,8 @@ main = do
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
   -- putStrLn $ show $ bProp
-  let t = bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one" &&& bRef "two"
-  !res <- solve Nothing defSettings t
+  let t = bChc "AA" (bRef "Aleft") (bRef "two" ==> bRef "Aright" ||| bRef "one")  -- &&& bRef "two"
+  !res <- solveVerbose Nothing defSettings t
   putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"

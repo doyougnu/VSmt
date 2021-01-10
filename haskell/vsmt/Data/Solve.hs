@@ -14,6 +14,7 @@
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveAnyClass             #-}
 {-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DerivingVia                #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -60,6 +61,7 @@ import qualified Z3.Monad                              as Z ( AST
                                                             , MonadZ3
                                                             , Result(..)
                                                             , Z3
+                                                            , astToString
                                                             , getSolver
                                                             , getContext
                                                             , evalZ3
@@ -92,6 +94,7 @@ import qualified Z3.Monad                              as Z ( AST
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 import           Control.DeepSeq                       (NFData)
+import           Data.Monoid                           (Sum(..))
 
 import           Data.Text.IO                          (putStrLn)
 import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
@@ -192,6 +195,11 @@ logInProducerWith :: (R.MonadReader State m, MonadLogger m, Show a) =>
 logInProducerWith msg value = do tid <- R.asks (threadId . channels)
                                  logInThreadWith "Producer" tid msg value
 
+logInZ3AST :: (R.MonadReader State m, MonadLogger m, Z.MonadZ3 m) =>
+  Text.Text -> SBool -> m ()
+logInZ3AST msg (unSBool -> value) = do tid <- R.asks (threadId . channels)
+                                       Z.astToString value >>= logInThreadWith "Producer" tid msg
+
 logInConsumer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
 logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
 
@@ -237,6 +245,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
   initialStore       <- newStore
   initialCache       <- newCaches
   initialResults     <- newResults
+  initialDiagnostics <- newDiagnostics
 
 
   let il = toIL i
@@ -249,6 +258,7 @@ internalSolver preSlvr slvr conf Settings{..} i = do
                          , channels = chans
                          , caches   = initialCache
                          , results  = initialResults
+                         , diagnostics = initialDiagnostics
                          }
       seasoning = preSlvr initialStore (sSnd <$> il)
 
@@ -281,16 +291,18 @@ solveForCore i = do
   initialStore       <- newStore
   initialCache       <- newCaches
   initialResults     <- newResults
+  initialDiagnostics <- newDiagnostics
 
   let il              = toIL i
 
-      vcChans   = VCChannels     $ (fromMain, toMain)
-      mainChans = MainChannels   $ (fromVC, toVC)
+      vcChans   = VCChannels   (fromMain, toMain)
+      mainChans = MainChannels (fromVC, toVC)
       chans     = Channels{ vcChans=vcChans, mainChans=mainChans, threadId=0}
       startState  = State{ stores   = initialStore
                          , channels = chans
                          , caches   = initialCache
                          , results  = initialResults
+                         , diagnostics = initialDiagnostics
                          }
       seasoning = runPreSolverNoLog initialStore (sSnd <$> il)
 
@@ -488,15 +500,26 @@ data State = State
   , channels :: Channels
   , caches   :: Caches
   , results  :: Results
+  , diagnostics :: Diagnostics
   }
 
 type Cache b = IMap.IntMap b
 type ACache = Cache (V :/\ IL)
 
 newtype Results = Results { unResult :: STM.TVar Result }
-
 deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
+
+-- | A counter for the diagnostics portion of the state
+newtype Counter = Counter { unCounter :: Int }
+  deriving (Num, Enum)         via Int
+  deriving (Semigroup, Monoid) via Sum Int
+
+data Diagnostics = Diagnostics
+                 { satCnt       :: STM.TVar Counter
+                 , unSatCnt     :: STM.TVar Counter
+                 , accCacheHits :: STM.TVar Counter
+                 }
 
 data Caches = Caches
               { accCache :: STM.TVar ACache
@@ -543,6 +566,12 @@ newStore = do vConfig    <- STM.newTVarIO mempty
               dimensions <- STM.newTVarIO mempty
               return Stores{..}
 
+newDiagnostics :: IO Diagnostics
+newDiagnostics = do satCnt       <- STM.newTVarIO mempty
+                    unSatCnt     <- STM.newTVarIO mempty
+                    accCacheHits <- STM.newTVarIO mempty
+                    return Diagnostics{..}
+
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
 update field = updateWith (field . stores)
 
@@ -554,6 +583,15 @@ readCache f = readWith (f . caches)
 
 updateCache :: (R.MonadReader State io, MonadIO io) => (Caches -> STM.TVar a) -> (a -> a) -> io ()
 updateCache field = updateWith (field . caches)
+
+succSatCnt :: (R.MonadReader State io, MonadIO io) => io ()
+succSatCnt = updateWith (satCnt . diagnostics) succ
+
+succUnSatCnt :: (R.MonadReader State io, MonadIO io) => io ()
+succUnSatCnt = updateWith (unSatCnt . diagnostics) succ
+
+succAccCacheHits :: (R.MonadReader State io, MonadIO io) => io ()
+succAccCacheHits = updateWith (accCacheHits . diagnostics) succ
 
 updateWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
 updateWith field f = R.asks field >>=
@@ -731,7 +769,9 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
   memo !a go = do acc <- readCache accCache
                   i <- liftIO $ hashStableName <$> makeStableName a
                   case IMap.lookup i acc of
-                    Just b -> logInProducerWith "Acc Cache Hit on " a >> return b
+                    Just b -> logInProducerWith "Acc Cache Hit on " a >>
+                              succAccCacheHits >>
+                              return b
                     Nothing -> do !b <- go
                                   logInProducerWith "Acc Cache miss on " a
                                   updateCache accCache (IMap.insert i b)
@@ -970,6 +1010,8 @@ dispatchOp' GTE (SD l) (SD r) = SBool <$> Z.mkGe (unSDouble  l)  (unSDouble  r)
 -- possible the plain terms in the AST into symbolic references
 accumulate :: ( Z.MonadZ3 z3
               , Cacheable z3 IL (V :/\ IL)
+              , MonadReader State z3
+              , MonadLogger z3
               ) => IL -> z3 (V :/\ IL)
  -- computation rules
 accumulate Unit    = return (P :/\ Unit)
@@ -978,6 +1020,9 @@ accumulate x@Chc{} = return (V :/\ x)
   -- bools
 accumulate x@(BOp Not (_ :/\ Ref r))  = memo x $! (P :/\ ) . Ref <$> sNot r
 accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = memo x $!
+  logInProducerWith "Accumulate: Discharging Refs" x >>
+  logInZ3AST "left side" l >>
+  logInZ3AST "right side" r >>
   (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
 accumulate x@(IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo x $ (P :/\ ) . Ref <$> dispatchOp' op l r
@@ -1003,6 +1048,7 @@ accumulate x@(BBOp op (P :/\ l) (P :/\ r)) = memo x $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
      let !res = BBOp op (P :/\ l') (P :/\ r')
+     logInProducerWith "accumulating two refs: " res
      accumulate res
 
 accumulate x@(BBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
@@ -1057,9 +1103,9 @@ iAccumulate' (IIOp o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
                                                return (vl <@> vr :/\  res)
 
 -------------------------------- Evaluation -----------------------------------
-toSolver :: (Monad m, Z.MonadZ3 m) => SBool -> m VarCore
+toSolver :: (Monad m, Z.MonadZ3 m, MonadLogger m, R.MonadReader State m) => SBool -> m VarCore
 {-# INLINE toSolver #-}
-toSolver (unSBool -> a) = do Z.assert a; return $! intoCore Unit
+toSolver (unSBool -> a) = do Z.assert a; logInProducerWith "Solver knows about: " a; return $! intoCore Unit
 
 isValue :: IL -> Bool
 isValue Unit    = True
@@ -1076,6 +1122,7 @@ isValue' _        = False
   -- computation rules
 evaluate :: ( MonadLogger z3
             , Z.MonadZ3   z3
+            , MonadReader State z3
             , Cacheable   z3 IL (V :/\ IL)
             ) => IL -> z3 VarCore
 evaluate Unit     = return $! intoCore Unit
@@ -1169,6 +1216,8 @@ toLocWith' = flip InNum
 
 findChoice :: ( Z.MonadZ3 z3
               , Cacheable z3 IL (V :/\ IL)
+              , MonadLogger z3
+              , MonadReader State z3
               ) => Loc -> z3 Loc
   -- base cases
 findChoice x@(InBool Ref{} Top) = return x
@@ -1176,8 +1225,11 @@ findChoice x@(InBool Unit Top)  = return x
 findChoice x@(InBool Chc {} _)  = return x
 findChoice x@(InNum Chc' {} _)  = return x
   -- discharge two references
-findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   =
+findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
   do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
+     logInProducerWith "findChoice BRef: " x
+     logInProducerWith "findChoice BRef constructed to: " $ BBOp op (P :/\ l) (P :/\ r)
+     logInProducerWith "findChoice BRef accumulated to: " n
      findChoice (InBool n parent)
 
 findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
@@ -1239,10 +1291,14 @@ findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 store ::
   ( R.MonadReader State io
   ,  MonadIO            io
+  , MonadLogger         io
   , Z.MonadZ3           io
   ) => Result -> io ()
-store r = asks (unResult . results)
-          >>= liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
+store r = do
+  logInProducerWith "Storing result: " r
+  reads config >>= logInProducerWith "Stores: "
+  asks (unResult . results)
+    >>= liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
@@ -1329,7 +1385,8 @@ removeChoices (VarCore Unit) = reads bools >>=
                                reads config >>=
                                logInProducerWith "Core reduced to Unit with Context" >>
                                do !vC <- reads vConfig
-                                  !r  <- getResult vC
+                                  (b, !r)  <- getResult vC
+                                  if b then succSatCnt else succUnSatCnt
                                   store r
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
 removeChoices (VarCore l) = choose (toLoc l)
@@ -1340,9 +1397,10 @@ choose ::
   ) => Loc -> SolverT m ()
 choose (InBool Unit Top)  = logInProducer "Choosing all done" >>
                                do !vC <- reads vConfig
-                                  !r  <- getResult vC
+                                  (b, !r)  <- getResult vC
+                                  if b then succSatCnt else succUnSatCnt
                                   store r
-choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
+choose (InBool l@Ref{} _) = logInProducer "Choosing all done Removing choices" >>
                               evaluate l >>= removeChoices
 choose loc =
   do

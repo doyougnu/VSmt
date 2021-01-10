@@ -20,11 +20,14 @@
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE TupleSections              #-}
 
 module Core.Result where
 
 import           Control.Monad.IO.Class (MonadIO)
+import           Control.Monad.IO.Class (liftIO)
 
+import           Control.Monad.Logger   (MonadLogger)
 import           Control.DeepSeq        (NFData)
 import           Data.Hashable          (Hashable)
 import           Data.Text              (Text, pack, unpack)
@@ -134,17 +137,19 @@ isSat = do cs <- Z.check
                        _     -> False
 
 -- | Generate a VSMT model
-getResult :: (Z.MonadZ3 m, MonadIO m) => Maybe VariantContext -> m Result
+getResult :: (Z.MonadZ3 m, MonadIO m, MonadLogger m) => Maybe VariantContext -> m (Bool, Result)
 getResult vc =
   do (!r,!m) <- Z.getModel
      case r of
-       Z.Unsat -> return mempty
-       Z.Undef -> return mempty
+       Z.Unsat -> return (False, mempty)
+       Z.Undef -> return (False, mempty)
        _       ->
          do m' <- maybe (pure mempty) Z.modelToString m
+            liftIO $ putStrLn $! "Raw model: " ++ m'
             let !ms  = parseModel . pack $ m'
                 bindings = VariableMap $!
                            M.fromList $!
                            fmap (\(k :/\ v) ->
                                    (k, ResultFormula $! pure (vc :/\ v))) ms
-            return $ Result $! Result' {variables = bindings, satisfiableVCs = vc}
+            liftIO $ putStrLn $! "Parsed model: " ++ show ms
+            return $ (True,) . Result $! Result' {variables = bindings, satisfiableVCs = vc}
