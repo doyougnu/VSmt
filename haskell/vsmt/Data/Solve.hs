@@ -239,13 +239,14 @@ internalSolver ::
   -> Settings
   -> Prop' Var
   -> IO b1
-internalSolver preSlvr slvr conf Settings{..} i = do
+internalSolver preSlvr slvr conf s@Settings{..} i = do
   (toMain, fromVC)   <- U.newChan vcBufSize
   (toVC,   fromMain) <- U.newChan vcBufSize
   initialStore       <- newStore
   initialCache       <- newCaches
   initialResults     <- newResults
   initialDiagnostics <- newDiagnostics
+  initialConstants   <- newConstants s
 
 
   let il = toIL i
@@ -254,11 +255,12 @@ internalSolver preSlvr slvr conf Settings{..} i = do
       vcChans   = VCChannels   (fromMain, toMain)
       mainChans = MainChannels (fromVC, toVC)
       chans     = Channels{ vcChans=vcChans, mainChans=mainChans, threadId=0}
-      startState  = State{ stores   = initialStore
-                         , channels = chans
-                         , caches   = initialCache
-                         , results  = initialResults
+      startState  = State{ stores      = initialStore
+                         , channels    = chans
+                         , caches      = initialCache
+                         , results     = initialResults
                          , diagnostics = initialDiagnostics
+                         , constants   = initialConstants
                          }
       seasoning = preSlvr initialStore (sSnd <$> il)
 
@@ -292,6 +294,7 @@ solveForCore i = do
   initialCache       <- newCaches
   initialResults     <- newResults
   initialDiagnostics <- newDiagnostics
+  initialConstants   <- newConstants defSettings{generateModels=False}
 
   let il              = toIL i
 
@@ -303,6 +306,7 @@ solveForCore i = do
                          , caches   = initialCache
                          , results  = initialResults
                          , diagnostics = initialDiagnostics
+                         , constants   = initialConstants
                          }
       seasoning = runPreSolverNoLog initialStore (sSnd <$> il)
 
@@ -569,6 +573,10 @@ newStore = do vConfig    <- STM.newTVarIO mempty
               bools      <- STM.newTVarIO mempty
               dimensions <- STM.newTVarIO mempty
               return Stores{..}
+
+newConstants :: Settings -> IO Constants
+newConstants Settings{..} = do genModels <- STM.newTVarIO generateModels
+                               return Constants{..}
 
 newDiagnostics :: IO Diagnostics
 newDiagnostics = do satCnt       <- STM.newTVarIO 0
@@ -1390,9 +1398,9 @@ removeChoices (VarCore Unit) = reads bools >>=
                                logInProducerWith "Core reduced to Unit with Context" >>
                                do !vC <- reads vConfig
                                   wantModels <- readWith (genModels . constants)
-                                  (!b :/\ !r) <- if wantModels
-                                                 then getResult vC
-                                                 else isSat     vC
+                                  (b :/\ r) <- if wantModels
+                                               then getResult vC
+                                               else isSat     vC
                                   if b then succSatCnt else succUnSatCnt
                                   store r
 removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
