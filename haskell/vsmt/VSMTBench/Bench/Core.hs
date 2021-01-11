@@ -63,6 +63,7 @@ mkDescription alg confDesc [prop] = desc
              , "Variants"   , show variants
              ]
     !desc = mconcat $ intersperse "/" $ pure alg ++ pure confDesc ++ desc'
+    nPln,nChc :: Int
     !nPln = plainCount prop
     !nChc = choiceCount prop
     ratio :: Float
