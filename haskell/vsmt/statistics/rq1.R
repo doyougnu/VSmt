@@ -6,8 +6,8 @@ library(scales)
 
 finResultsFile  <- "../munged_data/financial.csv"
 autoResultsFile <- "../munged_data/auto.csv"
-finDiag         <- "../munged_data/financial_diagnostics.csv"
-autoDiag        <- "../munged_data/auto_diagnostics.csv"
+finDiag         <- read.csv(file="../munged_data/financial_diagnostics.csv") %>% mutate(Variants = SatCount) %>% mutate(data = "Fin")
+autoDiag        <- read.csv(file="../munged_data/auto_diagnostics.csv") %>% mutate(Variants = SatCount) %>% mutate(data = "Auto")
 ## finRawFile <- "../data/fin_rq3_singletons.csv"
 ## autoRawFile <- "../data/auto_rq3_singletons.csv"
 
@@ -22,10 +22,14 @@ autoData <- read.csv(file=autoResultsFile) %>%
 finDF <- finData %>% mutate(data = "Fin")
 autoDF <- autoData %>% mutate(data = "Auto")
 
+diagData <- rbind(finDiag,autoDiag)
 data <- rbind(finDF, autoDF)
 
-rq1DF <- data %>% filter(Variants >= 2) %>% group_by(Algorithm) %>%
-  arrange(Variants)
+### we filter by vcore size because it has the right number for variants,
+### mkbench'' got messed up somewhere
+rq1DF <- data %>% filter(VCoreSize >= 2) %>% group_by(Algorithm) %>%
+  arrange(Variants) %>% mutate(Variants = case_when(Variants == 1 ~ VCoreSize,
+                                                    TRUE ~ Variants))
 
 breaksRq1 <- function(x) {
   if (max(x) < 17) {
@@ -35,15 +39,24 @@ breaksRq1 <- function(x) {
   }
 
 rq1 <- ggplot(rq1DF) +
-  geom_line(aes(x=Variants, y=Mean/60, color=Algorithm)) +
-  geom_point(aes(x=Variants, y=Mean/60, shape=Algorithm, color=Algorithm),size=3) +
+  geom_line(aes(x=sqrt(Variants), y=Mean, color=Algorithm)) +
+  geom_point(aes(x=sqrt(Variants), y=Mean, shape=Algorithm, color=Algorithm),size=3) +
   scale_shape_manual(values = c(1,6,5,17)) +
   facet_wrap(. ~ data, scales = "free") +
   theme_classic() +
   scale_x_continuous(breaks=breaksRq1, limits=c(2,NA)) +
+  scale_y_continuous(name = "Time [Sec.] to solve all Variants") +
   ggtitle("RQ1: Performance as variants increase") +
-  ylab("Time [Min.] to solve all Variants") +
+  xlab("Number of Unique Dimensions") +
   theme(legend.position = c(0.6,0.75))
+
+diagnostics <- ggplot(diagData) +
+  geom_line(aes(x=sqrt(Variants), y=CacheHits)) +
+  geom_point(aes(x=sqrt(Variants), y=CacheHits)) +
+  facet_wrap(. ~ data, scales = "free") +
+  theme_classic() +
+  scale_x_continuous(breaks=breaksRq1, limits=c(2,NA))
+
 
 ## ggsave("../plots/RQ1.png", plot = rq1, height = 4, width = 7, device = "png")
 
