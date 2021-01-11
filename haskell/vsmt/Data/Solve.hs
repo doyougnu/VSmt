@@ -55,6 +55,7 @@ import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
 import qualified Data.IntMap.Strict                    as IMap
+import qualified Data.Sequence                         as Seq
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
 import           Data.Monoid                           (Sum(..))
@@ -99,7 +100,7 @@ import           Control.DeepSeq                       (NFData)
 
 
 import           Data.Text.IO                          (putStrLn)
-import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
+import           System.Mem.StableName                 (StableName,makeStableName,hashStableName,eqStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
@@ -516,8 +517,8 @@ data State = State
   , constants :: Constants
   }
 
-type Cache b = IMap.IntMap b
-type ACache = Cache (V :/\ IL)
+type Cache a b = IMap.IntMap (Seq.Seq (StableName a :/\ b))
+type ACache = Cache IL (V :/\ IL)
 
 newtype Results = Results { unResult :: STM.TVar Result }
 deriving instance Generic Z.Result
@@ -800,15 +801,19 @@ class Cacheable m a b where
 
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) IL (V :/\ IL) where
-  memo !a go = do acc <- readCache accCache
-                  i <- liftIO $ hashStableName <$> makeStableName a
-                  case IMap.lookup i acc of
-                    Just b -> logInProducerWith "Acc Cache Hit on " a >>
-                              succAccCacheHits >>
-                              return b
+  memo !a go = do acc  <- readCache accCache
+                  sn   <- liftIO $ makeStableName a
+                  let iKey = hashStableName sn
+                      avoidCollision ss = do i <- Seq.findIndexL (eqStableName sn . sFst) ss
+                                             sSnd <$> Seq.lookup i ss
+                  case IMap.lookup iKey acc >>= avoidCollision of
+                    Just b -> do logInProducerWith "Acc Cache Hit on " a
+                                 succAccCacheHits
+                                 return b
                     Nothing -> do !b <- go
                                   logInProducerWith "Acc Cache miss on " a
-                                  updateCache accCache (IMap.insert i b)
+                                  updateCache accCache $!
+                                    IMap.insertWith (Seq.><) iKey . pure $ sn :/\ b
                                   return b
 
 
