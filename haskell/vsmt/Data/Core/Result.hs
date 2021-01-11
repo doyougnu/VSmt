@@ -24,7 +24,7 @@
 
 module Core.Result where
 
-import           Control.Monad.IO.Class (MonadIO,liftIO)
+import           Control.Monad.IO.Class (MonadIO)
 
 import           Control.Monad.Logger   (MonadLogger)
 import           Control.DeepSeq        (NFData)
@@ -146,11 +146,9 @@ getResult !vc =
        Z.Undef -> return (False :/\ mempty)
        _       ->
          do m' <- maybe (pure mempty) Z.modelToString m
-            liftIO $ putStrLn $ "Raw Model: " ++ m'
             let !ms  = parseModel . pack $! m'
                 bindings = VariableMap $!
                            M.fromList $!
                            fmap (\(k :/\ v) ->
                                    (k, ResultFormula $! pure (vc :/\ v))) ms
-            liftIO $ putStrLn $ "Parsed Model: " ++ show ms
             return $ (True :/\) . Result $! Result' {variables = bindings, satisfiableVCs = vc}

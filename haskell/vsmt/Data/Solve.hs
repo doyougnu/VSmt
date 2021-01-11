@@ -54,8 +54,8 @@ import           Control.Monad.Reader                  as R (MonadReader,
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
-import qualified Data.IntMap.Strict                    as IMap
-import qualified Data.Sequence                         as Seq
+-- import qualified Data.IntMap.Strict                    as IMap
+-- import qualified Data.Sequence                         as Seq
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
 import           Data.Monoid                           (Sum(..))
@@ -100,7 +100,7 @@ import           Control.DeepSeq                       (NFData)
 
 
 import           Data.Text.IO                          (putStrLn)
-import           System.Mem.StableName                 (StableName,makeStableName,hashStableName,eqStableName)
+import           System.Mem.StableName                 (StableName,makeStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
@@ -517,7 +517,7 @@ data State = State
   , constants :: Constants
   }
 
-type Cache a b = IMap.IntMap (Seq.Seq (StableName a :/\ b))
+type Cache a b = Map.HashMap (StableName a) b
 type ACache = Cache IL (V :/\ IL)
 
 newtype Results = Results { unResult :: STM.TVar Result }
@@ -802,20 +802,32 @@ class Cacheable m a b where
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) IL (V :/\ IL) where
   memo !a go = do acc  <- readCache accCache
-                  sn   <- liftIO $ makeStableName a
-                  let iKey = hashStableName sn
-                      avoidCollision ss = do i <- Seq.findIndexL (eqStableName sn . sFst) ss
-                                             sSnd <$> Seq.lookup i ss
-                  case IMap.lookup iKey acc >>= avoidCollision of
+                  !sn  <- liftIO $ makeStableName a
+                  case Map.lookup sn acc of
                     Just b -> do logInProducerWith "Acc Cache Hit on " a
                                  succAccCacheHits
                                  return b
                     Nothing -> do !b <- go
                                   logInProducerWith "Acc Cache miss on " a
-                                  updateCache accCache $!
-                                    IMap.insertWith (Seq.><) iKey . pure $ sn :/\ b
+                                  updateCache accCache $! Map.insert sn b
                                   return b
 
+-- instance (Monad m, MonadIO m, MonadLogger m) =>
+--   Cacheable (SolverT m) IL (V :/\ IL) where
+--   memo !a go = do acc  <- readCache accCache
+--                   sn   <- liftIO $ makeStableName a
+--                   let iKey = hashStableName sn
+--                       avoidCollision ss = do i <- Seq.findIndexL (eqStableName sn . sFst) ss
+--                                              sSnd <$> Seq.lookup i ss
+--                   case IMap.lookup iKey acc >>= avoidCollision of
+--                     Just b -> do logInProducerWith "Acc Cache Hit on " a
+--                                  succAccCacheHits
+--                                  return b
+--                     Nothing -> do !b <- go
+--                                   logInProducerWith "Acc Cache miss on " a
+--                                   updateCache accCache $!
+--                                     IMap.insertWith (Seq.><) iKey . pure $ sn :/\ b
+--                                   return b
 
 ----------------------------------- IL -----------------------------------------
 type BRef = SBool
