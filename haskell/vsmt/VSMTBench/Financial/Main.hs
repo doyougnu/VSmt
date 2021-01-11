@@ -297,16 +297,16 @@ main = do
 
   let diagnostics :: FilePath -> Settings -> IO ()
       diagnostics fn ss =
-        do runDiagnostics fn  "v-->v" "V1"                             ss justbPropV1
-           runDiagnostics fn  "v-->v" "V1*V2"                          ss justbPropV12
-           runDiagnostics fn  "v-->v" "V1*V2*V3"                       ss justbPropV123
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4"                    ss justbPropV1234
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5"                 ss justbPropV12345
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6"              ss justbPropV123456
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7"           ss justbPropV1234567
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        ss justbPropV12345678
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     ss justbPropV123456789
-           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" ss bProp
+        do runDiagnostics fn  "v-->v" "V1"                             2    ss justbPropV1
+           runDiagnostics fn  "v-->v" "V1*V2"                          4    ss justbPropV12
+           runDiagnostics fn  "v-->v" "V1*V2*V3"                       8    ss justbPropV123
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4"                    16   ss justbPropV1234
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5"                 32   ss justbPropV12345
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6"              64   ss justbPropV123456
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7"           128  ss justbPropV1234567
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        256  ss justbPropV12345678
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     512  ss justbPropV123456789
+           runDiagnostics fn  "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" 1024 ss bProp
 
 --     -- | Compression Ratio props, we start counting by 1 instead of 0 here
 --     justbPropV12'  = selectVariant v01Conf bProp
