@@ -36,14 +36,15 @@ average xs = realToFrac (sum xs) / genericLength xs
 instance DefaultOrdered FrozenDiags
 instance ToNamedRecord  FrozenDiags
 deriving newtype instance ToField Counter
-runDiagnostics :: FilePath -> String -> String -> Settings -> Proposition -> IO ()
-runDiagnostics fn alg variant ss p = do let a = Bl.toLazyByteString . Bl.stringUtf8 $ alg
-                                            v = Bl.toLazyByteString . Bl.stringUtf8 $ variant
-                                            sep = Bl.toLazyByteString . Bl.stringUtf8 $ ","
-                                        res <- solveGetDiag Nothing ss p
-                                        BS.appendFile fn $
-                                          a <> sep <> v <> sep <>
-                                          encodeDefaultOrderedByName (pure res)
+runDiagnostics :: FilePath -> String -> String -> Int -> Settings -> Proposition -> IO ()
+runDiagnostics fn alg variant numVariants ss p = do let a = Bl.toLazyByteString . Bl.stringUtf8 $ alg
+                                                        v = Bl.toLazyByteString . Bl.stringUtf8 $ variant
+                                                        n = Bl.toLazyByteString . Bl.stringUtf8 $ show $ numVariants
+                                                        sep = Bl.toLazyByteString . Bl.stringUtf8 $ ","
+                                                    res <- solveGetDiag Nothing ss p
+                                                    BS.appendFile fn $
+                                                      a <> sep <> v <> sep <> n <> sep <>
+                                                      encodeDefaultOrderedByName (pure res)
 
 
 -- | make a description for the benchmark, we input pass through variables alg,

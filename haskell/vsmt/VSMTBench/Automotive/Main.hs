@@ -181,10 +181,10 @@ main = do
 
   let diagnostics :: FilePath -> Settings -> IO ()
       diagnostics fn ss =
-        do runDiagnostics fn "v-->v" "V1"           ss bPropJustV1
-           runDiagnostics fn "v-->v" "V1*V2"        ss bPropJustV12
-           runDiagnostics fn "v-->v" "V1*V2*V3"     ss bPropJustV123
-           runDiagnostics fn "v-->v" "V1*V2*V3*V4"  ss bProp
+        do runDiagnostics fn "v-->v" "V1"           2  ss bPropJustV1
+           runDiagnostics fn "v-->v" "V1*V2"        4  ss bPropJustV12
+           runDiagnostics fn "v-->v" "V1*V2*V3"     8  ss bPropJustV123
+           runDiagnostics fn "v-->v" "V1*V2*V3*V4"  16 ss bProp
 
     -- | Compression Ratio props
       -- justbPropV12  = selectVariant v01Conf bProp
@@ -215,7 +215,7 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  diagnostics "raw_data/auto_diagnostics.csv" defSettings
+  -- diagnostics "raw_data/auto_diagnostics.csv" defSettings
 
   -- defaultMain $
   --   [  bgroup "Z3" (benches defSettings)
@@ -224,11 +224,11 @@ main = do
 
   -- let t = bRef "one" &&& bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bRef "a") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
-  -- let t = bChc "AA" (bRef "a" ==> bRef "b" &&& bRef "c" &&& bRef "d") true
+  let t = bChc "AA" (bRef "a") (bRef "a" ||| bRef "b" ||| bRef "c") ||| bRef "d"
   -- putStrLn $ show $ bProp
   -- let t = bChc "AA" (bRef "Aleft") (bRef "two" ==> bRef "Aright" ||| bRef "one")  -- &&& bRef "two"
-  -- !res <- solveVerbose Nothing defSettings t
-  -- putStrLn $ show res
+  !res <- solve Nothing defSettings t
+  putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing
