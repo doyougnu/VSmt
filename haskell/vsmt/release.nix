@@ -49,10 +49,9 @@ in
                       pkgs.haskellPackages.profiteur
                       pkgs.zlib
                       pkgs.z3
-                      pkgs.R
                       pkgs.cabal-install
-                      # unstable.julia_13
-                      unstable.julia
+                      unstable.julia_13
+                      # unstable.julia
                     ];
     };
   }
