@@ -123,8 +123,8 @@ pOnV :: [Plain Proposition] -> IO R.Result
 pOnV =  fmap mconcat . mapM (Sl.solve Nothing defSettings) . fmap unPlain
 
 -- | Plain propositions on the plain solver the brute force position
-pOnP :: [Plain Proposition] -> IO [Z.Result :/\  String]
-pOnP ps = do
+pOnPModel :: [Plain Proposition] -> IO [Z.Result :/\  String]
+pOnPModel ps = do
   let go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
                    Z.assert s
                    (r,m) <- Z.getModel
@@ -132,11 +132,18 @@ pOnP ps = do
                    return (r :/\  m')
   mapM (Z.evalZ3 . go) ps
 
+pOnP :: [Plain Proposition] -> IO [Z.Result]
+pOnP ps = do
+  let go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
+                   Z.assert s
+                   Z.check
+  mapM (Z.evalZ3 . go) ps
+
 -- | vOnP tests the performance of configuration. That is it should input a
 -- variational formula, then configure to all its variants, then run them each
 -- on a plain solver
-vOnP :: Proposition -> IO [Z.Result :/\ String]
-vOnP p = do
+vOnPModel :: Proposition -> IO [Z.Result :/\ String]
+vOnPModel p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
       go prop = Z.local $
@@ -145,4 +152,15 @@ vOnP p = do
            (r,m) <- Z.getModel
            m' <- maybe (pure "") Z.modelToString m
            return (r :/\  m')
+  Z.evalZ3 $ mapM go ps
+
+vOnP :: Proposition -> IO [Z.Result]
+vOnP p = do
+  let configs = genConfigs p
+      ps = fmap (Plain . (`configure` p)) configs
+      go prop = Z.local $
+        do s <- Sl.unSBool <$> runEvalZ3 prop
+           Z.assert s
+           r <- Z.check
+           return r
   Z.evalZ3 $ mapM go ps
