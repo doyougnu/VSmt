@@ -54,7 +54,7 @@ import           Control.Monad.Reader                  as R (MonadReader,
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
--- import qualified Data.IntMap.Strict                    as IMap
+import qualified Data.IntMap.Strict                    as IMap
 -- import qualified Data.Sequence                         as Seq
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
@@ -100,7 +100,7 @@ import           Control.DeepSeq                       (NFData)
 
 
 import           Data.Text.IO                          (putStrLn)
-import           System.Mem.StableName                 (StableName,makeStableName)
+import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
@@ -517,8 +517,10 @@ data State = State
   , constants :: Constants
   }
 
-type Cache a b = Map.HashMap (StableName a) b
-type ACache = Cache IL (V :/\ IL)
+type Cache a = IMap.IntMap a
+-- type Cache a b = Map.HashMap (StableName a) b
+-- type ACache = Cache IL (V :/\ IL)
+type ACache = Cache (V :/\ IL)
 
 newtype Results = Results { unResult :: STM.TVar Result }
 deriving instance Generic Z.Result
@@ -537,6 +539,7 @@ data Diagnostics = Diagnostics
                  { satCnt       :: STM.TVar Counter
                  , unSatCnt     :: STM.TVar Counter
                  , accCacheHits :: STM.TVar Counter
+                 , accCacheMiss :: STM.TVar Counter
                  }
 
 -- TODO abstract frozen into a type class or type family?
@@ -544,6 +547,7 @@ data FrozenDiags = FrozenDiags
                    { fSatCnt       :: Counter
                    , fUnSatCnt     :: Counter
                    , fAccCacheHits :: Counter
+                   , fAccCacheMiss :: Counter
                    } deriving (Generic, Show)
 
 data Caches = Caches
@@ -599,12 +603,14 @@ newDiagnostics :: IO Diagnostics
 newDiagnostics = do satCnt       <- STM.newTVarIO mempty
                     unSatCnt     <- STM.newTVarIO mempty
                     accCacheHits <- STM.newTVarIO mempty
+                    accCacheMiss <- STM.newTVarIO mempty
                     return Diagnostics{..}
 
 readDiagnostics :: State -> IO FrozenDiags
 readDiagnostics s = do fSatCnt       <- read (satCnt       . diagnostics) s
                        fUnSatCnt     <- read (unSatCnt     . diagnostics) s
                        fAccCacheHits <- read (accCacheHits . diagnostics) s
+                       fAccCacheMiss <- read (accCacheMiss . diagnostics) s
                        return FrozenDiags{..}
 
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
@@ -627,6 +633,9 @@ succUnSatCnt = updateWith (unSatCnt . diagnostics) succ
 
 succAccCacheHits :: (R.MonadReader State io, MonadIO io) => io ()
 succAccCacheHits = updateWith (accCacheHits . diagnostics) succ
+
+succAccCacheMiss :: (R.MonadReader State io, MonadIO io) => io ()
+succAccCacheMiss = updateWith (accCacheMiss . diagnostics) succ
 
 updateWith :: (R.MonadReader s io, MonadIO io) => (s -> STM.TVar a) -> (a -> a) -> io ()
 updateWith field f = R.asks field >>=
@@ -802,14 +811,15 @@ class Cacheable m a b where
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) IL (V :/\ IL) where
   memo !a go = do acc  <- readCache accCache
-                  !sn  <- liftIO $ makeStableName a
-                  case Map.lookup sn acc of
+                  !i   <- liftIO $ hashStableName <$> makeStableName a
+                  case IMap.lookup i acc of
                     Just b -> do logInProducerWith "Acc Cache Hit on " a
                                  succAccCacheHits
                                  return b
                     Nothing -> do !b <- go
                                   logInProducerWith "Acc Cache miss on " a
-                                  updateCache accCache $! Map.insert sn b
+                                  updateCache accCache $! IMap.insert i b
+                                  succAccCacheMiss
                                   return b
 
 -- instance (Monad m, MonadIO m, MonadLogger m) =>
@@ -881,10 +891,11 @@ vCoreSize' _            = 1
 
 vCoreNumPlain :: IL -> Int
 vCoreNumPlain Chc {}               = 0
+vCoreNumPlain Unit                 = 0
 vCoreNumPlain (BOp _ (_ :/\ e))        = vCoreNumPlain e
 vCoreNumPlain (BBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain  l + vCoreNumPlain r
 vCoreNumPlain (IBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain' l + vCoreNumPlain' r
-vCoreNumPlain _                    = 1
+vCoreNumPlain Ref {}               = 1
 
 vCoreNumPlain' :: IL' -> Int
 vCoreNumPlain' Chc' {}      = 0
@@ -893,11 +904,12 @@ vCoreNumPlain' (IIOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain' l + vCoreNumPlain' 
 vCoreNumPlain' _            = 1
 
 vCoreNumVar :: IL -> Int
-vCoreNumVar Chc {}       = 0
+vCoreNumVar Chc {}       = 1
 vCoreNumVar (BOp _ (_ :/\ e))    = vCoreNumVar e
 vCoreNumVar (BBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar  l + vCoreNumVar r
 vCoreNumVar (IBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar' l + vCoreNumVar' r
-vCoreNumVar _            = 1
+vCoreNumVar Ref {}       = 0
+vCoreNumVar Unit         = 0
 
 vCoreNumVar' :: IL' -> Int
 vCoreNumVar' Chc' {}      = 0
