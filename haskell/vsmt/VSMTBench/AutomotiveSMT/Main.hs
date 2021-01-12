@@ -24,8 +24,8 @@ import           Lang
 import           Auto
 import           Parser
 
-autoFileBool :: FilePath
-autoFileBool = "VSMTBench/Automotive/Automotive02_merged_evolution_history_boolean.json"
+autoFileInt :: FilePath
+autoFileInt = "VSMTBench/Automotive/Automotive02_merged_evolution_history_integer.json"
 
 -- | a different file that represents a possible json
 smAutoFile :: FilePath
@@ -78,12 +78,13 @@ justV123Conf = (bnot d5)
 -- run with stack bench --profile vsat:auto --benchmark-arguments='+RTS -S -RTS --output timings.html'
 main = do
   -- readfile is strict
-  bJsn <- BS.readFile autoFileBool
+  bJsn <- BS.readFile autoFileInt
   let (Just bAuto) = decodeStrict bJsn :: Maybe Auto
       !bCs = constraints bAuto
       bPs' = parse langParser "" <$> bCs
       failed = lefts bPs'
-      !bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ bPs'
+      -- !bPs = fmap (simplifyCtxs . renameCtxs sameCtxs) $ rights $ bPs'
+      !bPs = rights $ bPs'
 
       -- | Hardcoding equivalencies in generated dimensions to reduce number of
       -- dimensions to 4
@@ -93,23 +94,23 @@ main = do
       --   | d == "D_3" = "D_4"
       --   | otherwise = d
 
-      bProp :: Proposition
-      -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
-      !bProp = force $ (naiveEncode . autoToVSat) $ autoAndJoin bPs
+      -- bProp :: Proposition
+      -- -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
+      -- !bProp = force $ (naiveEncode . autoToVSat) $ autoAndJoin bPs
 
   -- Convert the fmf's to actual configurations
-  [ppV1]   <- fmap (fromJust . flip validateTotal (getVarFormula d1Conf)) <$> genConfigPool d1Conf
-  [ppV2]   <- fmap (fromJust . flip validateTotal (getVarFormula d2Conf)) <$> genConfigPool d2Conf
-  [ppV3]   <- fmap (fromJust . flip validateTotal (getVarFormula d3Conf)) <$> genConfigPool d3Conf
-  [ppV4]   <- fmap (fromJust . flip validateTotal (getVarFormula d4Conf)) <$> genConfigPool d4Conf
+  -- [ppV1]   <- fmap (fromJust . flip validateTotal (getVarFormula d1Conf)) <$> genConfigPool d1Conf
+  -- [ppV2]   <- fmap (fromJust . flip validateTotal (getVarFormula d2Conf)) <$> genConfigPool d2Conf
+  -- [ppV3]   <- fmap (fromJust . flip validateTotal (getVarFormula d3Conf)) <$> genConfigPool d3Conf
+  -- [ppV4]   <- fmap (fromJust . flip validateTotal (getVarFormula d4Conf)) <$> genConfigPool d4Conf
 
-  [justV1] <- genConfigPool justV1Conf
-  [justV2] <- genConfigPool justV2Conf
-  [justV3] <- genConfigPool justV3Conf
-  [justV4] <- genConfigPool justV4Conf
+  -- [justV1] <- genConfigPool justV1Conf
+  -- [justV2] <- genConfigPool justV2Conf
+  -- [justV3] <- genConfigPool justV3Conf
+  -- [justV4] <- genConfigPool justV4Conf
 
-  [justV12] <- genConfigPool justV12Conf
-  [justV123] <- genConfigPool justV123Conf
+  -- [justV12] <- genConfigPool justV12Conf
+  -- [justV123] <- genConfigPool justV123Conf
 
   -- | Compression ratio pairs
   -- [justV12]  <- genConfigPool pD01Conf
@@ -120,71 +121,71 @@ main = do
   -- let --[v01Conf,v12Conf,v23Conf] = confs'
 
   -- Plain propositions
-  let bPropV1   = fromJust . validatePlain $ configure ppV1 bProp
-      bPropV2   = fromJust . validatePlain $ configure ppV2 bProp
-      bPropV3   = fromJust . validatePlain $ configure ppV3 bProp
-      bPropV4   = fromJust . validatePlain $ configure ppV4 bProp
+  -- let bPropV1   = fromJust . validatePlain $ configure ppV1 bProp
+  --     bPropV2   = fromJust . validatePlain $ configure ppV2 bProp
+  --     bPropV3   = fromJust . validatePlain $ configure ppV3 bProp
+  --     bPropV4   = fromJust . validatePlain $ configure ppV4 bProp
 
   -- propositions with a reduced number of choices, these are subsets of
   -- variants
-      bPropJustV1 = configure justV1 bProp
-      bPropJustV2 = configure justV2 bProp
-      bPropJustV3 = configure justV3 bProp
-      bPropJustV4 = configure justV4 bProp
-      bPropJustV12 = configure justV12 bProp
-      bPropJustV123 = configure justV123 bProp
+      -- bPropJustV1 = configure justV1 bProp
+      -- bPropJustV2 = configure justV2 bProp
+      -- bPropJustV3 = configure justV3 bProp
+      -- bPropJustV4 = configure justV4 bProp
+      -- bPropJustV12 = configure justV12 bProp
+      -- bPropJustV123 = configure justV123 bProp
 
-  !v1Variants   <- genVariants bPropJustV1
-  !v12Variants  <- genVariants bPropJustV12
-  !v123Variants <- genVariants bPropJustV123
-  !allVariants  <- genVariants bProp
+  -- !v1Variants   <- genVariants bPropJustV1
+  -- !v12Variants  <- genVariants bPropJustV12
+  -- !v123Variants <- genVariants bPropJustV123
+  -- !allVariants  <- genVariants bProp
 
-  let benches :: Settings -> [Benchmark]
-      benches ss = [
-        -- v - v
-        -- mkBench   "v-->v" "V1" d1Conf (solve Nothing ss) (unPlain bPropV1)
-        -- , mkBench "v-->v" "V2" d2Conf (solve Nothing ss) (unPlain bPropV2)
-        -- , mkBench "v-->v" "V3" d3Conf (solve Nothing ss) (unPlain bPropV3)
-        -- , mkBench "v-->v" "V4" d4Conf (solve Nothing ss) (unPlain bPropV4)
-        -- , mkBench "v-->v" "V1"           justV1Conf   (solve Nothing ss) bPropJustV1
-        -- , mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
-        -- , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve Nothing ss) bPropJustV123
-          mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
+  -- let benches :: Settings -> [Benchmark]
+  --     benches ss = [
+  --       -- v - v
+  --       mkBench   "v-->v" "V1" d1Conf (solve Nothing ss) (unPlain bPropV1)
+  --       , mkBench "v-->v" "V2" d2Conf (solve Nothing ss) (unPlain bPropV2)
+  --       , mkBench "v-->v" "V3" d3Conf (solve Nothing ss) (unPlain bPropV3)
+  --       , mkBench "v-->v" "V4" d4Conf (solve Nothing ss) (unPlain bPropV4)
+  --       , mkBench "v-->v" "V1"           justV1Conf   (solve Nothing ss) bPropJustV1
+  --       , mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
+  --       , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve Nothing ss) bPropJustV123
+  --       , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
 
-       -- p - v
-        -- , mkBench'' "p-->v" "V1"  pOnV $ pure bPropV1
-        -- , mkBench'' "p-->v" "V2"  pOnV $ pure bPropV2
-        -- , mkBench'' "p-->v" "V3"  pOnV $ pure bPropV3
-        -- , mkBench'' "p-->v" "V4"  pOnV $ pure bPropV4
-        -- , mkBench'' "p-->v" "V1*V2"       pOnV v12Variants
-        -- , mkBench'' "p-->v" "V1*V2*V3"    pOnV v123Variants
-        -- , mkBench'' "p-->v" "V1*V2*V3*V4" pOnV allVariants
+  --      -- p - v
+  --       , mkBench'' "p-->v" "V1"  pOnV $ pure bPropV1
+  --       , mkBench'' "p-->v" "V2"  pOnV $ pure bPropV2
+  --       , mkBench'' "p-->v" "V3"  pOnV $ pure bPropV3
+  --       , mkBench'' "p-->v" "V4"  pOnV $ pure bPropV4
+  --       , mkBench'' "p-->v" "V1*V2"       pOnV v12Variants
+  --       , mkBench'' "p-->v" "V1*V2*V3"    pOnV v123Variants
+  --       , mkBench'' "p-->v" "V1*V2*V3*V4" pOnV allVariants
 
-       -- p - p
-        -- , mkBench'' "p-->p" "V1"  pOnP $ pure bPropV1
-        -- , mkBench'' "p-->p" "V2"  pOnP $ pure bPropV2
-        -- , mkBench'' "p-->p" "V3"  pOnP $ pure bPropV3
-        -- , mkBench'' "p-->p" "V4"  pOnP $ pure bPropV4
-        -- , mkBench'' "p-->p" "V1*V2"        pOnP v12Variants
-        -- , mkBench'' "p-->p" "V1*V2*V3"     pOnP v123Variants
-        -- , mkBench'' "p-->p" "V1*V2*V3*V4" pOnP allVariants
+  --      -- p - p
+  --       , mkBench'' "p-->p" "V1"  pOnP $ pure bPropV1
+  --       , mkBench'' "p-->p" "V2"  pOnP $ pure bPropV2
+  --       , mkBench'' "p-->p" "V3"  pOnP $ pure bPropV3
+  --       , mkBench'' "p-->p" "V4"  pOnP $ pure bPropV4
+  --       , mkBench'' "p-->p" "V1*V2"        pOnP v12Variants
+  --       , mkBench'' "p-->p" "V1*V2*V3"     pOnP v123Variants
+  --       , mkBench'' "p-->p" "V1*V2*V3*V4" pOnP allVariants
 
-        -- v - p
-        -- , mkBench "v-->p" "V1"  justV1Conf vOnP (unPlain bPropV1)
-        -- , mkBench "v-->p" "V2"  justV2Conf vOnP (unPlain bPropV2)
-        -- , mkBench "v-->p" "V3"  justV3Conf vOnP (unPlain bPropV3)
-        -- , mkBench "v-->p" "V4"  justV4Conf vOnP (unPlain bPropV4)
-        -- , mkBench "v-->p" "V1*V2"        justV12Conf vOnP bPropJustV12
-        -- , mkBench "v-->p" "V1*V2*V3"     justV123Conf vOnP bPropJustV123
-        -- , mkBench' "v-->p" "V1*V2*V3*V4"  vOnP bProp
-        ]
+  --       -- v - p
+  --       , mkBench "v-->p" "V1"  justV1Conf vOnP (unPlain bPropV1)
+  --       , mkBench "v-->p" "V2"  justV2Conf vOnP (unPlain bPropV2)
+  --       , mkBench "v-->p" "V3"  justV3Conf vOnP (unPlain bPropV3)
+  --       , mkBench "v-->p" "V4"  justV4Conf vOnP (unPlain bPropV4)
+  --       , mkBench "v-->p" "V1*V2"        justV12Conf vOnP bPropJustV12
+  --       , mkBench "v-->p" "V1*V2*V3"     justV123Conf vOnP bPropJustV123
+  --       , mkBench' "v-->p" "V1*V2*V3*V4"  vOnP bProp
+  --       ]
 
-  let diagnostics :: FilePath -> Settings -> IO ()
-      diagnostics fn ss =
-        do runDiagnostics fn "v-->v" "V1"           2  ss bPropJustV1
-           runDiagnostics fn "v-->v" "V1*V2"        4  ss bPropJustV12
-           runDiagnostics fn "v-->v" "V1*V2*V3"     8  ss bPropJustV123
-           runDiagnostics fn "v-->v" "V1*V2*V3*V4"  16 ss bProp
+  -- let diagnostics :: FilePath -> Settings -> IO ()
+  --     diagnostics fn ss =
+  --       do runDiagnostics fn "v-->v" "V1"           2  ss bPropJustV1
+  --          runDiagnostics fn "v-->v" "V1*V2"        4  ss bPropJustV12
+  --          runDiagnostics fn "v-->v" "V1*V2*V3"     8  ss bPropJustV123
+  --          runDiagnostics fn "v-->v" "V1*V2*V3*V4"  16 ss bProp
 
     -- | Compression Ratio props
       -- justbPropV12  = selectVariant v01Conf bProp
@@ -217,10 +218,10 @@ main = do
 
   -- diagnostics "raw_data/auto_diagnostics.csv" defSettings
 
-  defaultMain $
-    [  bgroup "Z3" (benches defSettings)
-    --   bgroup "Z3" (compRatioBenches z3DefConf)
-    ]
+  -- defaultMain $
+  --   [  bgroup "Z3" (benches defSettings)
+  --   --   bgroup "Z3" (compRatioBenches z3DefConf)
+  --   ]
 
   -- let t = bRef "one" &&& bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bnot $ bRef "one") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
@@ -230,5 +231,7 @@ main = do
   -- !res <- solveVerbose Nothing defWithModels t
   -- putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
-  -- putStrLn "asddf"
+  -- putStrLn $ "Failures" ++ show failed
+  putStrLn $ show $ length failed
+  putStrLn $ show $ length bPs
   -- solveForCoreVerbose bProp Nothing
