@@ -86,8 +86,8 @@ runEvalZ3 :: (Show a, Ord a) => Plain (Prop' a) -> Z.Z3 Sl.SBool
 runEvalZ3 = flip St.evalStateT mempty . evalZPlain . unPlain
 
 evalZPlain :: (Show a, Ord a) => Prop' a -> SimpleZCache a Z.Z3 Sl.SBool
-evalZPlain (LitB True)     = St.lift $ Sl.sTrue
-evalZPlain (LitB False)    = St.lift $ Sl.sFalse
+evalZPlain (LitB True)     = St.lift Sl.sTrue
+evalZPlain (LitB False)    = St.lift Sl.sFalse
 evalZPlain (RefB b)        = do st <- St.get
                                 case M.lookup b st of
                                   Just x  -> return x
@@ -99,7 +99,7 @@ evalZPlain (OpB _ e)       = do e' <- evalZPlain e
                                 St.lift $ Sl.sNot e'
 evalZPlain (OpBB op l r)  = do l' <- evalZPlain l
                                r' <- evalZPlain r
-                               St.lift $ (Sl.dispatchOp op) l' r'
+                               St.lift $ Sl.dispatchOp op l' r'
 evalZPlain ChcB {} = error "no choices here!"
 evalZPlain OpIB {} = error "Type Chef throws smt problems?"
 

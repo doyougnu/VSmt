@@ -192,13 +192,19 @@ properties =
         vsmtIsSoundBools
     ]
 
+-- | Check the soundness of the solver, we are checking against vOnP which
+-- doesn't use any of the vsmt code. The comparison is thus hard because of
+-- different domains, to simplify we check the number of sat is consistent
+-- between the two for all variants. The models are hard to check because of
+-- z3's default behavior with get-model (i.e., it doesn't return values for
+-- variables that are not needed to make a formula satisfiable).
 vsmtIsSoundBools :: Proposition -> QC.Property
-vsmtIsSoundBools p = (hasVariables p && onlyBools p) QC.==> QCM.monadicIO $
-  do res      <- liftIO $! solve Nothing defSettings p
+vsmtIsSoundBools p = (isVariational p && hasVariables p && onlyBools p) QC.==> QCM.monadicIO $
+  do res      <- liftIO $! unCounter . fSatCnt <$> solveGetDiag Nothing defSettings p
      plainRes <- liftIO $! vOnPByConfig p
-     liftIO $! putStrLn $ "Variational Result: " <> show (getSatisfiableVCs res) <> "\n"
-     liftIO $! putStrLn $ "Plain       Result: " <> show plainRes <> "\n"
-     return True
+     liftIO $! putStrLn $ "Variational Result: " <> show res               <> "\n"
+     liftIO $! putStrLn $ "Plain       Result: " <> show (length plainRes) <> "\n"
+     return $ res == length plainRes
 
 -- | TODO: https://github.com/doyougnu/VSmt/issues/4
 -- vsmtIsSound :: Proposition -> QC.Property
