@@ -14,53 +14,54 @@ module Main where
 import Test.Tasty
 import System.Environment (setEnv)
 
-import qualified TestSuite.Solve.Boolean.Plain
-import qualified TestSuite.Solve.Boolean.Choices
-import qualified TestSuite.Solve.Arithmetic.Plain
-import qualified TestSuite.Solve.Arithmetic.Choices
+-- import qualified TestSuite.Solve.Boolean.Plain
+-- import qualified TestSuite.Solve.Boolean.Choices
+-- import qualified TestSuite.Solve.Arithmetic.Plain
+-- import qualified TestSuite.Solve.Arithmetic.Choices
 import qualified TestSuite.Solve.Sound
-import qualified TestSuite.Core.Parser.Result
+-- import qualified TestSuite.Core.Parser.Result
 
 main :: IO ()
 main = do
   setEnv "TASTY_QUICKCHECK_TESTS" "300"
   defaultMain $ testGroup "Tests"
-    [ booleans
-    , arithmetics
-    , booleanPs
-    , arithmeticPs
+    [ -- booleans
+    -- , arithmetics
+    -- , booleanPs
+    -- , arithmeticPs
     -- , parsers
+      soundness
     ]
 
-booleans :: TestTree
-booleans = testGroup "Boolean Tests"
-  [ TestSuite.Solve.Boolean.Plain.tests
-  , TestSuite.Solve.Boolean.Choices.tests
-  ]
+-- booleans :: TestTree
+-- booleans = testGroup "Boolean Tests"
+--   [ TestSuite.Solve.Boolean.Plain.tests
+--   , TestSuite.Solve.Boolean.Choices.tests
+--   ]
 
-arithmetics :: TestTree
-arithmetics = testGroup "Arithmetic Tests"
-  [ TestSuite.Solve.Arithmetic.Plain.tests
-  , TestSuite.Solve.Arithmetic.Choices.tests
-  ]
+-- arithmetics :: TestTree
+-- arithmetics = testGroup "Arithmetic Tests"
+--   [ TestSuite.Solve.Arithmetic.Plain.tests
+--   , TestSuite.Solve.Arithmetic.Choices.tests
+--   ]
 
-booleanPs :: TestTree
-booleanPs = testGroup "Boolean Properties"
-  [ TestSuite.Solve.Boolean.Plain.properties
-  ]
+-- booleanPs :: TestTree
+-- booleanPs = testGroup "Boolean Properties"
+--   [ TestSuite.Solve.Boolean.Plain.properties
+--   ]
 
-arithmeticPs :: TestTree
-arithmeticPs = testGroup "Arithmetic Properties"
-  [ TestSuite.Solve.Arithmetic.Plain.properties
-  ]
+-- arithmeticPs :: TestTree
+-- arithmeticPs = testGroup "Arithmetic Properties"
+--   [ TestSuite.Solve.Arithmetic.Plain.properties
+--   ]
 
 soundness :: TestTree
 soundness = testGroup "Soundness of the Solver"
   [ TestSuite.Solve.Sound.properties
   ]
 
-parsers :: TestTree
-parsers = testGroup "Parser Tests"
-  [
-    TestSuite.Core.Parser.Result.tests
-  ]
+-- parsers :: TestTree
+-- parsers = testGroup "Parser Tests"
+--   [
+--     TestSuite.Core.Parser.Result.tests
+--   ]

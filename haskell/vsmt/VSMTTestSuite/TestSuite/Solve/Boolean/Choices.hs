@@ -28,27 +28,27 @@ tests = testGroup "Variational formulas"
   ]
 
 singletonChoice :: IO Result
-singletonChoice = flip satVerbose Nothing $ bChc "AA" (bRef "Aleft") (bRef "Aright")
+singletonChoice = solve Nothing defSettings $ bChc "AA" (bRef "Aleft") (bRef "Aright")
 
 singletonChoiceWithVC :: IO Result
-singletonChoiceWithVC = flip satVerbose (Just $ toVariantContext (bRef "AA")) $ bChc "AA" (bRef "Aleft") (bRef "Aright")
+singletonChoiceWithVC = solve (Just $ toVariantContext (bRef "AA")) defSettings $ bChc "AA" (bRef "Aleft") (bRef "Aright")
 
 singletonChoiceWithVars :: IO Result
-singletonChoiceWithVars = flip satVerbose Nothing $ (bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one") &&& bRef "two"
+singletonChoiceWithVars = solve Nothing defSettings $ (bChc "AA" (bRef "Aleft") (bRef "Aright") ||| bRef "one") &&& bRef "two"
 
 twoChoices :: IO Result
-twoChoices = flip satVerbose Nothing $
+twoChoices = solve Nothing defSettings $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 twoChoicesWithVC :: IO Result
-twoChoicesWithVC = flip satVerbose (Just $ toVariantContext $ (bRef "AA") &&& (bnot $ bRef "BB")) $
+twoChoicesWithVC = solve (Just $ toVariantContext $ (bRef "AA") &&& (bnot $ bRef "BB")) defSettings $
              bChc "AA" (bRef "Aleft") (bRef "Aright") &&&  bChc "BB" (bRef "Bleft") (bRef "BRight")
 
 -- | test to make sure the solver returns true for every variable assignment
 -- where the asst will _not_ have a choice as a child of the root node. This
 -- forces the solver to rotate the variational core
 treeOfChoices :: IO Result
-treeOfChoices = flip satVerbose Nothing $
+treeOfChoices = solve Nothing defSettings $
              (bChc "AA" (bRef "Aleft") (bRef "Aright") &&&
              bChc "BB" (bRef "Bleft") (bRef "Bright")) &&&
              (bChc "CC" (bRef "Cleft") (bRef "Cright") &&&

@@ -18,13 +18,17 @@ module Utils.VSMTTestFramework
   , module Core.Types
   , module Core.Result
   , module Core.Core
+  , module Core.Utils
+  , module Utils
   , module Utils.VSMTGen
   , goldenVsStringShow
   , goldFile
   , Text
   , liftIO
-  , satVerbose
-  , solveForCoreVerbose
+  , solve
+  , solveVerbose
+  , solveForCore
+  , defSettings
   ) where
 
 import Test.Tasty (TestTree, TestName, testGroup)
@@ -37,10 +41,13 @@ import System.FilePath ((</>), (<.>))
 import qualified Data.ByteString.Lazy.Char8 as LBC
 import Utils.VSMTGen
 
-import Solve (satVerbose, solveForCoreVerbose)
+import Solve (solve, solveVerbose, solveForCore)
+import Settings (defSettings)
 import Core.Types
 import Core.Result
 import Core.Core
+import Core.Utils
+import Utils
 
 goldFile :: FilePath -> FilePath
 goldFile name = "VSMTTestSuite" </> "GoldFiles" </> name <.> "gold"

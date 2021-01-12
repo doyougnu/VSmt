@@ -16,7 +16,7 @@ module TestSuite.Solve.Arithmetic.Choices where
 import Prelude hiding (EQ, LT, GT)
 
 import Utils.VSMTTestFramework
-import Solve
+
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree
 tests = testGroup "Variational formulas"
@@ -30,35 +30,35 @@ tests = testGroup "Variational formulas"
   ]
 
 singletonChoiceLHS :: IO Result
-singletonChoiceLHS = flip satVerbose Nothing $
+singletonChoiceLHS =  solve Nothing defSettings $
   iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") + 10 .== 23
 
 
 singletonChoiceRHS :: IO Result
-singletonChoiceRHS = flip satVerbose Nothing $ 100 + iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") .== 23
+singletonChoiceRHS =  solve Nothing defSettings $ 100 + iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") .== 23
 
 twoChoicesLHS :: IO Result
-twoChoicesLHS = flip satVerbose Nothing $
+twoChoicesLHS =  solve Nothing defSettings $
   (iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
   iChc "BB" (iRef "Bleft") (iRef "BRight")) .== 23
 
 twoChoicesRHS :: IO Result
-twoChoicesRHS = flip satVerbose Nothing $
+twoChoicesRHS =  solve Nothing defSettings $
   23 .== (iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
           iChc "BB" (iRef "Bleft") (iRef "BRight"))
 
 deepChoicesLHS :: IO Result
-deepChoicesLHS = flip satVerbose Nothing $
+deepChoicesLHS = solve Nothing defSettings $
    (1 + iRef "x" + (3 + c)) .== (23 + iRef "y")
   where c = iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") +
             iChc "BB" (iRef "Bleft") (iRef "BRight")
 
 memoryBlow :: IO Result
-memoryBlow = satVerbose p Nothing
+memoryBlow = solve Nothing defSettings p
   where p = OpBB Or (OpIB EQ (OpII Add (ChcI "RZD" (OpI Sign (RefI (ExRefTypeI "ngyithekwjlolcawjwhwgrgwhwwfvdbuuvirpewkcydekyriasvmwapkx"))) (OpI Abs (RefI (ExRefTypeI "bgvopjtokkmmgbkgugutmouubjf")))) (LitI (I (-48)))) (LitI (I (-40)))) (LitB False)
 
 
 infinite2 :: IO Result
-infinite2 = satVerbose p Nothing
+infinite2 = solve Nothing defSettings p
   -- where p = OpB Not (OpIB LTE (ChcI "BQ" (iRef  ("rzoql" :: Text)) (iRef "iyfa")) (LitI (D (-3.835702833833845))))
   where p = OpB Not (OpIB LTE (ChcI "BQ" (iRef  ("rzoql" :: Text)) (iRef "iyfa")) (LitI (D (-3.835702833833845))))

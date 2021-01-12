@@ -32,11 +32,11 @@ properties = testGroup "Properties"
 
 -- | TODO encode known boolean equivalences
 allTrue :: IO Result
-allTrue = flip satVerbose Nothing $ bRef "foo" &&& bRef "bar" &&& bRef "baz"
+allTrue = solve Nothing defSettings $ bRef "foo" &&& bRef "bar" &&& bRef "baz"
 
 plainBecomesUnit :: TestTree
 plainBecomesUnit = QC.testProperty
   "For all plain formulas the found variational core is Unit"
   $ \p -> not (isVariational p) QC.==> QCM.monadicIO $
-          do (core, _) <- liftIO $ solveForCoreVerbose p Nothing
+          do core <- liftIO $ sFst <$> solveForCore p
              QCM.assert $ isUnit core

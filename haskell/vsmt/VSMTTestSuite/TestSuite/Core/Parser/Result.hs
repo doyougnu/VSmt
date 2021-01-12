@@ -29,7 +29,7 @@ tests = testGroup "Result Parser"
 parserFail :: Assertion
 parserFail = do
   let fileName = goldFile "parserTest1"
-  result <- liftIO $ satVerbose p Nothing
+  result <- liftIO $ solve Nothing defSettings p
   liftIO $! T.writeFile fileName . pretty $ result
   m <- parseFromFile fileName
   assertBool "Didn't parse" $

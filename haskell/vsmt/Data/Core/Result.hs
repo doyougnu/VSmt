@@ -128,6 +128,10 @@ instance (Eq d, Hashable d, NFData d) => Monoid (Result' d) where
   mempty = Result'{variables=mempty,satisfiableVCs=mempty}
   mappend !x !y = x <> y
 
+-- | get satisfiable VCs from a result
+getSatisfiableVCs :: Result -> Maybe VariantContext
+getSatisfiableVCs = satisfiableVCs . unboxResult
+
 -- | check if the current context is sat or not
 isSat :: Z.MonadZ3 m => Maybe VariantContext -> m (Bool :/\ Result)
 isSat vcs = do cs <- Z.check

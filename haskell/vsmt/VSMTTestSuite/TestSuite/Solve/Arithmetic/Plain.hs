@@ -35,15 +35,15 @@ properties = testGroup "Properties"
   ]
 
 singletonVar :: IO Result
-singletonVar = flip satVerbose Nothing $ 5 + 2 .== iRef ("y" :: Text)
+singletonVar = solve Nothing defSettings $ 5 + 2 .== iRef ("y" :: Text)
 
 twoVars :: IO Result
-twoVars = flip satVerbose Nothing $ iRef "x" + 2 .== iRef ("y" :: Text)
+twoVars = solve Nothing defSettings $ iRef "x" + 2 .== iRef ("y" :: Text)
 
 -- | TODO encode numeric equivalences
 sub :: Assertion
 sub = do
-  (core, _) <- solveForCoreVerbose p Nothing
+  core <- sFst <$> solveForCore p
   assertBool "quickcheck says fail" . isUnit $ core
   where p = OpBB Or (OpBB Eqv (RefB "yn") (OpB Not (RefB "mbfd"))) (OpBB Eqv (RefB "d") (OpIB NEQ (RefI (ExRefTypeD "omo")) (RefI (ExRefTypeI "ru"))))
 
@@ -52,16 +52,16 @@ plainBecomesUnit :: TestTree
 plainBecomesUnit = QC.testProperty
   "For all plain formulas the found variational core is Unit"
   $ \p -> not (isVariational p) QC.==> QCM.monadicIO $
-          do (core, _) <- liftIO $ solveForCoreVerbose p Nothing
+          do core <- liftIO $ sFst <$> solveForCore p
              QCM.assert $ isUnit core
 
 infinite :: IO Result
-infinite = flip satVerbose Nothing p
+infinite = solve Nothing defSettings p
   where p = iChc "DD" (14.451303985118729 - (-(-22))) (signum 29.38464737058025) .== abs (iChc "EE" (signum (iRef ("uqqhmomillqezrrtwiunpyrdxqy" :: Text))) (-32) + (-29))
 
 -- | fails because there are no variables!
 edgeCase :: IO Result
-edgeCase = flip satVerbose Nothing p
+edgeCase = solve Nothing defSettings p
   where
     p =
       OpIB
