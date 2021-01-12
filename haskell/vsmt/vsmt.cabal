@@ -394,3 +394,47 @@ benchmark financial-smt
                , Lang
                , Parser
                , Financial
+
+benchmark linux
+  type            : exitcode-stdio-1.0
+  default-language: Haskell2010
+  ghc-options     : -O2 -threaded -rtsopts
+  other-extensions: BangPatterns
+                    DataKinds
+                    DeriveAnyClass
+                    DeriveDataTypeable
+                    FlexibleContexts
+                    GeneralizedNewtypeDeriving
+                    OverloadedLists
+                    OverloadedStrings
+                    Rank2Types
+                    RankNTypes
+                    ScopedTypeVariables
+                    StandaloneDeriving
+                    TemplateHaskell
+                    TupleSections
+                    TypeApplications
+  build-depends: aeson
+               , base >= 4.11
+               , bytestring
+               , containers
+               , cassava
+               , deepseq
+               , directory
+               , gauge
+               , hashable
+               , megaparsec
+               , mtl
+               , parser-combinators
+               , text
+               , z3
+               , sbv
+               , vsmt
+  hs-source-dirs: VSMTBench
+                , VSMTBench/Linux
+  main-is:       Main.hs
+  Other-modules: Utils.VSMTBenchFramework
+               , Bench.Core
+               , Lang
+               , Parser
+               , Financial

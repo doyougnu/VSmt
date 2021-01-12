@@ -167,7 +167,6 @@ main = do
   -- | Compression Ratio Confs to select out other dimensions
   -- [v01Conf,v12Conf,v23Conf,v34Conf,v45Conf,v56Conf,v67Conf,v78Conf,v89Conf] <- mkCompRatioConfs ds pairs
 
-  -- let
     -- | choice preserving props
   let !justbPropV1         = configure justV1 bProp
       !justbPropV12        = configure justV12 bProp
