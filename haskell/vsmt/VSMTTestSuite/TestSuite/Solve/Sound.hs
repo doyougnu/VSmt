@@ -194,11 +194,10 @@ properties =
 
 vsmtIsSoundBools :: Proposition -> QC.Property
 vsmtIsSoundBools p = (hasVariables p && onlyBools p) QC.==> QCM.monadicIO $
-  do variants <- liftIO $! genVariants p
-     res <- liftIO $! solve Nothing defSettings p
-     plainRes <- liftIO $! pOnV variants
+  do res      <- liftIO $! solve Nothing defSettings p
+     plainRes <- liftIO $! vOnPByConfig p
      liftIO $! putStrLn $ "Variational Result: " <> show (getSatisfiableVCs res) <> "\n"
-     liftIO $! putStrLn $ "Plain       Result: " <> show (getSatisfiableVCs plainRes) <> "\n"
+     liftIO $! putStrLn $ "Plain       Result: " <> show plainRes <> "\n"
      return True
 
 -- | TODO: https://github.com/doyougnu/VSmt/issues/4

@@ -12,6 +12,7 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE TupleSections        #-}
 
 module Utils where
 
@@ -143,7 +144,7 @@ pOnP ps = do
 vOnPModel :: Proposition -> IO [Z.Result :/\ String]
 vOnPModel p = do
   let configs = genConfigs p
-      ps = fmap (Plain . (`configure` p)) configs
+      ps = fmap (Plain . (`configure` p)) (configs)
       go prop = Z.local $
         do s <- Sl.unSBool <$> runEvalZ3 prop
            Z.assert s
@@ -162,3 +163,18 @@ vOnP p = do
            r <- Z.check
            return r
   Z.evalZ3 $ mapM go ps
+
+vOnPByConfig :: Proposition -> IO [VariantContext :/\ Bool]
+vOnPByConfig p = do
+  let configs      = genConfigs' p
+      configAsFunc = fmap (M.!) configs
+      variants     = fmap (Plain . (`configure` p)) configAsFunc
+      go prop  = Z.local $
+        do s <- Sl.unSBool <$> runEvalZ3 prop
+           Z.assert s
+           r <- Z.check
+           let res = case r of
+                 Z.Sat -> True
+                 _     -> False
+           return res
+  Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs variants

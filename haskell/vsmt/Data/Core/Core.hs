@@ -180,7 +180,27 @@ genConfigs (toList . dimensions -> ds) = (Map.!) . Map.fromList <$> booleanCombi
       fmap ((d, True) :) cs ++ fmap ((d, False) :) cs
       where cs = booleanCombinations dims
 
+-- | version of genConfigs that returns a map instead of a function
+genConfigs' :: Prop' a -> [Map.Map Dim Bool]
+genConfigs' (toList . dimensions -> ds) = Map.fromList <$> booleanCombinations ds
+  where
+    -- | given a list of stuff, generate a list of those things tagged with every
+    -- possible boolean combination. i.e. booleanCombinations [1..3] = [[(1, True),
+    -- (2, True) (3, True)], [(1, True), (2, True), (3, False)] ...]
+    booleanCombinations :: [a] -> [[(a, Bool)]]
+    booleanCombinations [] = []
+    -- this singleton case is super important, if missed the fmap will only ever
+    -- return empty list and the recursion won't consider the values
+    booleanCombinations [x] = [[(x, True)], [(x, False)]]
+    booleanCombinations (d:dims) =
+      fmap ((d, True) :) cs ++ fmap ((d, False) :) cs
+      where cs = booleanCombinations dims
+
 -------------------------- Manipulation ------------------------------------------
+configToContext :: Map.Map Dim Bool -> VariantContext
+configToContext = Map.foldMapWithKey ((toVariantContext .) . go)
+  where go k True  = bRef k
+        go k False = bnot $ bRef k
 
 -- | Alter the name of all dimensions by a function in a proposition
 renameDims :: (Dim -> Dim) -> Prop' a -> Prop' a
