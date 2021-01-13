@@ -22,6 +22,7 @@ import qualified Data.SBV            as S
 import           Data.SBV.Internals  (cvToBool)
 
 import           Data.String         (IsString (..))
+import           Data.List           (nub)
 import           Data.Text           (pack)
 import           Data.Maybe          (fromJust)
 import           Z3.Monad            as Z
@@ -168,8 +169,12 @@ vOnPByConfig :: Proposition -> IO [VariantContext :/\ Bool]
 vOnPByConfig p = do
   let configs      = genConfigs' p
       configAsFunc = fmap (M.!) configs
-      variants     = fmap (Plain . (`configure` p)) configAsFunc
-      go prop  = Z.local $
+      -- nub to remove duplicates produced by configuration. genConfigs' doesn't
+      -- account for nested choices even though these map to the same variant
+      -- thus we have to remove duplicates because vsmt will never evaluate the
+      -- a duplicate variant produced by nested choices.
+      variants     = nub $ fmap (Plain . (`configure` p)) configAsFunc
+  let go prop  = Z.local $
         do s <- Sl.unSBool <$> runEvalZ3 prop
            Z.assert s
            r <- Z.check

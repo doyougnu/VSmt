@@ -22,6 +22,9 @@ import Control.Monad (liftM2,liftM3)
 import Core.Types
 import Core.Core
 
+-------------------------- Newtype Wrappers ------------------------------------
+newtype OnlyBools = OnlyBools { unOnlyBools :: Proposition }
+
 -------------------------- Helpers ---------------------------------------------
 -- | Generate only alphabetical characters
 genAlphaNum :: Gen Text
@@ -101,6 +104,15 @@ arbProposition_ gd gv fs@(bfreqs, ifreqs) n = frequency $ zip bfreqs [ LitB <$> 
 arbProposition :: Gen Dim -> Gen Var -> ([Int], [Int]) -> Int -> Gen Proposition
 arbProposition = (((flip suchThat refsAreDisjoint .) . ) .) . arbProposition_
 
+onlyBoolProp :: Gen Dim -> Gen Var -> ([Int], [Int]) -> Int -> Gen Proposition
+onlyBoolProp _ gv _ 0 = RefB <$> gv
+onlyBoolProp gd gv fs@(bfreqs, ifreqs) n = frequency $ zip bfreqs [ LitB <$> arbitrary
+                                                                     , liftM2 OpB genBB l
+                                                                     , liftM3 OpBB genBBB l l
+                                                                     , liftM3 ChcB gd l l
+                                                                     ]
+  where l  = arbProposition_ gd gv fs (n `div` 2)
+
 ------------------------------- Instances --------------------------------------
 instance Arbitrary Var where arbitrary = genVar
 instance Arbitrary Dim where arbitrary = genDim
@@ -123,4 +135,8 @@ instance Arbitrary Proposition where
 
 instance Arbitrary NExpression where
   arbitrary = sized $ arbExpression genSharedDim genVar (repeat 3)
+  shrink = genericShrink
+
+instance Arbitrary OnlyBools where
+  arbitrary = size $ onlyBoolProp genSharedDim genVar (repeat 3, repeat 3)
   shrink = genericShrink

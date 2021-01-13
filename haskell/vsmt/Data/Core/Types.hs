@@ -1,4 +1,3 @@
-{-# LANGUAGE StandaloneDeriving #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : Core.Types
@@ -19,6 +18,7 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
+{-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE ViewPatterns               #-}
 
 module Core.Types where
@@ -49,6 +49,7 @@ newtype Total a = Total { unTotal :: a }
 
 -- | an type to represent that an 'a' is plain
 newtype Plain a = Plain { unPlain :: a }
+  deriving (Eq, Show)
 
 --
 -- * Syntax
