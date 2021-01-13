@@ -26,9 +26,12 @@ module Utils.VSMTTestFramework
   , Text
   , liftIO
   , solve
+  , solveGetDiag
   , solveVerbose
   , solveForCore
   , defSettings
+  , FrozenDiags(..)
+  , Counter(..)
   ) where
 
 import Test.Tasty (TestTree, TestName, testGroup)
@@ -41,7 +44,7 @@ import System.FilePath ((</>), (<.>))
 import qualified Data.ByteString.Lazy.Char8 as LBC
 import Utils.VSMTGen
 
-import Solve (solve, solveVerbose, solveForCore)
+import Solve (solve, solveGetDiag, solveVerbose, solveForCore,FrozenDiags(..),Counter(..))
 import Settings (defSettings)
 import Core.Types
 import Core.Result

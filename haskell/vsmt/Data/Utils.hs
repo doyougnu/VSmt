@@ -12,6 +12,7 @@
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE TypeOperators        #-}
+{-# LANGUAGE TupleSections        #-}
 
 module Utils where
 
@@ -85,8 +86,8 @@ runEvalZ3 :: (Show a, Ord a) => Plain (Prop' a) -> Z.Z3 Sl.SBool
 runEvalZ3 = flip St.evalStateT mempty . evalZPlain . unPlain
 
 evalZPlain :: (Show a, Ord a) => Prop' a -> SimpleZCache a Z.Z3 Sl.SBool
-evalZPlain (LitB True)     = St.lift $ Sl.sTrue
-evalZPlain (LitB False)    = St.lift $ Sl.sFalse
+evalZPlain (LitB True)     = St.lift Sl.sTrue
+evalZPlain (LitB False)    = St.lift Sl.sFalse
 evalZPlain (RefB b)        = do st <- St.get
                                 case M.lookup b st of
                                   Just x  -> return x
@@ -98,7 +99,7 @@ evalZPlain (OpB _ e)       = do e' <- evalZPlain e
                                 St.lift $ Sl.sNot e'
 evalZPlain (OpBB op l r)  = do l' <- evalZPlain l
                                r' <- evalZPlain r
-                               St.lift $ (Sl.dispatchOp op) l' r'
+                               St.lift $ Sl.dispatchOp op l' r'
 evalZPlain ChcB {} = error "no choices here!"
 evalZPlain OpIB {} = error "Type Chef throws smt problems?"
 
@@ -143,7 +144,7 @@ pOnP ps = do
 vOnPModel :: Proposition -> IO [Z.Result :/\ String]
 vOnPModel p = do
   let configs = genConfigs p
-      ps = fmap (Plain . (`configure` p)) configs
+      ps = fmap (Plain . (`configure` p)) (configs)
       go prop = Z.local $
         do s <- Sl.unSBool <$> runEvalZ3 prop
            Z.assert s
@@ -162,3 +163,18 @@ vOnP p = do
            r <- Z.check
            return r
   Z.evalZ3 $ mapM go ps
+
+vOnPByConfig :: Proposition -> IO [VariantContext :/\ Bool]
+vOnPByConfig p = do
+  let configs      = genConfigs' p
+      configAsFunc = fmap (M.!) configs
+      variants     = fmap (Plain . (`configure` p)) configAsFunc
+      go prop  = Z.local $
+        do s <- Sl.unSBool <$> runEvalZ3 prop
+           Z.assert s
+           r <- Z.check
+           let res = case r of
+                 Z.Sat -> True
+                 _     -> False
+           return res
+  Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs variants

@@ -74,6 +74,9 @@ type SMTProg = Prog (Stmt Proposition)
 instance Semigroup VariantContext where
   (<>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext (OpBB Or x y)
 
+instance Monoid VariantContext where
+  mempty = true
+
 -- | Top level Syntax
 data Stmt a = Assert !a         -- ^ constraint the prop
             | Call SolverOp            -- ^ side effectual interact with the solver
