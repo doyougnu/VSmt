@@ -1,4 +1,5 @@
-Algorithm,Config,SatCount,UnSatCount,CacheHits
-v-->v,V1*V2,4,0,196516
-v-->v,V1*V2*V3,4,0,196886
-v-->v,V1*V2*V3*V4,16,0,794967
+Algorithm,Config,Variants,SatCount,UnSatCount,CacheHits,CacheMiss
+v-->v,V1,2,2,0,95555,706
+v-->v,V1*V2,4,4,0,198052,678
+v-->v,V1*V2*V3,8,8,0,396400,741
+v-->v,V1*V2*V3*V4,16,16,0,796194,678

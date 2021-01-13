@@ -160,6 +160,9 @@ aExpr = makeExprParser aTerm aOperators
 -- I counted roughly 30% of the props are like this:
 -- 1514 -- failed with this parser
 -- 3107 -- pass with this parser
+
+-- meaning: summation on the right has to be true if the feature on the left is selected and otherwise has to be false
+-- probably an exactly1!, with parent on the left
 one :: T.Text
 one = "(feature[_0e8e9baa-56f5-48d3-93dd-1f4db1d546d4] = 1) = (feature[_d02f4ce4-a772-4095-a4eb-4f7e6f63b99f] + feature[_8e61b75f-6ea5-4789-b20a-e0b8ebc9a8b4] + feature[_64f9dd7e-10bb-4e2d-9068-72b5837eb3ab] + feature[_4611cbb8-b0a7-40a0-a89b-0112b8770e01])"
 
