@@ -173,7 +173,7 @@ vOnPByConfig p = do
       -- account for nested choices even though these map to the same variant
       -- thus we have to remove duplicates because vsmt will never evaluate the
       -- a duplicate variant produced by nested choices.
-      variants     = nub $ fmap (Plain . (`configure` p)) configAsFunc
+      variants     = fmap (Plain . (`configure` p)) configAsFunc
   let go prop  = Z.local $
         do s <- Sl.unSBool <$> runEvalZ3 prop
            Z.assert s
@@ -182,4 +182,7 @@ vOnPByConfig p = do
                  Z.Sat -> True
                  _     -> False
            return res
-  Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs variants
+  putStrLn $ "Config: " ++ show configs ++ "\n"
+  putStrLn $ "Variants: " ++ show variants ++ "\n"
+  putStrLn $ "Filtered Variants: " ++ show (nub variants) ++ "\n"
+  Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs (nub variants)

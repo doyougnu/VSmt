@@ -1,4 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : TestSuite.Solve.Sound
@@ -11,10 +10,14 @@
 -- solvers
 -----------------------------------------------------------------------------
 
+{-# LANGUAGE BangPatterns      #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns      #-}
+
 module TestSuite.Solve.Sound where
 
 -- import qualified Data.Text as Text
--- import qualified Data.Text.IO as T
+import qualified Data.Text.IO as T
 -- import qualified Data.SBV as S
 -- import qualified Data.SBV.Internals as I
 -- import qualified Data.HashMap.Strict as M
@@ -199,13 +202,19 @@ properties =
 -- between the two for all variants. The models are hard to check because of
 -- z3's default behavior with get-model (i.e., it doesn't return values for
 -- variables that are not needed to make a formula satisfiable).
-vsmtIsSoundBools :: Proposition -> QC.Property
-vsmtIsSoundBools p = (isVariational p && hasVariables p && onlyBools p) QC.==> QCM.monadicIO $
-  do res      <- liftIO $! unCounter . fSatCnt <$> solveGetDiag Nothing defSettings p
-     plainRes <- liftIO $! filter sSnd <$> vOnPByConfig p
-     liftIO $! putStrLn $ "Variational Result: " <> show res               <> "\n"
-     liftIO $! putStrLn $ "Plain       Result: " <> show (length plainRes) <> "\n"
-     return $ res == length plainRes
+vsmtIsSoundBools :: OnlyBools -> QC.Property
+vsmtIsSoundBools (unOnlyBools -> p) = noNestedChoices p && isVariational p QC.==> QCM.monadicIO $
+  do
+    liftIO $ putStrLn "--------------------- Start  -----------------------------------"
+    liftIO $ T.putStrLn $ "Proposition: " <> pretty p
+    plainRes <- liftIO $! filter sSnd <$> vOnPByConfig p
+    !res    <- liftIO $! unCounter . fSatCnt <$> solveGetDiag Nothing defSettings p
+    !res2    <- liftIO $! getSatisfiableVCs <$> solve Nothing defSettings p
+    liftIO $! putStrLn $ "Variational Result: " <> show res               <> "\n"
+    liftIO $! putStrLn $ "Variational Model: " <> show (length res2)               <> "\n"
+    liftIO $! putStrLn $ "Plain       Result: " <> show (length plainRes) <> "\n"
+    liftIO $ putStrLn "--------------------- End    -----------------------------------"
+    return $ res `seq` res == length plainRes
 
 -- | TODO: https://github.com/doyougnu/VSmt/issues/4
 -- vsmtIsSound :: Proposition -> QC.Property

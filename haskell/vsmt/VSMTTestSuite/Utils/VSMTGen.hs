@@ -26,7 +26,7 @@ import           Core.Types
 
 -------------------------- Newtype Wrappers ------------------------------------
 newtype OnlyBools = OnlyBools { unOnlyBools :: Proposition }
-  deriving (Generic)
+  deriving (Generic,Show)
 
 -------------------------- Helpers ---------------------------------------------
 -- | Generate only alphabetical characters
@@ -107,10 +107,10 @@ arbProposition_ gd gv fs@(bfreqs, ifreqs) n = frequency $ zip bfreqs [ LitB <$> 
 arbProposition :: Gen Dim -> Gen Var -> ([Int], [Int]) -> Int -> Gen Proposition
 arbProposition = (((flip suchThat refsAreDisjoint .) . ) .) . arbProposition_
 
+-- | newtype generator for propositional formulas of only booleans and no literals
 onlyBoolProp :: Gen Dim -> Gen Var -> [Int] -> Int -> Gen Proposition
 onlyBoolProp _ gv _ 0 = RefB <$> gv
-onlyBoolProp gd gv bfreqs n = frequency $ zip bfreqs [ LitB <$> arbitrary
-                                                     , liftM2 OpB genBB l
+onlyBoolProp gd gv bfreqs n = frequency $ zip bfreqs [ liftM2 OpB genBB l
                                                      , liftM3 OpBB genBBB l l
                                                      , liftM3 ChcB gd l l
                                                      ]

@@ -30,6 +30,7 @@ module Utils.VSMTTestFramework
   , solveVerbose
   , solveForCore
   , defSettings
+  , pretty
   , FrozenDiags(..)
   , Counter(..)
   ) where
@@ -50,6 +51,7 @@ import Core.Types
 import Core.Result
 import Core.Core
 import Core.Utils
+import Core.Pretty (pretty)
 import Utils
 
 goldFile :: FilePath -> FilePath

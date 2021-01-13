@@ -17,8 +17,6 @@ import Parser.Result
 import Utils.VSMTTestFramework
 import qualified Data.Text.IO as T
 
-import Core.Pretty
-
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree
 tests = testGroup "Result Parser"

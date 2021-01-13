@@ -290,6 +290,20 @@ hasVariables p = (not . Set.null $ booleans p) || (not . Set.null $ numerics p)
 onlyBools :: Proposition -> Bool
 onlyBools = Set.null . numerics
 
+noNestedChoices :: Proposition -> Bool
+noNestedChoices = go True
+  where go True (ChcB _ l r) = go False l && go False r
+        go False ChcB{}      = False
+        go b (OpIB _ l r) = go' b l && go' b r
+        go b (OpB _ e)    = go b e
+        go b (OpBB _ l r) = go b l && go b r
+        go _ _            = True
+
+        go' True (ChcI _ l r) = go' False l && go' False r
+        go' False ChcI {}     = False
+        go' b (OpII _ l r)    = go' b l && go' b r
+        go' b (OpI _ e)       = go' b e
+        go' _ _               = True
 
 -------------------------- Construction -----------------------------------------
 fromList :: Foldable f => (a -> a -> a) -> f a -> a
