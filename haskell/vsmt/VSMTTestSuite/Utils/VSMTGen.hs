@@ -11,19 +11,22 @@
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveGeneric     #-}
 
 module Utils.VSMTGen where
 
-import Test.Tasty.QuickCheck
-import Prelude hiding (LT,GT,EQ)
-import Data.Text (Text,singleton,toUpper,pack)
-import Control.Monad (liftM2,liftM3)
+import           Control.Monad         (liftM2, liftM3)
+import           Data.Text             (Text, pack, singleton, toUpper)
+import           GHC.Generics          (Generic)
+import           Prelude               hiding (EQ, GT, LT)
+import           Test.Tasty.QuickCheck
 
-import Core.Types
-import Core.Core
+import           Core.Core
+import           Core.Types
 
 -------------------------- Newtype Wrappers ------------------------------------
 newtype OnlyBools = OnlyBools { unOnlyBools :: Proposition }
+  deriving (Generic)
 
 -------------------------- Helpers ---------------------------------------------
 -- | Generate only alphabetical characters
@@ -104,14 +107,14 @@ arbProposition_ gd gv fs@(bfreqs, ifreqs) n = frequency $ zip bfreqs [ LitB <$> 
 arbProposition :: Gen Dim -> Gen Var -> ([Int], [Int]) -> Int -> Gen Proposition
 arbProposition = (((flip suchThat refsAreDisjoint .) . ) .) . arbProposition_
 
-onlyBoolProp :: Gen Dim -> Gen Var -> ([Int], [Int]) -> Int -> Gen Proposition
+onlyBoolProp :: Gen Dim -> Gen Var -> [Int] -> Int -> Gen Proposition
 onlyBoolProp _ gv _ 0 = RefB <$> gv
-onlyBoolProp gd gv fs@(bfreqs, ifreqs) n = frequency $ zip bfreqs [ LitB <$> arbitrary
-                                                                     , liftM2 OpB genBB l
-                                                                     , liftM3 OpBB genBBB l l
-                                                                     , liftM3 ChcB gd l l
-                                                                     ]
-  where l  = arbProposition_ gd gv fs (n `div` 2)
+onlyBoolProp gd gv bfreqs n = frequency $ zip bfreqs [ LitB <$> arbitrary
+                                                     , liftM2 OpB genBB l
+                                                     , liftM3 OpBB genBBB l l
+                                                     , liftM3 ChcB gd l l
+                                                     ]
+  where l  = onlyBoolProp gd gv bfreqs (n `div` 2)
 
 ------------------------------- Instances --------------------------------------
 instance Arbitrary Var where arbitrary = genVar
@@ -138,5 +141,5 @@ instance Arbitrary NExpression where
   shrink = genericShrink
 
 instance Arbitrary OnlyBools where
-  arbitrary = size $ onlyBoolProp genSharedDim genVar (repeat 3, repeat 3)
+  arbitrary = fmap OnlyBools . sized $ onlyBoolProp genSharedDim genVar (repeat 3)
   shrink = genericShrink

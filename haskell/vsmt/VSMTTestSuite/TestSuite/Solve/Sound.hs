@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : TestSuite.Solve.Sound
@@ -201,7 +202,7 @@ properties =
 vsmtIsSoundBools :: Proposition -> QC.Property
 vsmtIsSoundBools p = (isVariational p && hasVariables p && onlyBools p) QC.==> QCM.monadicIO $
   do res      <- liftIO $! unCounter . fSatCnt <$> solveGetDiag Nothing defSettings p
-     plainRes <- liftIO $! vOnPByConfig p
+     plainRes <- liftIO $! filter sSnd <$> vOnPByConfig p
      liftIO $! putStrLn $ "Variational Result: " <> show res               <> "\n"
      liftIO $! putStrLn $ "Plain       Result: " <> show (length plainRes) <> "\n"
      return $ res == length plainRes
