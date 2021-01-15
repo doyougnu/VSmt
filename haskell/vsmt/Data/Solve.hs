@@ -35,7 +35,7 @@
 module Solve where
 
 import qualified Control.Concurrent.Async              as A (async,cancel,mapConcurrently_)
-import qualified Control.Concurrent.STM                as STM (modifyTVar', readTVarIO, newTVarIO, TVar, atomically)
+import qualified Control.Concurrent.STM                as STM (modifyTVar', readTVarIO, newTVarIO, TVar, atomically,readTVar)
 import qualified Control.Concurrent.Chan.Unagi.Bounded as U
 import           Control.Monad                         (forever, void, when)
 import           Control.Monad.Except                  (MonadError)
@@ -95,7 +95,7 @@ import qualified Z3.Monad                              as Z ( AST
                                                             )
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
-import           Control.DeepSeq                       (NFData)
+-- import           Control.DeepSeq                       (NFData,force)
 
 import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
@@ -143,9 +143,10 @@ solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO Result
 solve v s p = sFst <$> internalSolver runPreSolverNoLog runSolverNoLog v s p
 
 -- | the solve but return the diagnostics
-solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
-solveGetDiag vc s p = do (_ :/\ finalS) <- internalSolver runPreSolverNoLog runSolverNoLog vc s p
-                         readDiagnostics finalS
+solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO (Result :/\ FrozenDiags)
+solveGetDiag vc s p = do (r :/\ finalS) <- internalSolver runPreSolverNoLog runSolverNoLog vc s p
+                         fs <- readDiagnostics finalS
+                         return (r :/\ fs)
 
 
 -- TODO fix this horrendous type signature
@@ -157,11 +158,11 @@ internalSolver ::
   , Z.MonadZ3 m
   , Z.MonadZ3 f
   ) => (Stores -> f IL -> Z.Z3 (IL :/\ Stores))
-  -> (State -> SolverT m Result -> Z.Z3 b)
+  -> (State -> SolverT m Result -> Z.Z3 (Result :/\ State))
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
-  -> IO b
+  -> IO (Result :/\ State)
 internalSolver preSlvr slvr conf s@Settings{..} i = do
   (toMain, fromVC)   <- U.newChan vcBufSize
   (toVC,   fromMain) <- U.newChan vcBufSize
@@ -198,16 +199,20 @@ internalSolver preSlvr slvr conf s@Settings{..} i = do
         do (il' :/\ st) <- seasoning
            slvr startState{stores=st} $
              do void $ findVCore il' >>= removeChoices
-                readWith (unResult . results)
+                r <- readWith (unResults . results)
+                readWith (satCnt . diagnostics) >>= logInProducerWith "Thawed diags"
+                return r
 
   -- kick off
   !aWorkers  <- A.async runVCWorkers
 
-  results <- populateChans
+  result <- populateChans
 
   A.cancel aWorkers
 
-  return results
+  ds <- readDiagnostics (sSnd result)
+  logIOWith "Frozen Results" ds
+  return result
 
 solveForCore :: Proposition -> IO (VarCore :/\ State)
 solveForCore i = do
@@ -280,25 +285,25 @@ vcHelper ::
   -> (t -> f1 b -> f2 a2)
   -> Int
   -> f2 ()
-vcHelper fromMain toMain st slvr tid =
+vcHelper fromMain toMain st slvr _ =
   -- listen to the channel forever and check requests incrementally against the
   -- context if there is one
     void $
     slvr st $
     forever $
      do
-       logInVC' tid "Waiting"
+       -- logInVC' tid "Waiting"
        (d, shouldNegate, vc') <- liftIO $ U.readChan fromMain
-       logInVC' tid "got request"
+       -- logInVC' tid "got request"
        Z.local $
          do sD <- constrain d
-            logInVCWith tid "before" sD
+            -- logInVCWith tid "before" sD
             !new <- case vc' of
                       Just e  -> if shouldNegate
                                  then sDNot sD >>= sDAnd e
                                  else sDAnd e sD
                       Nothing -> return sD
-            logInVCWith tid "created" new
+            -- logInVCWith tid "created" new
             Z.assert (unSDimension new)
             Z.check >>= liftIO . \case
               Z.Sat -> U.writeChan toMain (True, Just new)
@@ -315,9 +320,12 @@ type Store = Map.HashMap
 newtype SInteger   = SInteger   { unSInteger   :: Z.AST }
   deriving stock (Eq,Show)
 newtype SDouble    = SDouble    { unSDouble    :: Z.AST }
-  deriving stock (Eq,Show)
+  deriving stock (Eq,Show,Generic)
+-- instance NFData SBool
+-- deriving instance Generic Z.AST
+-- deriving instance NFData Z.AST
 newtype SBool      = SBool      { unSBool      :: Z.AST }
-  deriving stock (Eq,Show)
+  deriving stock (Eq,Show,Generic)
 newtype SDimension = SDimension { unSDimension :: Z.AST }
   deriving stock (Eq,Show)
 
@@ -423,12 +431,12 @@ type SVariantContext = Maybe SDimension
 -- constant time _for every_ choice, hence we want to make that constant factor
 -- as small as possible
 data State = State
-  { stores   :: Stores
-  , channels :: Channels
-  , caches   :: Caches
-  , results  :: Results
-  , diagnostics :: Diagnostics
-  , constants :: Constants
+  { stores      :: !Stores
+  , channels    :: !Channels
+  , caches      :: !Caches
+  , results     :: !Results
+  , diagnostics :: !Diagnostics
+  , constants   :: !Constants
   }
 
 type Cache a = IMap.IntMap a
@@ -436,13 +444,13 @@ type Cache a = IMap.IntMap a
 -- type ACache = Cache IL (V :/\ IL)
 type ACache = Cache (V :/\ IL)
 
-newtype Results = Results { unResult :: STM.TVar Result }
-deriving instance Generic Z.Result
-deriving anyclass instance NFData Z.Result
+newtype Results = Results { unResults :: STM.TVar Result }
+-- deriving instance Generic Z.Result
+-- deriving anyclass instance NFData Z.Result
 
 -- | A counter for the diagnostics portion of the state
 data Counter =  Counter {-# UNPACK #-} !Int
-  deriving (Show, Generic)
+  deriving (Eq,Show,Generic)
 
 instance Enum Counter where
   toEnum               = Counter
@@ -528,10 +536,10 @@ newDiagnostics = do satCnt       <- STM.newTVarIO mempty
                     return Diagnostics{..}
 
 readDiagnostics :: State -> IO FrozenDiags
-readDiagnostics s = do !fSatCnt       <- read (satCnt       . diagnostics) s
-                       !fUnSatCnt     <- read (unSatCnt     . diagnostics) s
-                       !fAccCacheHits <- read (accCacheHits . diagnostics) s
-                       !fAccCacheMiss <- read (accCacheMiss . diagnostics) s
+readDiagnostics s = do !fSatCnt       <- fullRead (satCnt       . diagnostics) s
+                       !fUnSatCnt     <- fullRead (unSatCnt     . diagnostics) s
+                       !fAccCacheHits <- fullRead (accCacheHits . diagnostics) s
+                       !fAccCacheMiss <- fullRead (accCacheMiss . diagnostics) s
                        return FrozenDiags{..}
 
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
@@ -567,6 +575,15 @@ readWith f = R.asks f  >>= liftIO . STM.readTVarIO
 
 read :: MonadIO io => (s -> STM.TVar a) -> s -> io a
 read f = liftIO . STM.readTVarIO . f
+
+fullRead :: MonadIO io => (s -> STM.TVar a) -> s -> io a
+fullRead f = liftIO . STM.atomically . STM.readTVar . f
+
+fromState :: MonadIO io => (State -> STM.TVar a) -> State -> io a
+fromState f = liftIO . STM.readTVarIO . f
+
+resultFromState :: State -> IO Result
+resultFromState = fromState (unResults . results)
 
 freeze :: (R.MonadReader State io, MonadIO io) => io FrozenStores
 freeze = do st       <- R.asks stores
@@ -778,8 +795,11 @@ data IL = Unit
     | BOp   B_B (V :/\ IL)
     | BBOp BB_B (V :/\ IL)  (V :/\ IL)
     | IBOp NN_B (V :/\ IL') (V :/\ IL')
-    | Chc Dim Proposition Proposition
+    | Chc Dim !Proposition !Proposition
     deriving stock (Generic, Show, Eq)
+
+-- instance NFData IL
+-- instance NFData IL'
 
 -- | tags which describes where in the tree there is variation
 data V = P | V deriving (Generic, Show, Eq, Hashable)
@@ -1205,11 +1225,8 @@ findChoice x@(InBool Unit Top)  = return x
 findChoice x@(InBool Chc {} _)  = return x
 findChoice x@(InNum Chc' {} _)  = return x
   -- discharge two references
-findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
+findChoice (InBool l@Ref {} (InL parent op r@Ref {}))   =
   do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
-     logInProducerWith "findChoice BRef: " x
-     logInProducerWith "findChoice BRef constructed to: " $ BBOp op (P :/\ l) (P :/\ r)
-     logInProducerWith "findChoice BRef accumulated to: " n
      findChoice (InBool n parent)
 
 findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
@@ -1277,7 +1294,7 @@ store ::
 store r = do
   logInProducerWith "Storing result: " r
   reads config >>= logInProducerWith "Stores: "
-  asks (unResult . results)
+  asks (unResults . results)
     >>= liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
@@ -1341,8 +1358,6 @@ alternative dim goLeft goRight =
        logInProducer "Writing to continue left"
        continueLeft
 
-
-     logInProducer "Now left side"
      -- resetTo s
 
      -- right side, notice that we negate the symbolic, and reset the state
@@ -1366,8 +1381,10 @@ removeChoices (VarCore Unit) = do !vC <- reads vConfig
                                                then getResult vC
                                                else isSat     vC
                                   logInProducerWith "Solver returned Model: " (b :/\ r)
+                                  readWith (satCnt . diagnostics)>>= logInProducerWith "SatCount Before"
                                   reads config >>= logInProducerWith "Core reduced to Unit with Context"
                                   if b then succSatCnt else succUnSatCnt
+                                  readWith (satCnt . diagnostics)>>= logInProducerWith "SatCount After"
                                   store r
 removeChoices (VarCore x@(Ref _)) = do _ <- evaluate x; removeChoices (VarCore Unit)
 removeChoices (VarCore l) = choose (toLoc l)
