@@ -41,8 +41,8 @@ import           Control.Monad                         (forever, void, when)
 import           Control.Monad.Except                  (MonadError)
 import           Control.Monad.IO.Class                (liftIO)
 import           Control.Monad.Logger                  (LoggingT,
-                                                        MonadLogger (..),
-                                                        NoLoggingT, logDebug,
+                                                        MonadLogger(..),
+                                                        NoLoggingT,
                                                         runNoLoggingT,
                                                         runStdoutLoggingT)
 import           Control.Monad.Reader                  as R (MonadReader,
@@ -97,17 +97,14 @@ import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 import           Control.DeepSeq                       (NFData)
 
-
-import           Data.Text.IO                          (putStrLn)
 import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
-
 import           Core.Pretty
 import           Core.Result
 import           Core.Types
-import           Core.Utils                            ((:/\)(..),sSnd,sFst)
+import           Core.Utils
 
 import           Settings
 
