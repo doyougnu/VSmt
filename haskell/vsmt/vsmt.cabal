@@ -50,7 +50,7 @@ library
                , monad-logger
                , mtl
                , parser-combinators
-               , z3
+               , z3-haskell
                , sbv
                , stm
                , text
@@ -126,7 +126,7 @@ Test-Suite VSMTTest
                   , tasty-hunit
                   , text
                   , QuickCheck
-                  , z3
+                  , z3-haskell
                   , sbv
                   , unordered-containers
                   , vsmt
@@ -206,7 +206,7 @@ benchmark busybox
                , megaparsec
                , parser-combinators
                , text
-               , z3
+               , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -252,7 +252,7 @@ benchmark financial
                , mtl
                , parser-combinators
                , text
-               , z3
+               , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -296,7 +296,7 @@ benchmark auto
                , mtl
                , parser-combinators
                , text
-               , z3
+               , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench/
@@ -340,7 +340,7 @@ benchmark auto-smt
                , mtl
                , parser-combinators
                , text
-               , z3
+               , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench/
@@ -384,7 +384,7 @@ benchmark financial-smt
                , mtl
                , parser-combinators
                , text
-               , z3
+               , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -428,7 +428,7 @@ benchmark linux
                , mtl
                , parser-combinators
                , text
-               , z3
+               , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench

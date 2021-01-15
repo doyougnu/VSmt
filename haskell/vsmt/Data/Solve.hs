@@ -53,8 +53,8 @@ import           Control.Monad.Reader                  as R (MonadReader,
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
-import qualified Data.IntMap.Strict                    as IMap
--- import qualified Data.Sequence                         as Seq
+-- import qualified Data.IntMap.Strict                    as IMap
+import           System.Mem.StableName                   (makeStableName, StableName)
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
 -- import           Data.Monoid                           (Sum(..))
@@ -95,7 +95,7 @@ import qualified Z3.Monad                              as Z ( AST
                                                             )
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
--- import           Control.DeepSeq                       (NFData,force)
+import           Control.DeepSeq                       (NFData,force)
 
 import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
@@ -439,10 +439,10 @@ data State = State
   , constants   :: !Constants
   }
 
-type Cache a = IMap.IntMap a
--- type Cache a b = Map.HashMap (StableName a) b
+-- type Cache a = IMap.IntMap a
+type Cache a b = Map.HashMap (StableName a) b
 -- type ACache = Cache IL (V :/\ IL)
-type ACache = Cache (V :/\ IL)
+type ACache = Cache IL (V :/\ IL)
 
 newtype Results = Results { unResults :: STM.TVar Result }
 -- deriving instance Generic Z.Result
@@ -746,20 +746,32 @@ instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
 class Cacheable m a b where
   memo    :: a -> m b -> m b
 
+-- instance (Monad m, MonadIO m, MonadLogger m) =>
+--   Cacheable (SolverT m) Int (V :/\ IL) where
+--   memo !k go = do acc  <- readCache accCache
+--                   case IMap.lookup k acc of
+--                     Just b -> do logInProducerWith "Acc Cache Hit on " k
+--                                  succAccCacheHits
+--                                  return b
+--                     Nothing -> do !b <- go
+--                                   logInProducerWith "Acc Cache miss on " k
+--                                   updateCache accCache $! IMap.insert k b
+--                                   succAccCacheMiss
+--                                   return b
+
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) IL (V :/\ IL) where
-  memo !a go = do acc  <- readCache accCache
-                  !i   <- liftIO $ hashStableName <$> makeStableName a
-                  case IMap.lookup i acc of
+  memo a go = do acc  <- readCache accCache
+                 sn <- liftIO $ makeStableName a
+                 case Map.lookup sn acc of
                     Just b -> do logInProducerWith "Acc Cache Hit on " a
                                  succAccCacheHits
                                  return b
-                    Nothing -> do !b <- go
+                    Nothing -> do b <- go
                                   logInProducerWith "Acc Cache miss on " a
-                                  updateCache accCache $! IMap.insert i b
+                                  updateCache accCache $! Map.insert sn (force b)
                                   succAccCacheMiss
                                   return b
-
 -- instance (Monad m, MonadIO m, MonadLogger m) =>
 --   Cacheable (SolverT m) IL (V :/\ IL) where
 --   memo !a go = do acc  <- readCache accCache
@@ -800,6 +812,14 @@ data IL = Unit
 
 -- instance NFData IL
 -- instance NFData IL'
+
+instance NFData IL
+instance NFData IL'
+instance NFData V
+instance NFData NRef
+instance NFData SInteger
+instance NFData SDouble
+instance NFData SBool
 
 -- | tags which describes where in the tree there is variation
 data V = P | V deriving (Generic, Show, Eq, Hashable)
