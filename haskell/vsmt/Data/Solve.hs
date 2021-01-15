@@ -97,7 +97,6 @@ import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 import           Control.DeepSeq                       (NFData,force)
 
-import           System.Mem.StableName                 (StableName,makeStableName,hashStableName)
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
 
@@ -143,10 +142,9 @@ solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO Result
 solve v s p = sFst <$> internalSolver runPreSolverNoLog runSolverNoLog v s p
 
 -- | the solve but return the diagnostics
-solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO (Result :/\ FrozenDiags)
-solveGetDiag vc s p = do (r :/\ finalS) <- internalSolver runPreSolverNoLog runSolverNoLog vc s p
-                         fs <- readDiagnostics finalS
-                         return (r :/\ fs)
+solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
+solveGetDiag vc s p = readDiagnostics . sSnd =<< internalSolver runPreSolverNoLog runSolverNoLog vc s p
+
 
 
 -- TODO fix this horrendous type signature
@@ -211,7 +209,7 @@ internalSolver preSlvr slvr conf s@Settings{..} i = do
   A.cancel aWorkers
 
   ds <- readDiagnostics (sSnd result)
-  logIOWith "Frozen Results" ds
+
   return result
 
 solveForCore :: Proposition -> IO (VarCore :/\ State)
@@ -318,12 +316,9 @@ vcHelper fromMain toMain st slvr _ =
 type Store = Map.HashMap
 
 newtype SInteger   = SInteger   { unSInteger   :: Z.AST }
-  deriving stock (Eq,Show)
+  deriving stock (Eq,Show,Generic)
 newtype SDouble    = SDouble    { unSDouble    :: Z.AST }
   deriving stock (Eq,Show,Generic)
--- instance NFData SBool
--- deriving instance Generic Z.AST
--- deriving instance NFData Z.AST
 newtype SBool      = SBool      { unSBool      :: Z.AST }
   deriving stock (Eq,Show,Generic)
 newtype SDimension = SDimension { unSDimension :: Z.AST }
@@ -1059,7 +1054,7 @@ accumulate x@(BOp Not (P :/\ e)) = memo x $!
      let !res = BOp Not (P :/\ e')
      accumulate res
 
-accumulate x@(BOp Not (V :/\ e)) = memo x $!
+accumulate (BOp Not (V :/\ e)) = -- memo x $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp Not (V :/\ e')
      return (V :/\ res)
@@ -1071,7 +1066,7 @@ accumulate x@(BBOp op (P :/\ l) (P :/\ r)) = memo x $!
      logInProducerWith "accumulating two refs: " res
      accumulate res
 
-accumulate x@(BBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
+accumulate (BBOp op (_ :/\ l) (_ :/\ r)) = -- memo x $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
      let !res  = BBOp op (vl :/\ l') (vr :/\ r')
@@ -1083,7 +1078,7 @@ accumulate x@(IBOp op (P :/\ l) (P :/\ r)) = memo x $!
      let !res = IBOp op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate x@(IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
+accumulate (IBOp op (_ :/\ l) (_ :/\ r)) = -- memo x $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp op a b

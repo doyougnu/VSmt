@@ -10,7 +10,7 @@ let
             overrides = haskellPackagesNew: haskellPackagesOld: rec {
 
               vsmt = haskellPackagesNew.callPackage ./vsmt.nix {
-                z3-haskell = haskellPackagesNew.callPackage /home/doyougnu/Programming/haskell-z3/z3.nix { z3 = pkgs.z3; };
+                z3-haskell = haskellPackagesNew.callPackage /home/doyougnu/programming/haskell-z3/z3.nix { z3 = pkgs.z3; };
                 zlib = pkgs.zlib;
               };
 
