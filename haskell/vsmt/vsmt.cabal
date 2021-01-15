@@ -116,6 +116,7 @@ Test-Suite VSMTTest
   Build-depends : base >= 4.11
                   , bytestring
                   , containers
+                  , deepseq
                   , filepath
                   , hashable
                   , tasty
@@ -139,6 +140,7 @@ Test-Suite VSMTTest
                   , TestSuite.Solve.Arithmetic.Choices
                   , TestSuite.Solve.Sound
                   , TestSuite.Core.Parser.Result
+                  , TestSuite.Solve.Laws.Boolean
 
 -- Benchmark VSMTBench
 --   type            : exitcode-stdio-1.0

@@ -18,7 +18,8 @@ import System.Environment (setEnv)
 -- import qualified TestSuite.Solve.Boolean.Choices
 -- import qualified TestSuite.Solve.Arithmetic.Plain
 -- import qualified TestSuite.Solve.Arithmetic.Choices
-import qualified TestSuite.Solve.Sound
+-- import qualified TestSuite.Solve.Sound
+import qualified TestSuite.Solve.Laws.Boolean
 -- import qualified TestSuite.Core.Parser.Result
 
 main :: IO ()
@@ -30,7 +31,8 @@ main = do
     -- , booleanPs
     -- , arithmeticPs
     -- , parsers
-      soundness
+    -- , soundness
+      laws
     ]
 
 -- booleans :: TestTree
@@ -55,9 +57,14 @@ main = do
 --   [ TestSuite.Solve.Arithmetic.Plain.properties
 --   ]
 
-soundness :: TestTree
-soundness = testGroup "Soundness of the Solver"
-  [ TestSuite.Solve.Sound.properties
+-- soundness :: TestTree
+-- soundness = testGroup "Soundness of the Solver"
+--   [ TestSuite.Solve.Sound.properties
+--   ]
+
+laws :: TestTree
+laws = testGroup "Laws"
+  [ TestSuite.Solve.Laws.Boolean.properties
   ]
 
 -- parsers :: TestTree
