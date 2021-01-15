@@ -57,7 +57,7 @@ import qualified Data.IntMap.Strict                    as IMap
 -- import qualified Data.Sequence                         as Seq
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
-import           Data.Monoid                           (Sum(..))
+-- import           Data.Monoid                           (Sum(..))
 
 import qualified Z3.Monad                              as Z ( AST
                                                             , MonadZ3
@@ -111,84 +111,7 @@ import           Core.Utils                            ((:/\)(..),sSnd,sFst)
 
 import           Settings
 
-log :: MonadLogger m => Text.Text -> m ()
-log = $(logDebug)
-
-logWith :: (MonadLogger m, Show a) => Text.Text -> a -> m ()
-logWith msg value = log $ msg <> sep <> Text.pack (show value)
-  where sep :: Text.Text
-        sep = " : "
-
-logIOWith :: Show a => Text.Text -> a -> IO ()
-logIOWith msg value = putStrLn $ msg <> sep <> Text.pack (show value)
-  where sep :: Text.Text
-        sep = " : "
-
-logIO :: Text.Text -> IO ()
-logIO = putStrLn
-
-logPretty :: (Pretty a, MonadLogger m, Show a) => Text.Text -> a -> m ()
-logPretty msg value = log $ msg <> sep <> pretty value
-  where sep :: Text.Text
-        sep = " : "
-
-logInThread :: MonadLogger m => Text.Text -> Int -> Text.Text -> m ()
-logInThread kind tid msg = log logmsg
-  where
-    logmsg :: Text.Text
-    logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
-
-logInProducer' :: MonadLogger m => Int -> Text.Text -> m ()
-logInProducer' = logInThread "Producer"
-
-logInConsumer' :: MonadLogger m => Int -> Text.Text -> m ()
-logInConsumer' = logInThread "Consumer"
-
-logInThreadIO :: Text.Text -> Int -> Text.Text -> IO ()
-logInThreadIO kind tid msg = putStrLn logmsg
-  where
-    logmsg :: Text.Text
-    logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
-
-logInThreadWith :: (MonadLogger m, Show a) => Text.Text -> Int -> Text.Text -> a -> m ()
-logInThreadWith kind tid msg = logWith logmsg
-  where
-    logmsg :: Text.Text
-    logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> " <> msg
-
-logInConsumerWith :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
-logInConsumerWith = logInThreadWith "Consumer"
-
-logInVCWith  :: (MonadLogger m, Show a) => Int -> Text.Text -> a -> m ()
-logInVCWith = logInThreadWith "VCWorker"
-
-logInVC' :: MonadLogger m => Int -> Text.Text -> m ()
-logInVC' = logInThread "VCWorker"
-
-logInThreadIOWith :: Show a => Text.Text -> Int -> Text.Text -> a -> IO ()
-logInThreadIOWith kind tid msg value = putStrLn logmsg
-  where logmsg :: Text.Text
-        logmsg = "[" <> kind <> ": " <> Text.pack (show tid) <> "] " <> "==> "
-                 <> msg <> sep <> Text.pack (show value)
-
-        sep :: Text.Text
-        sep = " : "
-
-logInIOProducerWith :: Show a => Int -> Text.Text -> a -> IO ()
-logInIOProducerWith = logInThreadIOWith "Producer"
-
-logInIOConsumerWith :: Show a => Int -> Text.Text -> a -> IO ()
-logInIOConsumerWith = logInThreadIOWith "Consumer"
-
-logInIOProducer :: Int -> Text.Text -> IO ()
-logInIOProducer = logInThreadIO "Producer"
-
-logInIOConsumer :: Int -> Text.Text -> IO ()
-logInIOConsumer = logInThreadIO "Consumer"
-
-logInIOVC :: Int -> Text.Text -> IO ()
-logInIOVC = logInThreadIO "VCWorker"
-
+--------------------------------- Specific logging ----------------------------
 logInProducer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
 logInProducer msg = R.asks (threadId . channels) >>= flip logInProducer' msg
 
@@ -207,11 +130,6 @@ logInZ3AST msg (unSBool -> value) = do tid <- R.asks (threadId . channels)
 logInConsumer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
 logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
 
-logThenPass :: (MonadLogger m, Show b) => Text.Text -> b -> m b
-logThenPass str a = logWith str a >> return a
-
-logThreadPass :: (MonadLogger m, Show b) => Int -> Text.Text -> b -> m b
-logThreadPass tid str a = logInThreadWith "Thread" tid str a >> return a
 
 ------------------------------ Internal Api -------------------------------------
 findVCore :: ( MonadLogger z3
@@ -229,8 +147,8 @@ solve v s p = sFst <$> internalSolver runPreSolverNoLog runSolverNoLog v s p
 
 -- | the solve but return the diagnostics
 solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
-solveGetDiag vc s p = readDiagnostics . sSnd =<<
-                      internalSolver runPreSolverNoLog runSolverNoLog vc s p
+solveGetDiag vc s p = do (_ :/\ finalS) <- internalSolver runPreSolverNoLog runSolverNoLog vc s p
+                         readDiagnostics finalS
 
 
 -- TODO fix this horrendous type signature
@@ -526,27 +444,34 @@ deriving instance Generic Z.Result
 deriving anyclass instance NFData Z.Result
 
 -- | A counter for the diagnostics portion of the state
-newtype Counter = Counter { unCounter :: Int }
-  deriving (Num, Enum, Show)   via Int
-  deriving (Semigroup, Monoid) via Sum Int
-  deriving Generic
+data Counter =  Counter {-# UNPACK #-} !Int
+  deriving (Show, Generic)
+
+instance Enum Counter where
+  toEnum               = Counter
+  fromEnum (Counter i) = i
+instance Semigroup Counter where (<>) (Counter l) (Counter r) = Counter $! l + r
+instance Monoid    Counter where mempty = Counter 0
+
+unCounter :: Counter -> Int
+unCounter = fromEnum
 
 data Constants = Constants { genModels :: STM.TVar Bool
                            }
 
 data Diagnostics = Diagnostics
-                 { satCnt       :: STM.TVar Counter
-                 , unSatCnt     :: STM.TVar Counter
-                 , accCacheHits :: STM.TVar Counter
-                 , accCacheMiss :: STM.TVar Counter
+                 { satCnt       :: !(STM.TVar Counter)
+                 , unSatCnt     :: !(STM.TVar Counter)
+                 , accCacheHits :: !(STM.TVar Counter)
+                 , accCacheMiss :: !(STM.TVar Counter)
                  }
 
 -- TODO abstract frozen into a type class or type family?
 data FrozenDiags = FrozenDiags
-                   { fSatCnt       :: Counter
-                   , fUnSatCnt     :: Counter
-                   , fAccCacheHits :: Counter
-                   , fAccCacheMiss :: Counter
+                   { fSatCnt       :: !Counter
+                   , fUnSatCnt     :: !Counter
+                   , fAccCacheHits :: !Counter
+                   , fAccCacheMiss :: !Counter
                    } deriving (Generic, Show)
 
 data Caches = Caches
@@ -606,10 +531,10 @@ newDiagnostics = do satCnt       <- STM.newTVarIO mempty
                     return Diagnostics{..}
 
 readDiagnostics :: State -> IO FrozenDiags
-readDiagnostics s = do fSatCnt       <- read (satCnt       . diagnostics) s
-                       fUnSatCnt     <- read (unSatCnt     . diagnostics) s
-                       fAccCacheHits <- read (accCacheHits . diagnostics) s
-                       fAccCacheMiss <- read (accCacheMiss . diagnostics) s
+readDiagnostics s = do !fSatCnt       <- read (satCnt       . diagnostics) s
+                       !fUnSatCnt     <- read (unSatCnt     . diagnostics) s
+                       !fAccCacheHits <- read (accCacheHits . diagnostics) s
+                       !fAccCacheMiss <- read (accCacheMiss . diagnostics) s
                        return FrozenDiags{..}
 
 update :: (R.MonadReader State io, MonadIO io) => (Stores -> STM.TVar a) -> (a -> a) -> io ()
@@ -1438,18 +1363,16 @@ removeChoices ::
   ( MonadLogger m
   , Z.MonadZ3   m
   ) => VarCore -> SolverT m ()
-removeChoices (VarCore Unit) = reads bools >>=
-                               logInProducerWith "Core reduced to Unit" >>
-                               reads config >>=
-                               logInProducerWith "Core reduced to Unit with Context" >>
-                               do !vC <- reads vConfig
+removeChoices (VarCore Unit) = do !vC <- reads vConfig
                                   wantModels <- readWith (genModels . constants)
                                   (b :/\ r) <- if wantModels
                                                then getResult vC
                                                else isSat     vC
+                                  logInProducerWith "Solver returned Model: " (b :/\ r)
+                                  reads config >>= logInProducerWith "Core reduced to Unit with Context"
                                   if b then succSatCnt else succUnSatCnt
                                   store r
-removeChoices (VarCore x@(Ref _)) = evaluate x >>= removeChoices
+removeChoices (VarCore x@(Ref _)) = do _ <- evaluate x; removeChoices (VarCore Unit)
 removeChoices (VarCore l) = choose (toLoc l)
 
 choose ::
