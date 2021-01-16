@@ -18,7 +18,7 @@ import           Core.Core
 import           Core.Types
 import qualified Data.ByteString.Builder as Bl (stringUtf8, toLazyByteString)
 import qualified Data.ByteString.Lazy    as BS (appendFile)
-import           Data.Csv                (DefaultOrdered, ToField,
+import           Data.Csv                (DefaultOrdered, ToField(..),
                                           ToNamedRecord,
                                           encodeDefaultOrderedByName)
 import           Settings
@@ -35,7 +35,9 @@ average xs = realToFrac (sum xs) / genericLength xs
 
 instance DefaultOrdered FrozenDiags
 instance ToNamedRecord  FrozenDiags
-deriving newtype instance ToField Counter
+instance ToField Counter where
+  toField (Counter i) = toField i
+-- deriving newtype instance ToField Counter
 runDiagnostics :: FilePath -> String -> String -> Int -> Settings -> Proposition -> IO ()
 runDiagnostics fn alg variant numVariants ss p = do let a = Bl.toLazyByteString . Bl.stringUtf8 $ alg
                                                         v = Bl.toLazyByteString . Bl.stringUtf8 $ variant

@@ -48,8 +48,6 @@ import           Control.Monad.Reader                  as R (MonadReader,
 import           Control.Monad.Trans                   (MonadIO, MonadTrans,
                                                         lift)
 import qualified Data.HashMap.Strict                   as Map
-import qualified Data.IntMap.Strict                    as IMap
--- import qualified Data.Sequence                         as Seq
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
 -- import           Data.Monoid                           (Sum(..))
@@ -90,6 +88,7 @@ import qualified Z3.Monad                              as Z ( AST
                                                             )
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
+import           Control.DeepSeq                       (NFData)
 
 import           Prelude                               hiding (EQ, GT, LT, log,
                                                         putStrLn,read,reads)
@@ -136,10 +135,9 @@ solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO Result
 solve v s p = sFst <$> internalSolver runPreSolverNoLog runSolverNoLog v s p
 
 -- | the solve but return the diagnostics
-solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO (Result :/\ FrozenDiags)
-solveGetDiag vc s p = do (r :/\ finalS) <- internalSolver runPreSolverNoLog runSolverNoLog vc s p
-                         fs <- readDiagnostics finalS
-                         return (r :/\ fs)
+solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
+solveGetDiag vc s p = readDiagnostics . sSnd =<< internalSolver runPreSolverNoLog runSolverNoLog vc s p
+
 
 
 -- TODO fix this horrendous type signature
@@ -194,7 +192,6 @@ internalSolver preSlvr slvr conf s@Settings{..} i = do
            slvr st $
              do void $ findVCore il' >>= removeChoices
                 r <- readWith (unResults . results)
-                readWith (satCnt . diagnostics) >>= logInProducerWith "Thawed diags"
                 return r
 
   -- kick off
@@ -310,7 +307,7 @@ vcHelper fromMain toMain st slvr _ =
 type Store = Map.HashMap
 
 newtype SInteger   = SInteger   { unSInteger   :: Z.AST }
-  deriving stock (Eq,Show,Ord,Generic)
+  deriving stock (Eq,Show,Generic,Ord)
 newtype SDouble    = SDouble    { unSDouble    :: Z.AST }
   deriving stock (Eq,Show,Generic,Ord)
 newtype SBool      = SBool      { unSBool      :: Z.AST }
@@ -401,13 +398,6 @@ instance IxStorable Dim where add    = Map.insert
                               find   = Map.lookup
                               adjust = Map.adjust
 
--- instance Eq a => IxStorable (StableName a) where
---   type Container (StableName a) = Map.HashMap (StableName a)
---   add    = Map.insert
---   isIn   = Map.member
---   find   = Map.lookup
---   adjust = Map.adjust
-
 type SVariantContext = Maybe SDimension
 
 -- | The internal state of the solver is just a record that accumulates results
@@ -428,14 +418,10 @@ data State = State
   , constants   :: !Constants
   }
 
-type Cache a = IMap.IntMap a
--- type Cache a b = Map.HashMap (StableName a) b
--- type ACache = Cache IL (V :/\ IL)
-type ACache = Cache (V :/\ IL)
+type Cache a b = Map.HashMap a b
+type ACache = Cache IL (V :/\ IL)
 
 newtype Results = Results { unResults :: STM.TVar Result }
--- deriving instance Generic Z.Result
--- deriving anyclass instance NFData Z.Result
 
 -- | A counter for the diagnostics portion of the state
 data Counter =  Counter {-# UNPACK #-} !Int
@@ -738,34 +724,17 @@ class Cacheable m a b where
   memo    :: a -> m b -> m b
 
 instance (Monad m, MonadIO m, MonadLogger m) =>
-  Cacheable (SolverT m) Int (V :/\ IL) where
-  memo !k go = do acc  <- readCache accCache
-                  case IMap.lookup k acc of
-                    Just b -> do logInProducerWith "Acc Cache Hit on " k
+  Cacheable (SolverT m) IL (V :/\ IL) where
+  memo !a go = do acc <- readCache accCache
+                  case Map.lookup a acc of
+                    Just b -> do logInProducerWith "Acc Cache Hit on " a
                                  succAccCacheHits
                                  return b
                     Nothing -> do !b <- go
-                                  logInProducerWith "Acc Cache miss on " k
-                                  updateCache accCache $! IMap.insert k b
+                                  logInProducerWith "Acc Cache miss on " a
+                                  updateCache accCache $! Map.insert a b
                                   succAccCacheMiss
                                   return b
-
--- instance (Monad m, MonadIO m, MonadLogger m) =>
---   Cacheable (SolverT m) IL (V :/\ IL) where
---   memo !a go = do acc  <- readCache accCache
---                   sn   <- liftIO $ makeStableName a
---                   let iKey = hashStableName sn
---                       avoidCollision ss = do i <- Seq.findIndexL (eqStableName sn . sFst) ss
---                                              sSnd <$> Seq.lookup i ss
---                   case IMap.lookup iKey acc >>= avoidCollision of
---                     Just b -> do logInProducerWith "Acc Cache Hit on " a
---                                  succAccCacheHits
---                                  return b
---                     Nothing -> do !b <- go
---                                   logInProducerWith "Acc Cache miss on " a
---                                   updateCache accCache $!
---                                     IMap.insertWith (Seq.><) iKey . pure $ sn :/\ b
---                                   return b
 
 ----------------------------------- IL -----------------------------------------
 type BRef = SBool
@@ -786,12 +755,27 @@ data NRef = SI SInteger
 -- that will survive in the variational core are binary connectives, symbolic
 -- references and choices
 data IL = Unit
-    | Ref  !BRef
-    | BOp  !Key  B_B (V :/\ IL)
-    | BBOp !Key BB_B (V :/\ IL)  (V :/\ IL)
-    | IBOp !Key NN_B (V :/\ IL') (V :/\ IL')
-    | Chc Dim Proposition Proposition
+    | Ref !BRef
+    | BOp   B_B (V :/\ IL)
+    | BBOp BB_B (V :/\ IL)  (V :/\ IL)
+    | IBOp NN_B (V :/\ IL') (V :/\ IL')
+    | Chc Dim !Proposition !Proposition
     deriving stock (Generic, Show, Eq,Ord)
+
+instance NFData IL
+instance NFData IL'
+instance NFData V
+instance NFData NRef
+instance NFData SInteger
+instance NFData SDouble
+instance NFData SBool
+
+instance Hashable IL
+instance Hashable IL'
+instance Hashable NRef
+instance Hashable SInteger
+instance Hashable SDouble
+instance Hashable SBool
 
 -- | tags which describes where in the tree there is variation
 data V = P | V deriving (Generic, Show, Eq, Hashable,Ord)
@@ -1037,7 +1021,7 @@ accumulate (BOp k Not (P :/\ e)) = memo k $!
      let !res = BOp k' Not (P :/\ e')
      accumulate res
 
-accumulate (BOp k Not (V :/\ e)) = memo k $!
+accumulate (BOp Not (V :/\ e)) =  memo x $!
   do (_ :/\ e') <- accumulate e
      k' <- generateKey
      let !res = BOp k' Not (V :/\ e')
@@ -1065,7 +1049,7 @@ accumulate (IBOp k op (P :/\ l) (P :/\ r)) = memo k $!
      let !res = IBOp k' op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate (IBOp k op (_ :/\ l) (_ :/\ r)) = memo k $!
+accumulate (IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      k' <- generateKey
@@ -1226,13 +1210,14 @@ findChoice :: ( Z.MonadZ3 z3
               , MonadReader State z3
               ) => Loc -> z3 Loc
   -- base cases
-findChoice x@(InBool Ref{} Top) = return x
+findChoice x@(InBool Ref{} Top) = logInProducerWith "got ref returning" x >> return x
 findChoice x@(InBool Unit Top)  = return x
 findChoice x@(InBool Chc {} _)  = return x
 findChoice x@(InNum Chc' {} _)  = return x
   -- discharge two references
-findChoice (InBool l@Ref {} (InL parent op k r@Ref {}))   =
-  do (_ :/\ n) <- accumulate $ BBOp op k (P :/\ l) (P :/\ r)
+findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
+  do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
+     logInProducerWith "InBool InL discharging refs" x
      findChoice (InBool n parent)
 
 findChoice (InNum l@Ref' {} (InLB parent op k r@Ref' {})) =
@@ -1251,8 +1236,9 @@ findChoice (InNum r@Ref'{}  (InU' o e)) =
   do (_ :/\ n) <- iAccumulate' $! IOp o (P :/\ r)
      findChoice (InNum n e)
 
-findChoice (InBool r@Ref {} (InR acc op k parent)) =
-  do (_ :/\ n) <- accumulate $! BBOp op k (P :/\ Ref acc) (P :/\ r)
+findChoice x@(InBool r@Ref {} (InR acc op parent)) =
+  do (_ :/\ n) <- accumulate $! BBOp op (P :/\ Ref acc) (P :/\ r)
+     logInProducerWith "InBool InR with " x
      findChoice (InBool n parent)
 
 findChoice (InNum r@Ref' {} (InRB acc op k parent)) =
@@ -1263,13 +1249,14 @@ findChoice (InNum r@Ref' {} (InR' acc op parent)) =
   do (_ :/\ n) <- iAccumulate' $! IIOp op (P :/\ Ref' acc) (P :/\ r)
      findChoice (InNum n parent)
   -- switch
-findChoice (InBool (Ref l) (InL parent op k r))   = findChoice (InBool r $ InR l op k parent)
-findChoice (InNum  (Ref' l) (InLB parent op k r)) = findChoice (InNum  r $ InRB l op k parent)
+findChoice x@(InBool (Ref l) (InL parent op r))   = logInProducerWith "switching to InR" x >> findChoice (InBool r $! InR l op parent)
+findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
 findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
   -- recur
-findChoice (InBool (BBOp k op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InBool l $ InL ctx k op r)
-findChoice (InBool (IBOp k op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InLB ctx k op r)
-findChoice (InBool (BOp  k o  (_ :/\ e))           ctx) = findChoice (InBool e $ InU k o ctx)
+findChoice x@(InBool (BBOp op (_ :/\ l) (_ :/\ r)) ctx) = logInProducerWith "InBool general case" x
+                                                          >> findChoice (InBool l $ InL ctx op r)
+findChoice (InBool (IBOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InLB ctx op r)
+findChoice (InBool (BOp  o  (_ :/\ e))           ctx) = findChoice (InBool e $ InU o ctx)
 findChoice (InNum  (IOp  o  (_ :/\ e))           ctx) = findChoice (InNum  e $ InU' o ctx)
 findChoice (InNum  (IIOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
@@ -1299,7 +1286,6 @@ store ::
   ) => Result -> io ()
 store r = do
   logInProducerWith "Storing result: " r
-  reads config >>= logInProducerWith "Stores: "
   asks (unResults . results)
     >>= liftIO . STM.atomically . flip STM.modifyTVar' (r <>)
 
@@ -1386,11 +1372,8 @@ removeChoices (VarCore Unit) = do !vC <- reads vConfig
                                   (b :/\ r) <- if wantModels
                                                then getResult vC
                                                else isSat     vC
-                                  logInProducerWith "Solver returned Model: " (b :/\ r)
-                                  readWith (satCnt . diagnostics)>>= logInProducerWith "SatCount Before"
                                   reads config >>= logInProducerWith "Core reduced to Unit with Context"
                                   if b then succSatCnt else succUnSatCnt
-                                  readWith (satCnt . diagnostics)>>= logInProducerWith "SatCount After"
                                   store r
 removeChoices (VarCore x@(Ref _)) = do _ <- evaluate x; removeChoices (VarCore Unit)
 removeChoices (VarCore l) = choose (toLoc l)
@@ -1400,7 +1383,7 @@ choose ::
   , Z.MonadZ3   m
   ) => Loc -> SolverT m ()
 choose (InBool Unit Top)  = removeChoices (VarCore Unit)
-choose (InBool l@Ref{} _) = logInProducer "Choosing all done Removing choices" >>
+choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
                               evaluate l >>= removeChoices
 choose loc =
   do
@@ -1413,15 +1396,13 @@ choose loc =
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
-        logInProducer "Choosing Context"
         let goLeft  = toIL cl >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
             goRight = toIL cr >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
 
         case find d conf of
           Just True  -> goLeft
           Just False -> goRight
-          Nothing    -> do logInProducer "Cache miss running alt";
-                           alternative d goLeft goRight
+          Nothing    -> alternative d goLeft goRight
 
       (InNum (Chc' d cl cr) ctx) -> do
         logInProducer "Got choice in context InNum"
