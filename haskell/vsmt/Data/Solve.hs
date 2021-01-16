@@ -122,7 +122,7 @@ logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
 
 ------------------------------ Internal Api -------------------------------------
 findVCore :: ( MonadLogger z3
-             , Cacheable   z3 Int (V :/\ IL)
+             , Cacheable   z3 IL (V :/\ IL)
              , MonadReader State z3
              , Z.MonadZ3   z3
              ) => IL -> z3 VarCore
@@ -796,9 +796,9 @@ data IL' = Ref' !NRef
 
 
 vCoreSize :: IL -> Int
-vCoreSize (BBOp _ _ (_ :/\ l) (_:/\ r)) = vCoreSize l + vCoreSize r
-vCoreSize (BOp  _ _ (_ :/\ e))           = vCoreSize e
-vCoreSize (IBOp _ _ (_:/\ l) (_ :/\ r)) = vCoreSize' l + vCoreSize' r
+vCoreSize (BBOp _ (_ :/\ l) (_:/\ r)) = vCoreSize l + vCoreSize r
+vCoreSize (BOp  _ (_ :/\ e))           = vCoreSize e
+vCoreSize (IBOp _ (_:/\ l) (_ :/\ r)) = vCoreSize' l + vCoreSize' r
 vCoreSize _            = 1
 
 vCoreSize' :: IL' -> Int
@@ -809,9 +809,9 @@ vCoreSize' _            = 1
 vCoreNumPlain :: IL -> Int
 vCoreNumPlain Chc {}                         = 0
 vCoreNumPlain Unit                           = 0
-vCoreNumPlain (BOp  _ _ (_ :/\ e))           = vCoreNumPlain e
-vCoreNumPlain (BBOp _ _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain  l + vCoreNumPlain r
-vCoreNumPlain (IBOp _ _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain' l + vCoreNumPlain' r
+vCoreNumPlain (BOp  _ (_ :/\ e))           = vCoreNumPlain e
+vCoreNumPlain (BBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain  l + vCoreNumPlain r
+vCoreNumPlain (IBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumPlain' l + vCoreNumPlain' r
 vCoreNumPlain Ref {}                         = 1
 
 vCoreNumPlain' :: IL' -> Int
@@ -822,9 +822,9 @@ vCoreNumPlain' _                              = 1
 
 vCoreNumVar :: IL -> Int
 vCoreNumVar Chc {} = 1
-vCoreNumVar (BOp  _ _ (_ :/\ e)) = vCoreNumVar e
-vCoreNumVar (BBOp _ _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar  l + vCoreNumVar r
-vCoreNumVar (IBOp _ _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar' l + vCoreNumVar' r
+vCoreNumVar (BOp  _ (_ :/\ e)) = vCoreNumVar e
+vCoreNumVar (BBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar  l + vCoreNumVar r
+vCoreNumVar (IBOp _ (_ :/\ l) (_ :/\ r)) = vCoreNumVar' l + vCoreNumVar' r
 vCoreNumVar Ref {} = 0
 vCoreNumVar Unit   = 0
 
@@ -857,16 +857,13 @@ toIL (LitB True)  = (P :/\) . Ref <$> sTrue
 toIL (LitB False) = (P :/\) . Ref <$> sFalse
 toIL (RefB ref)   = (P :/\) <$> constrain ref
 toIL (OpB op e)      = do (v :/\ e') <- toIL e
-                          k <- generateKey
-                          return (v :/\  BOp k op (v :/\ e'))
+                          return (v :/\  BOp op (v :/\ e'))
 toIL (OpBB op l r) = do l'@(vl :/\ _) <- toIL l
                         r'@(vr :/\ _) <- toIL r
-                        k <- generateKey
-                        return (vl <@> vr :/\ BBOp k op l' r')
+                        return (vl <@> vr :/\ BBOp op l' r')
 toIL (OpIB op l r) = do l'@(vl :/\ _) <- toIL' l
                         r'@(vr :/\ _) <- toIL' r
-                        k <- generateKey
-                        return (vl <@> vr :/\ IBOp k op l' r')
+                        return (vl <@> vr :/\ IBOp op l' r')
 toIL (ChcB d l r)  = return (V :/\ Chc d l r)
 
 toIL' :: ( Constrainable    m (ExRefType Var) IL'
@@ -994,7 +991,7 @@ dispatchOp' GTE (SD l) (SD r) = SBool <$> Z.mkGe (unSDouble  l)  (unSDouble  r)
 -- the optimizer better opportunities. Accumulation seeks to combine as much as
 -- possible the plain terms in the AST into symbolic references
 accumulate :: ( Z.MonadZ3 z3
-              , Cacheable z3 Int (V :/\ IL)
+              , Cacheable z3 IL (V :/\ IL)
               , MonadReader State z3
               , MonadLogger z3
               ) => IL -> z3 (V :/\ IL)
@@ -1003,57 +1000,51 @@ accumulate Unit    = return (P :/\ Unit)
 accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
-accumulate (BOp  k Not (_ :/\ Ref r))  = memo k $! (P :/\ ) . Ref <$> sNot r
-accumulate (BBOp k op (_ :/\ Ref l) (_ :/\ Ref r)) = memo k $! (P :/\ ) . Ref <$> dispatchOp op l r
+accumulate x@(BOp  Not (_ :/\ Ref r))  = memo x $! (P :/\ ) . Ref <$> sNot r
+accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = memo x $! (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate (IBOp k op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo k $ (P :/\ ) . Ref <$> dispatchOp' op l r
+accumulate x@(IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo x $ (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
-accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
-accumulate x@(BBOp _ _ (_ :/\ Ref _)   (_ :/\ Chc {}))  = return (V :/\ x)
-accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Ref _))   = return (V :/\ x)
-accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
-accumulate x@(IBOp _ _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
-accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
+accumulate x@(BBOp _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
+accumulate x@(BBOp _ (_ :/\ Ref _)   (_ :/\ Chc {}))  = return (V :/\ x)
+accumulate x@(BBOp _ (_ :/\ Chc {})  (_ :/\ Ref _))   = return (V :/\ x)
+accumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
+accumulate x@(IBOp _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
+accumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-accumulate (BOp k Not (P :/\ e)) = memo k $!
+accumulate x@(BOp Not (P :/\ e)) = memo x $!
   do (_ :/\ e') <- accumulate e
-     k' <- generateKey
-     let !res = BOp k' Not (P :/\ e')
+     let !res = BOp  Not (P :/\ e')
      accumulate res
 
-accumulate (BOp Not (V :/\ e)) =  memo x $!
+accumulate x@(BOp Not (V :/\ e)) =  memo x $!
   do (_ :/\ e') <- accumulate e
-     k' <- generateKey
-     let !res = BOp k' Not (V :/\ e')
+     let !res = BOp Not (V :/\ e')
      return (V :/\ res)
 
-accumulate (BBOp k op (P :/\ l) (P :/\ r)) = memo k $!
+accumulate x@(BBOp op (P :/\ l) (P :/\ r)) = memo x $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
-     k' <- generateKey
-     let !res = BBOp k' op (P :/\ l') (P :/\ r')
+     let !res = BBOp op (P :/\ l') (P :/\ r')
      logInProducerWith "accumulating two refs: " res
      accumulate res
 
-accumulate (BBOp k op (_ :/\ l) (_ :/\ r)) = memo k $!
+accumulate x@(BBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
-     k' <- generateKey
-     let !res  = BBOp k' op (vl :/\ l') (vr :/\ r')
+     let !res  = BBOp op (vl :/\ l') (vr :/\ r')
      return (vl <@> vr :/\ res)
 
-accumulate (IBOp k op (P :/\ l) (P :/\ r)) = memo k $!
+accumulate x@(IBOp op (P :/\ l) (P :/\ r)) = memo x $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
-     k' <- generateKey
-     let !res = IBOp k' op (P :/\ l') (P :/\ r')
+     let !res = IBOp op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate (IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
+accumulate x@(IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
-     k' <- generateKey
-     let !res = IBOp k' op a b
+     let !res = IBOp op a b
      return (vl <@> vr :/\  res)
 
 iAccumulate' :: Z.MonadZ3 z3 => IL' -> z3 (V :/\ IL')
@@ -1113,62 +1104,62 @@ isValue' _        = False
 evaluate :: ( MonadLogger z3
             , Z.MonadZ3   z3
             , MonadReader State z3
-            , Cacheable   z3 Int (V :/\ IL)
+            , Cacheable   z3 IL  (V :/\ IL)
             ) => IL -> z3 VarCore
 evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
-evaluate (BOp _ Not (_ :/\ Ref r))                  = sNot r >>= toSolver
-evaluate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r))    = toSolver =<< dispatchOp op l r
+evaluate (BOp Not (_ :/\ Ref r))                  = sNot r >>= toSolver
+evaluate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r))    = toSolver =<< dispatchOp op l r
   -- numerics
-evaluate (IBOp _ op  (_ :/\ Ref' l) (_ :/\ Ref' r)) = toSolver =<< dispatchOp' op l r
+evaluate (IBOp op  (_ :/\ Ref' l) (_ :/\ Ref' r)) = toSolver =<< dispatchOp' op l r
   -- choices
-evaluate x@(BBOp _ _ (V :/\ _) (V :/\ _)) = return $! intoCore x
-evaluate x@(IBOp _ _ (V :/\ _) (V :/\ _)) = return $! intoCore x
+evaluate x@(BBOp _ (V :/\ _) (V :/\ _)) = return $! intoCore x
+evaluate x@(IBOp _ (V :/\ _) (V :/\ _)) = return $! intoCore x
   -- congruence cases
-evaluate (BBOp _ And (_ :/\ l) (_ :/\ Unit))      = evaluate l
-evaluate (BBOp _ And (_ :/\ Unit) (_ :/\ r))      = evaluate r
-evaluate (BBOp _ And (_ :/\ l) (_ :/\ x@(Ref _))) = do _ <- evaluate x; evaluate l
-evaluate (BBOp _ And (_ :/\ x@(Ref _)) (_ :/\ r)) = do _ <- evaluate x; evaluate r
-evaluate (IBOp k op (P :/\ l) (P :/\ r))          = do !l' <- iAccumulate' l
-                                                       !r' <- iAccumulate' r
-                                                       let !res = IBOp k op l' r'
-                                                       evaluate res
+evaluate (BBOp And (_ :/\ l) (_ :/\ Unit))      = evaluate l
+evaluate (BBOp And (_ :/\ Unit) (_ :/\ r))      = evaluate r
+evaluate (BBOp And (_ :/\ l) (_ :/\ x@(Ref _))) = do _ <- evaluate x; evaluate l
+evaluate (BBOp And (_ :/\ x@(Ref _)) (_ :/\ r)) = do _ <- evaluate x; evaluate r
+evaluate (IBOp op (P :/\ l) (P :/\ r))          = do !l' <- iAccumulate' l
+                                                     !r' <- iAccumulate' r
+                                                     let !res = IBOp op l' r'
+                                                     evaluate res
 
-evaluate (IBOp k op (_ :/\ l) (_ :/\ r))          = do l' <- iAccumulate' l
-                                                       r' <- iAccumulate' r
-                                                       let res = IBOp k op l' r'
-                                                       return $! intoCore res
+evaluate (IBOp op (_ :/\ l) (_ :/\ r))          = do l' <- iAccumulate' l
+                                                     r' <- iAccumulate' r
+                                                     let res = IBOp op l' r'
+                                                     return $! intoCore res
 
   -- accumulation cases
-evaluate x@(BOp _ Not (P :/\ _))  = accumulate x >>= evaluate . sSnd
-evaluate x@(BOp _ Not (V :/\ _))  = intoCore . sSnd <$> accumulate x
-evaluate (BBOp k And (P :/\ l) (P :/\ r)) = log "[Eval P P] And case" >>
+evaluate x@(BOp Not (P :/\ _))  = accumulate x >>= evaluate . sSnd
+evaluate x@(BOp Not (V :/\ _))  = intoCore . sSnd <$> accumulate x
+evaluate (BBOp And (P :/\ l) (P :/\ r)) = log "[Eval P P] And case" >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
-     let !res = BBOp k And (P :/\ l') (P :/\ r')
+     let !res = BBOp And (P :/\ l') (P :/\ r')
      evaluate res
-evaluate (BBOp k And (V :/\ l) (P :/\ r)) = log "[Eval V P] And case" >>
+evaluate (BBOp And (V :/\ l) (P :/\ r)) = log "[Eval V P] And case" >>
   do (VarCore r') <- evaluate r
-     let !res = BBOp k And (V :/\ l) (P :/\ r')
+     let !res = BBOp And (V :/\ l) (P :/\ r')
      evaluate res
-evaluate (BBOp k And (P :/\ l) (V :/\ r)) = log "[Eval P V] And case" >>
+evaluate (BBOp And (P :/\ l) (V :/\ r)) = log "[Eval P V] And case" >>
   do (VarCore l') <- evaluate l
-     let !res = BBOp k And (P :/\ l') (V :/\ r)
+     let !res = BBOp And (P :/\ l') (V :/\ r)
      evaluate res
-evaluate (BBOp k op (P :/\ l) (P :/\ r)) = log "[Eval P P] General Case" >>
+evaluate (BBOp op (P :/\ l) (P :/\ r)) = log "[Eval P P] General Case" >>
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
-     let !res = BBOp k op (P :/\ l') (P :/\ r')
+     let !res = BBOp op (P :/\ l') (P :/\ r')
      evaluate res
-evaluate (BBOp k op (V :/\ l) (P :/\ r)) = log "[Eval V P] General Case" >>
+evaluate (BBOp op (V :/\ l) (P :/\ r)) = log "[Eval V P] General Case" >>
   do (_ :/\ r') <- accumulate r
-     let !res = BBOp k op (V :/\ l) (P :/\ r')
+     let !res = BBOp op (V :/\ l) (P :/\ r')
      return $! intoCore res
-evaluate (BBOp k op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
+evaluate (BBOp op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
   do (_ :/\ l') <- accumulate l
-     let !res = BBOp k op (P :/\ l') (V :/\ r)
+     let !res = BBOp op (P :/\ l') (V :/\ r)
      return $! intoCore res
 
 ------------------------- Removing Choices -------------------------------------
@@ -1177,19 +1168,19 @@ evaluate (BBOp k op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
 -- removes the need to perform tree rotations. We make this as strict as
 -- possible because we know we will be consuming the entire structure so there
 -- is not need to build thunks
-data Ctx = InL  !Ctx   !Key BB_B  IL
-         | InR  !SBool !Key BB_B  !Ctx
-         | InLB !Ctx   !Key NN_B  IL'
-         | InRB NRef   !Key NN_B  !Ctx
+data Ctx = InL  !Ctx   BB_B  IL
+         | InR  !SBool BB_B  !Ctx
+         | InLB !Ctx   NN_B  IL'
+         | InRB NRef   NN_B  !Ctx
          | InL' !Ctx   NN_N  IL'
          | InR' NRef   NN_N  !Ctx
-         | InU         !Key B_B   !Ctx
+         | InU         B_B   !Ctx
          | InU'        N_N   !Ctx
          | Top
     deriving Show
 
-data Loc = InBool !IL !Ctx
-         | InNum !IL' !Ctx
+data Loc = InBool !IL  !Ctx
+         | InNum  !IL' !Ctx
          deriving Show
 
 toLoc :: IL -> Loc
@@ -1205,7 +1196,7 @@ toLocWith' :: Ctx -> IL' -> Loc
 toLocWith' = flip InNum
 
 findChoice :: ( Z.MonadZ3 z3
-              , Cacheable z3 Int (V :/\ IL)
+              , Cacheable z3 IL (V :/\ IL)
               , MonadLogger z3
               , MonadReader State z3
               ) => Loc -> z3 Loc
@@ -1220,8 +1211,8 @@ findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
      logInProducerWith "InBool InL discharging refs" x
      findChoice (InBool n parent)
 
-findChoice (InNum l@Ref' {} (InLB parent op k r@Ref' {})) =
-  do (_ :/\ n) <- accumulate $ IBOp op k (P :/\ l) (P :/\ r)
+findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
+  do (_ :/\ n) <- accumulate $ IBOp op (P :/\ l) (P :/\ r)
      findChoice (InBool n parent)
 
 findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) =
@@ -1229,8 +1220,8 @@ findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) =
      findChoice (InNum n parent)
 
   -- folds
-findChoice (InBool r@Ref{} (InU o k e))   =
-  do (_ :/\ n) <- accumulate $! BOp o k (P :/\ r)
+findChoice (InBool r@Ref{} (InU o e))   =
+  do (_ :/\ n) <- accumulate $! BOp o (P :/\ r)
      findChoice (InBool n e)
 findChoice (InNum r@Ref'{}  (InU' o e)) =
   do (_ :/\ n) <- iAccumulate' $! IOp o (P :/\ r)
@@ -1241,8 +1232,8 @@ findChoice x@(InBool r@Ref {} (InR acc op parent)) =
      logInProducerWith "InBool InR with " x
      findChoice (InBool n parent)
 
-findChoice (InNum r@Ref' {} (InRB acc op k parent)) =
-  do (_ :/\ n) <- accumulate $! IBOp op k (P :/\ Ref' acc) (P :/\ r)
+findChoice (InNum r@Ref' {} (InRB acc op parent)) =
+  do (_ :/\ n) <- accumulate $! IBOp op (P :/\ Ref' acc) (P :/\ r)
      findChoice (InBool n parent)
 
 findChoice (InNum r@Ref' {} (InR' acc op parent)) =
@@ -1260,9 +1251,9 @@ findChoice (InBool (BOp  o  (_ :/\ e))           ctx) = findChoice (InBool e $ I
 findChoice (InNum  (IOp  o  (_ :/\ e))           ctx) = findChoice (InNum  e $ InU' o ctx)
 findChoice (InNum  (IIOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InL' ctx op r)
   -- legal to discharge Units under a conjunction only
-findChoice (InBool Unit (InL parent k And r))   = do t <- sTrue
-                                                     findChoice (InBool r $ InR t k And parent)
-findChoice (InBool Unit (InR acc _ And parent)) = findChoice (InBool (Ref acc) parent) -- TODO not sure if k is needed here
+findChoice (InBool Unit (InL parent And r))   = do t <- sTrue
+                                                   findChoice (InBool r $ InR t And parent)
+findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent) -- TODO not sure if k is needed here
   -- TODO Not sure if unit can ever exist with a context, most of these will
   -- never pass the parser and cannot be constructed in the Prop' data type, but
   -- the IL allows for them
@@ -1448,10 +1439,10 @@ instance (Pretty a, Pretty b) => Pretty (a :/\ b) where
 instance Pretty IL where
   pretty Unit = "unit"
   pretty (Ref b)      = pretty b
-  pretty (BOp _ Not r@(_ :/\ Ref _))   = "~" <> pretty r
-  pretty (BOp _ o e)   = pretty o <> parens (pretty e)
-  pretty (BBOp _ op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
-  pretty (IBOp _ op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
+  pretty (BOp Not r@(_ :/\ Ref _))   = "~" <> pretty r
+  pretty (BOp o e)   = pretty o <> parens (pretty e)
+  pretty (BBOp op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
+  pretty (IBOp op l r) = parens $ mconcat [pretty l, " ", pretty op, " ", pretty r]
   pretty (Chc d l r)  = pretty d <> between "<" (pretty l <> "," <> pretty r) ">"
 
 instance Pretty NRef where
