@@ -18,7 +18,7 @@ import           Settings
 import           Core.Types
 import           Core.Core
 import           Utils
-import           Solve (solveVerbose, solve)
+import           Solve (solveVerbose, solve,solveGetDiag)
 
 import           Lang
 import           Auto
@@ -215,20 +215,21 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  -- diagnostics "raw_data/auto_diagnostics.csv" defSettings
+  diagnostics "raw_data/auto_diagnostics_withfix.csv" defSettings
 
   defaultMain $
     [  bgroup "Z3" (benches defSettings)
     --   bgroup "Z3" (compRatioBenches z3DefConf)
     ]
 
-  -- let t = bRef "one" &&& bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
+  let t = bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") -- &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bnot $ bRef "one") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = (bChc "AA" (bRef "a") (bRef "b" ||| bRef "c")) ||| bRef "d"
   -- putStrLn $ show $ bProp
   -- let t = bChc "AA" (bRef "Aleft") (bRef "two" ==> bRef "Aright" ||| bRef "one")  -- &&& bRef "two"
-  -- !res <- solveVerbose Nothing defWithModels t
-  -- putStrLn $ show res
+  _ <- solveVerbose Nothing defWithModels t
+  !res <- solveGetDiag Nothing defWithModels t
+  putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing
