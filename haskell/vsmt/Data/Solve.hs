@@ -784,6 +784,17 @@ V <@> P = V
 P <@> V = V
 P <@> P = P
 
+-- | get the topmost variational indicator of the IL ast
+getVofIL :: IL -> V
+getVofIL (BOp _ (v :/\ _))            = v
+getVofIL (BBOp _ (l :/\ _) (r :/\ _)) = l <@> r
+getVofIL (IBOp _ (l :/\ _) (r :/\ _)) = l <@> r
+getVofIL _                            = P
+
+getVofIL' :: IL' -> V
+getVofIL' (IOp _ (v :/\ _))            = v
+getVofIL' (IIOp _ (l :/\ _) (r :/\ _)) = l <@> r
+getVofIL' _                            = P
 
 data IL' = Ref' !NRef
     | IOp   N_N (V :/\ IL')
@@ -1012,7 +1023,7 @@ accumulate x@(BOp Not (P :/\ e)) = memo x $!
      let !res = BOp Not (P :/\ e')
      accumulate res
 
-accumulate (BOp Not (V :/\ e)) = -- memo x $!
+accumulate x@(BOp Not (V :/\ e)) = memo x $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp Not (V :/\ e')
      return (V :/\ res)
@@ -1036,7 +1047,7 @@ accumulate x@(IBOp op (P :/\ l) (P :/\ r)) = memo x $!
      let !res = IBOp op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate (IBOp op (_ :/\ l) (_ :/\ r)) = -- memo x $!
+accumulate x@(IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp op a b
@@ -1160,32 +1171,35 @@ evaluate (BBOp op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
 -- removes the need to perform tree rotations. We make this as strict as
 -- possible because we know we will be consuming the entire structure so there
 -- is not need to build thunks
-data Ctx = InL  !Ctx   BB_B  IL
-         | InR  !SBool BB_B  !Ctx
-         | InLB !Ctx   NN_B  IL'
-         | InRB NRef   NN_B  !Ctx
-         | InL' !Ctx   NN_N  IL'
-         | InR' NRef   NN_N  !Ctx
-         | InU         B_B   !Ctx
-         | InU'        N_N   !Ctx
+data Ctx = InL  (V :/\ Ctx)  BB_B  (V :/\ IL)
+         | InR  (V :/\ IL)   BB_B  (V :/\ Ctx)
+         | InLB (V :/\ Ctx)  NN_B  (V :/\ IL')
+         | InRB (V :/\ IL')  NN_B  (V :/\ Ctx)
+         | InL' (V :/\ Ctx)  NN_N  (V :/\ IL')
+         | InR' (V :/\ IL')  NN_N  (V :/\ Ctx)
+         | InU  B_B   (V :/\ Ctx)
+         | InU' N_N   (V :/\ Ctx)
          | Top
     deriving Show
 
-data Loc = InBool !IL !Ctx
-         | InNum !IL' !Ctx
+data Loc = InBool (V :/\ IL)  !Ctx
+         | InNum  (V :/\ IL') !Ctx
          deriving Show
+
+toLocWith :: Ctx -> IL -> Loc
+toLocWith a@(InL (l :/\ _) _ (r :/\ _)) il  = InBool (l <@> r :/\ il) a
+toLocWith a@(InR (l :/\ _) _ (r :/\ _)) il  = InBool (l <@> r :/\ il) a
+toLocWith a@(InU _ (v :/\ _)) il            = InBool (v :/\ il) a
+toLocWith a il = InBool (getVofIL il :/\ il) a
+
+toLocWith' :: Ctx -> IL' -> Loc
+toLocWith' a@(InLB (l :/\ _) _ (r :/\ _)) il = InNum (l <@> r :/\ il) a
+toLocWith' a@(InRB (l :/\ _) _ (r :/\ _)) il = InNum (l <@> r :/\ il) a
+toLocWith' a@(InU' _ (v :/\ _))          il  = InNum (v :/\ il) a
+toLocWith' a il = InNum (getVofIL' il :/\ il) a
 
 toLoc :: IL -> Loc
 toLoc = toLocWith Top
-
-toLoc' :: IL' -> Loc
-toLoc' = toLocWith' Top
-
-toLocWith :: Ctx -> IL -> Loc
-toLocWith = flip InBool
-
-toLocWith' :: Ctx -> IL' -> Loc
-toLocWith' = flip InNum
 
 findChoice :: ( Z.MonadZ3 z3
               , Cacheable z3 IL (V :/\ IL)
@@ -1193,72 +1207,123 @@ findChoice :: ( Z.MonadZ3 z3
               , MonadReader State z3
               ) => Loc -> z3 Loc
   -- base cases
-findChoice x@(InBool Ref{} Top) = logInProducerWith "got ref returning" x >> return x
-findChoice x@(InBool Unit Top)  = return x
-findChoice x@(InBool Chc {} _)  = return x
-findChoice x@(InNum Chc' {} _)  = return x
+findChoice x@(InBool (_ :/\ Ref{}) Top) = return x
+findChoice x@(InBool (_ :/\ Unit) Top)  = return x
+findChoice x@(InBool (_ :/\ Chc {}) _)  = return x
+findChoice x@(InNum  (_ :/\ Chc'{}) _)  = return x
+
+  -- unary cases
+findChoice (InBool  (V :/\ BOp op e) ctx)  =
+  findChoice (InBool e (InU op (V :/\ ctx)))
+findChoice (InNum  (V :/\ IOp op e) ctx)  =
+  findChoice (InNum  e (InU' op (V :/\ ctx)))
+
+  -- bool cases
+findChoice (InBool (v :/\ BBOp op l@(V :/\ _) r@(P :/\ _)) ctx) =
+  findChoice (InBool l (InL (v :/\ ctx) op r))
+findChoice (InBool (v :/\ BBOp op l@(P :/\ _) r@(V :/\ _)) ctx) =
+  findChoice (InBool r (InR l op (v :/\ ctx)))
+  -- when both V prefer the left side
+findChoice (InBool (v :/\ BBOp op l@(V :/\ _) r@(V :/\ _)) ctx) =
+  findChoice (InBool l (InL (v :/\ ctx) op r))
+
+  -- relational cases
+findChoice (InBool (v :/\ IBOp op l@(V :/\ _) r@(P :/\ _)) ctx) =
+  do findChoice (InNum l (InLB (v :/\ ctx) op r))
+findChoice (InBool (v :/\ IBOp op l@(P :/\ _) r@(V :/\ _)) ctx) =
+  do findChoice (InNum r (InRB l op (v :/\ ctx)))
+  -- when both V prefer the left side
+findChoice (InBool (v :/\ IBOp op l@(V :/\ _) r@(V :/\ _)) ctx) =
+  do findChoice (InNum l (InLB (v :/\ ctx) op r))
+
+  -- numeric cases
+findChoice (InNum  (v :/\ IIOp op l@(V :/\ _) r@(P :/\ _)) ctx) =
+  do findChoice (InNum l (InL' (v :/\ ctx) op r))
+findChoice (InNum (v :/\ IIOp op l@(P :/\ _) r@(V :/\ _)) ctx) =
+  do findChoice (InNum r (InR' l op (v :/\ ctx)))
+  -- when both V prefer the left side
+findChoice (InNum (v :/\ IIOp op l@(V :/\ _) r@(V :/\ _)) ctx) =
+  do findChoice (InNum l (InL' (v :/\ ctx) op r))
+
+  -- switch
+findChoice (InBool l@(P :/\ _) (InL parent op r)) =
+  findChoice (InBool r $! InR l op parent)
+findChoice (InBool r@(P :/\ _) (InR l op parent)) =
+  findChoice (InBool l $! InL parent op r)
+
+findChoice (InNum  l@(P :/\ _) (InLB parent op r)) =
+  findChoice (InNum r $! InRB l op parent)
+findChoice (InNum  r@(P :/\ _) (InRB l op parent)) =
+  findChoice (InNum l $! InLB parent op r)
+
+findChoice (InNum  l@(P :/\ _) (InL' parent op r)) =
+  findChoice (InNum  r $ InR' l op parent)
+findChoice (InNum  r@(P :/\ _) (InR' l op parent)) =
+  findChoice (InNum  l $ InL' parent op r)
   -- discharge two references
-findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
-  do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
-     logInProducerWith "InBool InL discharging refs" x
-     findChoice (InBool n parent)
+-- findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
+--   do (_ :/\ n) <- accumulate $ BBOp op (P :/\ l) (P :/\ r)
+--      logInProducerWith "InBool InL discharging refs" x
+--      findChoice (InBool n parent)
 
-findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
-  do (_ :/\ n) <- accumulate  $ IBOp op (P :/\ l) (P :/\ r)
-     findChoice (InBool n parent)
+-- findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
+--   do (_ :/\ n) <- accumulate  $ IBOp op (P :/\ l) (P :/\ r)
+--      findChoice (InBool n parent)
 
-findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) =
-  do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ l) (P :/\ r)
-     findChoice (InNum n parent)
+-- findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) =
+--   do (_ :/\ n) <- iAccumulate' $ IIOp op (P :/\ l) (P :/\ r)
+--      findChoice (InNum n parent)
 
   -- folds
-findChoice (InBool r@Ref{} (InU o e))   =
-  do (_ :/\ n) <- accumulate $! BOp o (P :/\ r)
-     findChoice (InBool n e)
-findChoice (InNum r@Ref'{}  (InU' o e)) =
-  do (_ :/\ n) <- iAccumulate' $! IOp o (P :/\ r)
-     findChoice (InNum n e)
+-- findChoice (InBool r@Ref{} (InU o e))   =
+--   do (_ :/\ n) <- accumulate $! BOp o (P :/\ r)
+--      findChoice (InBool n e)
+-- findChoice (InNum r@Ref'{}  (InU' o e)) =
+--   do (_ :/\ n) <- iAccumulate' $! IOp o (P :/\ r)
+--      findChoice (InNum n e)
 
-findChoice x@(InBool r@Ref {} (InR acc op parent)) =
-  do (_ :/\ n) <- accumulate $! BBOp op (P :/\ Ref acc) (P :/\ r)
-     logInProducerWith "InBool InR with " x
-     findChoice (InBool n parent)
+-- findChoice x@(InBool r@Ref {} (InR acc op parent)) =
+--   do (_ :/\ n) <- accumulate $! BBOp op (P :/\ Ref acc) (P :/\ r)
+--      logInProducerWith "InBool InR with " x
+--      findChoice (InBool n parent)
 
-findChoice (InNum r@Ref' {} (InRB acc op parent)) =
-  do (_ :/\ n) <- accumulate $! IBOp op (P :/\ Ref' acc) (P :/\ r)
-     findChoice (InBool n parent)
+-- findChoice (InNum r@Ref' {} (InRB acc op parent)) =
+--   do (_ :/\ n) <- accumulate $! IBOp op (P :/\ Ref' acc) (P :/\ r)
+--      findChoice (InBool n parent)
 
-findChoice (InNum r@Ref' {} (InR' acc op parent)) =
-  do (_ :/\ n) <- iAccumulate' $! IIOp op (P :/\ Ref' acc) (P :/\ r)
-     findChoice (InNum n parent)
-  -- switch
-findChoice x@(InBool (Ref l) (InL parent op r))   = logInProducerWith "switching to InR" x >> findChoice (InBool r $! InR l op parent)
-findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
-findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
+-- findChoice (InNum r@Ref' {} (InR' acc op parent)) =
+--   do (_ :/\ n) <- iAccumulate' $! IIOp op (P :/\ Ref' acc) (P :/\ r)
+--      findChoice (InNum n parent)
   -- recur
-findChoice x@(InBool (BBOp op (_ :/\ l) (_ :/\ r)) ctx) = logInProducerWith "InBool general case" x
-                                                          >> findChoice (InBool l $ InL ctx op r)
-findChoice (InBool (IBOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InLB ctx op r)
-findChoice (InBool (BOp  o  (_ :/\ e))           ctx) = findChoice (InBool e $ InU o ctx)
-findChoice (InNum  (IOp  o  (_ :/\ e))           ctx) = findChoice (InNum  e $ InU' o ctx)
-findChoice (InNum  (IIOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InL' ctx op r)
-  -- legal to discharge Units under a conjunction only
-findChoice (InBool Unit (InL parent And r))   = do t <- sTrue
-                                                   findChoice (InBool r $ InR t And parent)
-findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
+
+-- findChoice x@(InBool (BBOp op (P :/\ l) (V :/\ r)) ctx) = findChoice (InBool l $ InL ctx op r)
+-- findChoice x@(InBool (BBOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InBool l $ InL ctx op r)
+
+-- findChoice (InBool (IBOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InLB ctx op r)
+-- findChoice (InBool (BOp  o  (_ :/\ e))           ctx) = findChoice (InBool e $ InU o ctx)
+-- findChoice (InNum  (IOp  o  (_ :/\ e))           ctx) = findChoice (InNum  e $ InU' o ctx)
+-- findChoice (InNum  (IIOp op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InL' ctx op r)
+--   -- legal to discharge Units under a conjunction only
+-- findChoice (InBool Unit (InL parent And r))   = do t <- sTrue
+--                                                    findChoice (InBool r $ InR t And parent)
+-- findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
   -- TODO Not sure if unit can ever exist with a context, most of these will
   -- never pass the parser and cannot be constructed in the Prop' data type, but
   -- the IL allows for them
-findChoice x@(InBool Ref{} InU'{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
-findChoice x@(InNum Ref'{} InU{})  = error $ "Boolean unary operator applied to numeric: " ++ show x
-findChoice (InBool Unit ctx)       = error $ "Unit with a context" ++ show ctx
-findChoice x@(InNum Ref'{} Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
-findChoice x@(InBool Ref{} InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
-findChoice x@(InBool Ref{} InRB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
-findChoice x@(InBool Ref{} InL'{}) = error $ "An impossible case bool reference in arithmetic: " ++ show x
-findChoice x@(InBool Ref{} InR'{}) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
-findChoice x@(InNum Ref'{} InL{})  = error $ "An impossible case: " ++ show x
-findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InL{}) = error $ "Ref in left of binary bool op, why did you think you had choices?" ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InR{}) = error $ "Ref in right of binary bool op, why did you think you had choices?" ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InU{}) = error $ "Ref in unary bool op, why did you think you had choices?" ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InU'{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
+findChoice x@(InNum (_ :/\ Ref'{}) InU{})  = error $ "Boolean unary operator applied to numeric: " ++ show x
+findChoice (InBool (_ :/\ Unit) ctx)       = error $ "Unit with a context" ++ show ctx
+findChoice x@(InNum (_ :/\ Ref'{}) Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InRB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InL'{}) = error $ "An impossible case bool reference in arithmetic: " ++ show x
+findChoice x@(InBool (_ :/\ Ref{}) InR'{}) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
+findChoice x@(InNum (_ :/\ Ref'{}) InL{})  = error $ "An impossible case: " ++ show x
+findChoice x@(InNum (_ :/\ Ref'{}) InR{})  = error $ "An impossible case: " ++ show x
+findChoice x = error $ "catch all error in findchoice with " ++ show x
 
 
 store ::
@@ -1365,14 +1430,14 @@ choose ::
   ( MonadLogger m
   , Z.MonadZ3   m
   ) => Loc -> SolverT m ()
-choose (InBool Unit Top)  = removeChoices (VarCore Unit)
-choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
-                              evaluate l >>= removeChoices
+choose (InBool (_ :/\ Unit) Top)  = removeChoices (VarCore Unit)
+choose (InBool (_ :/\ l@Ref{}) _) = logInProducer "Choosing all done" >>
+                                    evaluate l >>= removeChoices
 choose loc =
   do
     loc' <- findChoice loc
     case loc' of
-      (InBool (Chc d cl cr) ctx) -> do
+      (InBool (_ :/\ Chc d cl cr) ctx) -> do
         conf <- reads config
         -- we'd like to evaluate after IL but this makes the async harder so we
         -- accumulate instead. Specifically there is an interaction with in new
@@ -1387,7 +1452,7 @@ choose loc =
           Just False -> goRight
           Nothing    -> alternative d goLeft goRight
 
-      (InNum (Chc' d cl cr) ctx) -> do
+      (InNum (_ :/\ Chc' d cl cr) ctx) -> do
         logInProducer "Got choice in context InNum"
         conf <- reads config
         let goLeft  = toIL' cl >>= iAccumulate' . sSnd >>= findChoice . toLocWith' ctx . sSnd >>= choose
