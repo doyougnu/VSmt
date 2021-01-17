@@ -65,7 +65,7 @@ frequencies = elements [1..10]
 
 -------------------------- Operator Generators ----------------------------------
 genNN :: Gen N_N
-genNN = elements [Neg, Abs, Sign]
+genNN = elements [Neg]
 
 genRefN :: Gen (ExRefType Var)
 genRefN = do v <- genVar; elements [ExRefTypeI v, ExRefTypeD v]

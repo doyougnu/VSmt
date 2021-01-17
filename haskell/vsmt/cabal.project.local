@@ -1,7 +1,7 @@
 -- packages: lib/sbv
 
-profiling: True
+profiling: False
 benchmarks: True
-library-profiling: True
+library-profiling: False
 profiling-detail: all-functions
 library-profiling-detail: all-functions

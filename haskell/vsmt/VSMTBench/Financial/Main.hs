@@ -130,28 +130,28 @@ main = do
       -- !bPropOpts = applyOpts defConf bProp
 
   -- | convert choice preserving vc's to actual confs
-  [justV1]         <- genConfigPool justD0Conf
-  [justV12]        <- genConfigPool justD01Conf
-  [justV123]       <- genConfigPool justD012Conf
-  [justV1234]      <- genConfigPool justD0123Conf
-  [justV12345]     <- genConfigPool justD01234Conf
-  [justV123456]    <- genConfigPool justD012345Conf
-  [justV1234567]   <- genConfigPool justD0123456Conf
-  [justV12345678]  <- genConfigPool justD01234567Conf
-  [justV123456789] <- genConfigPool justD012345678Conf
+  [!justV1]         <- genConfigPool justD0Conf
+  [!justV12]        <- genConfigPool justD01Conf
+  [!justV123]       <- genConfigPool justD012Conf
+  [!justV1234]      <- genConfigPool justD0123Conf
+  [!justV12345]     <- genConfigPool justD01234Conf
+  [!justV123456]    <- genConfigPool justD012345Conf
+  [!justV1234567]   <- genConfigPool justD0123456Conf
+  [!justV12345678]  <- genConfigPool justD01234567Conf
+  [!justV123456789] <- genConfigPool justD012345678Conf
 
   -- for each total configuration we have to tell the type system teh config is
   -- total to get the right configure instance
-  [ppV1]  <- fmap (fromJust . flip validateTotal (getVarFormula d0Conf)) <$> genConfigPool d0Conf
-  [ppV2]  <- fmap (fromJust . flip validateTotal (getVarFormula d1Conf)) <$> genConfigPool d1Conf
-  [ppV3]  <- fmap (fromJust . flip validateTotal (getVarFormula d2Conf)) <$> genConfigPool d2Conf
-  [ppV4]  <- fmap (fromJust . flip validateTotal (getVarFormula d3Conf)) <$> genConfigPool d3Conf
-  [ppV5]  <- fmap (fromJust . flip validateTotal (getVarFormula d4Conf)) <$> genConfigPool d4Conf
-  [ppV6]  <- fmap (fromJust . flip validateTotal (getVarFormula d5Conf)) <$> genConfigPool d5Conf
-  [ppV7]  <- fmap (fromJust . flip validateTotal (getVarFormula d6Conf)) <$> genConfigPool d6Conf
-  [ppV8]  <- fmap (fromJust . flip validateTotal (getVarFormula d7Conf)) <$> genConfigPool d7Conf
-  [ppV9]  <- fmap (fromJust . flip validateTotal (getVarFormula d8Conf)) <$> genConfigPool d8Conf
-  [ppV10] <- fmap (fromJust . flip validateTotal (getVarFormula d9Conf)) <$> genConfigPool d9Conf
+  [!ppV1]  <- fmap (fromJust . flip validateTotal (getVarFormula d0Conf)) <$> genConfigPool d0Conf
+  [!ppV2]  <- fmap (fromJust . flip validateTotal (getVarFormula d1Conf)) <$> genConfigPool d1Conf
+  [!ppV3]  <- fmap (fromJust . flip validateTotal (getVarFormula d2Conf)) <$> genConfigPool d2Conf
+  [!ppV4]  <- fmap (fromJust . flip validateTotal (getVarFormula d3Conf)) <$> genConfigPool d3Conf
+  [!ppV5]  <- fmap (fromJust . flip validateTotal (getVarFormula d4Conf)) <$> genConfigPool d4Conf
+  [!ppV6]  <- fmap (fromJust . flip validateTotal (getVarFormula d5Conf)) <$> genConfigPool d5Conf
+  [!ppV7]  <- fmap (fromJust . flip validateTotal (getVarFormula d6Conf)) <$> genConfigPool d6Conf
+  [!ppV8]  <- fmap (fromJust . flip validateTotal (getVarFormula d7Conf)) <$> genConfigPool d7Conf
+  [!ppV9]  <- fmap (fromJust . flip validateTotal (getVarFormula d8Conf)) <$> genConfigPool d8Conf
+  [!ppV10] <- fmap (fromJust . flip validateTotal (getVarFormula d9Conf)) <$> genConfigPool d9Conf
 
   -- compression ratio pairs
   -- justV12  <- genConfigPool pD01Conf
@@ -191,16 +191,16 @@ main = do
       !bPropV10 = fromJust . validatePlain $ configure ppV10 bProp
 
     -- | sets of variants
-  v1Variants         <- genVariants justbPropV1
-  v12Variants        <- genVariants justbPropV12
-  v123Variants       <- genVariants justbPropV123
-  v1234Variants      <- genVariants justbPropV1234
-  v12345Variants     <- genVariants justbPropV12345
-  v123456Variants    <- genVariants justbPropV123456
-  v1234567Variants   <- genVariants justbPropV1234567
-  v12345678Variants  <- genVariants justbPropV12345678
-  v123456789Variants <- genVariants justbPropV123456789
-  allVariants        <- genVariants bProp
+  !v1Variants         <- genVariants justbPropV1
+  !v12Variants        <- genVariants justbPropV12
+  !v123Variants       <- genVariants justbPropV123
+  !v1234Variants      <- genVariants justbPropV1234
+  !v12345Variants     <- genVariants justbPropV12345
+  !v123456Variants    <- genVariants justbPropV123456
+  !v1234567Variants   <- genVariants justbPropV1234567
+  !v12345678Variants  <- genVariants justbPropV12345678
+  !v123456789Variants <- genVariants justbPropV123456789
+  !allVariants        <- genVariants bProp
 
 
   let benches :: Settings -> [Benchmark]
@@ -208,69 +208,69 @@ main = do
         [
           -- v-->v
           -- for the variational props we leave choices in and let the solver find all variants
-          mkBench "v-->v" "V1"  d0Conf (solve Nothing solverConf) (unPlain bPropV1)
-        , mkBench "v-->v" "V2"  d1Conf (solve Nothing solverConf) (unPlain bPropV2)
-        , mkBench "v-->v" "V3"  d2Conf (solve Nothing solverConf) (unPlain bPropV3)
-        , mkBench "v-->v" "V4"  d3Conf (solve Nothing solverConf) (unPlain bPropV4)
-        , mkBench "v-->v" "V5"  d4Conf (solve Nothing solverConf) (unPlain bPropV5)
-        , mkBench "v-->v" "V6"  d5Conf (solve Nothing solverConf) (unPlain bPropV6)
-        , mkBench "v-->v" "V7"  d6Conf (solve Nothing solverConf) (unPlain bPropV7)
-        , mkBench "v-->v" "V8"  d7Conf (solve Nothing solverConf) (unPlain bPropV8)
-        , mkBench "v-->v" "V9"  d8Conf (solve Nothing solverConf) (unPlain bPropV9)
-        , mkBench "v-->v" "V10" d9Conf (solve Nothing solverConf) (unPlain bPropV10)
+        --   mkBench "v-->v" "V1"  d0Conf (solve Nothing solverConf) (unPlain bPropV1)
+        -- , mkBench "v-->v" "V2"  d1Conf (solve Nothing solverConf) (unPlain bPropV2)
+        -- , mkBench "v-->v" "V3"  d2Conf (solve Nothing solverConf) (unPlain bPropV3)
+        -- , mkBench "v-->v" "V4"  d3Conf (solve Nothing solverConf) (unPlain bPropV4)
+        -- , mkBench "v-->v" "V5"  d4Conf (solve Nothing solverConf) (unPlain bPropV5)
+        -- , mkBench "v-->v" "V6"  d5Conf (solve Nothing solverConf) (unPlain bPropV6)
+        -- , mkBench "v-->v" "V7"  d6Conf (solve Nothing solverConf) (unPlain bPropV7)
+        -- , mkBench "v-->v" "V8"  d7Conf (solve Nothing solverConf) (unPlain bPropV8)
+        -- , mkBench "v-->v" "V9"  d8Conf (solve Nothing solverConf) (unPlain bPropV9)
+        -- , mkBench "v-->v" "V10" d9Conf (solve Nothing solverConf) (unPlain bPropV10)
 
-        , mkBench "v-->v" "V1"                             justD0Conf         (solve Nothing solverConf) justbPropV1
+          mkBench "v-->v" "V1"                             justD0Conf         (solve Nothing solverConf) justbPropV1
         , mkBench "v-->v" "V1*V2"                          justD01Conf        (solve Nothing solverConf) justbPropV12
         , mkBench "v-->v" "V1*V2*V3"                       justD012Conf       (solve Nothing solverConf) justbPropV123
         , mkBench "v-->v" "V1*V2*V3*V4"                    justD0123Conf      (solve Nothing solverConf) justbPropV1234
-        , mkBench "v-->v" "V1*V2*V3*V4*V5"                 justD01234Conf     (solve Nothing solverConf) justbPropV12345
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf    (solve Nothing solverConf) justbPropV123456
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf   (solve Nothing solverConf) justbPropV1234567
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf  (solve Nothing solverConf) justbPropV12345678
-        , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (solve Nothing solverConf) justbPropV123456789
-        , mkBench' "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (solve Nothing solverConf) bProp
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5"                 justD01234Conf     (solve Nothing solverConf) justbPropV12345
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6"              justD012345Conf    (solve Nothing solverConf) justbPropV123456
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7"           justD0123456Conf   (solve Nothing solverConf) justbPropV1234567
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        justD01234567Conf  (solve Nothing solverConf) justbPropV12345678
+        -- , mkBench "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     justD012345678Conf (solve Nothing solverConf) justbPropV123456789
+        -- , mkBench' "v-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" (solve Nothing solverConf) bProp
        -- p - v
-        , mkBench'' "p-->v" "V1"  pOnV (pure bPropV1)
-        , mkBench'' "p-->v" "V2"  pOnV (pure bPropV2)
-        , mkBench'' "p-->v" "V3"  pOnV (pure bPropV3)
-        , mkBench'' "p-->v" "V4"  pOnV (pure bPropV4)
-        , mkBench'' "p-->v" "V5"  pOnV (pure bPropV5)
-        , mkBench'' "p-->v" "V6"  pOnV (pure bPropV6)
-        , mkBench'' "p-->v" "V7"  pOnV (pure bPropV7)
-        , mkBench'' "p-->v" "V8"  pOnV (pure bPropV8)
-        , mkBench'' "p-->v" "V9"  pOnV (pure bPropV9)
-        , mkBench'' "p-->v" "V10" pOnV (pure bPropV10)
-        , mkBench'' "p-->v" "V1"                             pOnV v1Variants
-        , mkBench'' "p-->v" "V1*V2"                          pOnV v12Variants
-        , mkBench'' "p-->v" "V1*V2*V3"                       pOnV v123Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4"                    pOnV v1234Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4*V5"                 pOnV v12345Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6"              pOnV v123456Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7"           pOnV v1234567Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        pOnV v12345678Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     pOnV v123456789Variants
-        , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" pOnV allVariants
+        -- , mkBench'' "p-->v" "V1"  pOnV (pure bPropV1)
+        -- , mkBench'' "p-->v" "V2"  pOnV (pure bPropV2)
+        -- , mkBench'' "p-->v" "V3"  pOnV (pure bPropV3)
+        -- , mkBench'' "p-->v" "V4"  pOnV (pure bPropV4)
+        -- , mkBench'' "p-->v" "V5"  pOnV (pure bPropV5)
+        -- , mkBench'' "p-->v" "V6"  pOnV (pure bPropV6)
+        -- , mkBench'' "p-->v" "V7"  pOnV (pure bPropV7)
+        -- , mkBench'' "p-->v" "V8"  pOnV (pure bPropV8)
+        -- , mkBench'' "p-->v" "V9"  pOnV (pure bPropV9)
+        -- , mkBench'' "p-->v" "V10" pOnV (pure bPropV10)
+        -- , mkBench'' "p-->v" "V1"                             pOnV v1Variants
+        -- , mkBench'' "p-->v" "V1*V2"                          pOnV v12Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3"                       pOnV v123Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4"                    pOnV v1234Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4*V5"                 pOnV v12345Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6"              pOnV v123456Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7"           pOnV v1234567Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7*V8"        pOnV v12345678Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     pOnV v123456789Variants
+        -- , mkBench'' "p-->v" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" pOnV allVariants
 -- --  -- p - p
-        , mkBench'' "p-->p" "V1"  pOnP (pure bPropV1)
-        , mkBench'' "p-->p" "V2"  pOnP (pure bPropV2)
-        , mkBench'' "p-->p" "V3"  pOnP (pure bPropV3)
-        , mkBench'' "p-->p" "V4"  pOnP (pure bPropV4)
-        , mkBench'' "p-->p" "V5"  pOnP (pure bPropV5)
-        , mkBench'' "p-->p" "V6"  pOnP (pure bPropV6)
-        , mkBench'' "p-->p" "V7"  pOnP (pure bPropV7)
-        , mkBench'' "p-->p" "V8"  pOnP (pure bPropV8)
-        , mkBench'' "p-->p" "V9"  pOnP (pure bPropV9)
-        , mkBench'' "p-->p" "V10" pOnP (pure bPropV10)
+        -- , mkBench'' "p-->p" "V1"  pOnP (pure bPropV1)
+        -- , mkBench'' "p-->p" "V2"  pOnP (pure bPropV2)
+        -- , mkBench'' "p-->p" "V3"  pOnP (pure bPropV3)
+        -- , mkBench'' "p-->p" "V4"  pOnP (pure bPropV4)
+        -- , mkBench'' "p-->p" "V5"  pOnP (pure bPropV5)
+        -- , mkBench'' "p-->p" "V6"  pOnP (pure bPropV6)
+        -- , mkBench'' "p-->p" "V7"  pOnP (pure bPropV7)
+        -- , mkBench'' "p-->p" "V8"  pOnP (pure bPropV8)
+        -- , mkBench'' "p-->p" "V9"  pOnP (pure bPropV9)
+        -- , mkBench'' "p-->p" "V10" pOnP (pure bPropV10)
         , mkBench'' "p-->p" "V1"                             pOnP v1Variants
         , mkBench'' "p-->p" "V1*V2"                          pOnP v12Variants
         , mkBench'' "p-->p" "V1*V2*V3"                       pOnP v123Variants
         , mkBench'' "p-->p" "V1*V2*V3*V4"                    pOnP v1234Variants
-        , mkBench'' "p-->p" "V1*V2*V3*V4*V5"                 pOnP v12345Variants
-        , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6"              pOnP v123456Variants
-        , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7"           pOnP v1234567Variants
-        , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7*V8"        pOnP v12345678Variants
-        , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     pOnP v123456789Variants
-        , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" pOnP allVariants
+        -- , mkBench'' "p-->p" "V1*V2*V3*V4*V5"                 pOnP v12345Variants
+        -- , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6"              pOnP v123456Variants
+        -- , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7"           pOnP v1234567Variants
+        -- , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7*V8"        pOnP v12345678Variants
+        -- , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9"     pOnP v123456789Variants
+        -- , mkBench'' "p-->p" "V1*V2*V3*V4*V5*V6*V7*V8*V9*V10" pOnP allVariants
       -- v - p
         , mkBench "v-->p" "V1"  d0Conf vOnP (unPlain bPropV1)
         , mkBench "v-->p" "V2"  d1Conf vOnP (unPlain bPropV2)
@@ -368,9 +368,9 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnP (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
-  diagnostics "raw_data/financial_diagnostics.csv" defSettings
+  -- diagnostics "raw_data/financial_diagnostics.csv" defSettings
 
-  -- defaultMain $
-  --       [ bgroup "Z3" (benches defSettings)
-  --     -- , bgroup "Z3" (compRatioBenches z3DefConf)
-  --       ]
+  defaultMain $
+        [ bgroup "Z3" (benches defSettings)
+      -- , bgroup "Z3" (compRatioBenches z3DefConf)
+        ]
