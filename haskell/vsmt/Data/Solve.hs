@@ -1342,48 +1342,61 @@ accumulateCtx x@(InNum  (_ :/\ Chc'{}) _)  = return x
 
   -- computation rules
   -- unary cases
-accumulateCtx x@(InBool (_ :/\ r@Ref{}) (_ :/\ InU op ctx)) = memo x $
-  do new <- accumulate (BOp op (P :/\ r)); accumulateCtx (InBool new ctx)
-accumulateCtx x@(InNum (_ :/\ r@Ref'{}) (_ :/\ InU' op ctx)) = memo x $
-  do new <- iAccumulate' (IOp op (P :/\ r)); accumulateCtx (InNum new ctx)
+accumulateCtx x@(InBool r@(P :/\ _) (_ :/\ InU op ctx)) = memo x $
+  do new <- accumulate (BOp op r); accumulateCtx (InBool new ctx)
+accumulateCtx x@(InNum r@(P :/\ _) (_ :/\ InU' op ctx)) = memo x $
+  do new <- iAccumulate' (IOp op r); accumulateCtx (InNum new ctx)
   -- bool cases
-accumulateCtx x@(InBool (_ :/\ l@Ref{}) (_ :/\ InL ctx op (_ :/\ r@Ref{}))) = memo x $
-  do new <- accumulate (BBOp op (P :/\ l) (P :/\ r)); accumulateCtx (InBool new ctx)
-accumulateCtx x@(InBool (_ :/\ r@Ref{}) (_ :/\ InR (_ :/\ l@Ref{}) op ctx)) = memo x $
-  do new <- accumulate (BBOp op (P :/\ l) (P :/\ r)); accumulateCtx (InBool new ctx)
+accumulateCtx x@(InBool l@(P :/\ _) (P :/\ InL ctx op r)) = memo x $
+  do new <- accumulate (BBOp op l r); accumulateCtx (InBool new ctx)
+accumulateCtx x@(InBool r@(P :/\ _) (P :/\ InR l op ctx)) = memo x $
+  do new <- accumulate (BBOp op l r); accumulateCtx (InBool new ctx)
   -- inequalities
-accumulateCtx x@(InNum (_ :/\ l@Ref'{}) (_ :/\ InLB ctx op (_ :/\ r@Ref'{}))) = memo x $
-  do new <- accumulate (IBOp op (P :/\ l) (P :/\ r)); accumulateCtx (InBool new ctx)
-accumulateCtx x@(InNum (_ :/\ r@Ref'{}) (_ :/\ InRB (_ :/\ l@Ref'{}) op ctx)) = memo x $
-  do new <- accumulate (IBOp op (P :/\ l) (P :/\ r)); accumulateCtx (InBool new ctx)
+accumulateCtx x@(InNum l@(P :/\ _) (P :/\ InLB ctx op r)) = memo x $
+  do new <- accumulate (IBOp op l r); accumulateCtx (InBool new ctx)
+accumulateCtx x@(InNum r@(P :/\ _) (P :/\ InRB l op ctx)) = memo x $
+  do new <- accumulate (IBOp op l r); accumulateCtx (InBool new ctx)
   -- numerics
-accumulateCtx x@(InNum (_ :/\ l@Ref'{}) (_ :/\ InL' ctx op (_ :/\ r@Ref'{}))) = memo x $
-  do new <- iAccumulate' (IIOp op (P :/\ l) (P :/\ r)); accumulateCtx (InNum new ctx)
-accumulateCtx x@(InNum (_ :/\ r@Ref'{}) (_ :/\ InR' (_ :/\ l@Ref'{}) op ctx)) = memo x $
-  do new <- iAccumulate' (IIOp op (P :/\ l) (P :/\ r)); accumulateCtx (InNum new ctx)
+accumulateCtx x@(InNum l@(P :/\ _) (P :/\ InL' ctx op r)) = memo x $
+  do new <- iAccumulate' (IIOp op l r); accumulateCtx (InNum new ctx)
+accumulateCtx x@(InNum r@(P :/\ _) (P :/\ InR' l op ctx)) = memo x $
+  do new <- iAccumulate' (IIOp op l r); accumulateCtx (InNum new ctx)
 
-  -- switch
+  -- switch, if we get here then we can't accumulate more on this branch
   -- bools
-accumulateCtx x@(InBool l@(P :/\ _) (_ :/\ InL ctx op r@(v :/\ _))) = memo x $
-  accumulateCtx (InBool r (P <@> v :/\ InR l op ctx))
-accumulateCtx x@(InBool r@(P :/\ _) (_ :/\ InR l@(v :/\ _) op ctx)) = memo x $
-  accumulateCtx (InBool l (P <@> v :/\ InL ctx op r))
+accumulateCtx x@(InBool (P :/\ l) (V :/\ InL ctx op r)) = memo x $
+  do new <- accumulate l; accumulateCtx (InBool r (V :/\ InR new op ctx))
+accumulateCtx x@(InBool (P :/\ r) (V :/\ InR l op ctx)) = memo x $
+  do new <- accumulate r; accumulateCtx (InBool l (V :/\ InL ctx op new))
   -- inequalities
-accumulateCtx x@(InNum l@(P :/\ _) (_ :/\ InLB ctx op r@(v :/\ _))) = memo x $
-  accumulateCtx (InNum r (P <@> v :/\ InRB l op ctx))
-accumulateCtx x@(InNum r@(P :/\ _) (_ :/\ InRB l@(v :/\ _) op ctx)) = memo x $
-  accumulateCtx (InNum l (P <@> v :/\ InLB ctx op r))
+accumulateCtx x@(InNum (P :/\ l) (V :/\ InLB ctx op r)) = memo x $
+  do new <- iAccumulate' l; accumulateCtx (InNum r (V :/\ InRB new op ctx))
+accumulateCtx x@(InNum (P :/\ r) (V :/\ InRB l op ctx)) = memo x $
+  do new <- iAccumulate' r; accumulateCtx (InNum l (V :/\ InLB ctx op new))
   -- numerics
-accumulateCtx x@(InNum l@(P :/\ _) (_ :/\ InL' ctx op r@(v :/\ _))) = memo x $
-  accumulateCtx (InNum r (P <@> v :/\ InR' l op ctx))
-accumulateCtx x@(InNum r@(P :/\ _) (_ :/\ InR' l@(v :/\ _) op ctx)) = memo x $
-  accumulateCtx (InNum l (P <@> v :/\ InL' ctx op r))
+accumulateCtx x@(InNum (P :/\ l) (V :/\ InL' ctx op r)) = memo x $
+  do new <- iAccumulate' l; accumulateCtx (InNum r (V :/\ InR' new op ctx))
+accumulateCtx x@(InNum (P :/\ r) (V :/\ InR' l op ctx)) = memo x $
+  do new <- iAccumulate' r; accumulateCtx (InNum l (V :/\ InL' ctx op new))
 
   -- recur
-accumulateCtx (InBool il ctx) = do il' <- accumulate (sSnd il)
-                                   accumulateCtx (InBool il' ctx)
-accumulateCtx (InNum il ctx) = do il' <- iAccumulate' (sSnd il)
-                                  accumulateCtx (InNum il' ctx)
+  -- bools
+accumulateCtx x@(InBool (V :/\ BOp op e) ctx)              = memo x $ accumulateCtx (InBool e (V :/\ InU op ctx))
+accumulateCtx x@(InBool (V :/\ BBOp op l@(P :/\ _) r) ctx) = memo x $ accumulateCtx (InBool l (V :/\ InL ctx op r))
+accumulateCtx x@(InBool (V :/\ BBOp op l r@(P :/\ _)) ctx) = memo x $ accumulateCtx (InBool r (V :/\ InR l op ctx))
+  -- on the general case prefer the left side
+accumulateCtx x@(InBool (V :/\ BBOp op l r) ctx) = memo x $ accumulateCtx (InBool l (V :/\ InL ctx op r))
+  -- inequalities
+accumulateCtx x@(InNum (V :/\ IOp op e) ctx)               = memo x $ accumulateCtx (InNum e (V :/\ InU' op ctx))
+accumulateCtx x@(InBool (V :/\ IBOp op l@(P :/\ _) r) ctx) = memo x $ accumulateCtx (InNum l (V :/\ InLB ctx op r))
+accumulateCtx x@(InBool (V :/\ IBOp op l r@(P :/\ _)) ctx) = memo x $ accumulateCtx (InNum r (V :/\ InRB l op ctx))
+accumulateCtx x@(InBool (V :/\ IBOp op l r) ctx)           = memo x $ accumulateCtx (InNum l (V :/\ InLB ctx op r))
+  -- numerics
+accumulateCtx x@(InNum (V :/\ IIOp op l@(P :/\ _) r) ctx) = memo x $ accumulateCtx (InNum l (V :/\ InL' ctx op r))
+accumulateCtx x@(InNum (V :/\ IIOp op l r@(P :/\ _)) ctx) = memo x $ accumulateCtx (InNum r (V :/\ InR' l op ctx))
+accumulateCtx x@(InNum (V :/\ IIOp op l r) ctx)           = memo x $ accumulateCtx (InNum l (V :/\ InL' ctx op r))
+
+accumulateCtx x = error $ "an impossible case happened" ++ show x
 
 store ::
   ( R.MonadReader State io
