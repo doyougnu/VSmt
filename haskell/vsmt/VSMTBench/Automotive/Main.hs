@@ -147,9 +147,9 @@ main = do
         -- , mkBench "v-->v" "V3" d3Conf (solve Nothing ss) (unPlain bPropV3)
         -- , mkBench "v-->v" "V4" d4Conf (solve Nothing ss) (unPlain bPropV4)
         -- , mkBench "v-->v" "V1"           justV1Conf   (solve Nothing ss) bPropJustV1
-        -- , mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
+          mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
         -- , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve Nothing ss) bPropJustV123
-          mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
+        -- , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
 
        -- p - v
         -- , mkBench'' "p-->v" "V1"  pOnV $ pure bPropV1
@@ -165,7 +165,7 @@ main = do
         -- , mkBench'' "p-->p" "V2"  pOnP $ pure bPropV2
         -- , mkBench'' "p-->p" "V3"  pOnP $ pure bPropV3
         -- , mkBench'' "p-->p" "V4"  pOnP $ pure bPropV4
-        -- , mkBench'' "p-->p" "V1*V2"        pOnP v12Variants
+        , mkBench'' "p-->p" "V1*V2"        pOnP v12Variants
         -- , mkBench'' "p-->p" "V1*V2*V3"     pOnP v123Variants
         -- , mkBench'' "p-->p" "V1*V2*V3*V4" pOnP allVariants
 
@@ -215,21 +215,21 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  diagnostics "raw_data/auto_diagnostics_withfix.csv" defSettings
+  -- diagnostics "raw_data/auto_diagnostics_withfix.csv" defSettings
 
   defaultMain $
     [  bgroup "Z3" (benches defSettings)
     --   bgroup "Z3" (compRatioBenches z3DefConf)
     ]
 
-  let t = bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") -- &&&  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
+  -- let t = bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") <+>  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bnot $ bRef "one") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
   -- let t = (bChc "AA" (bRef "a") (bRef "b" ||| bRef "c")) ||| bRef "d"
   -- putStrLn $ show $ bProp
   -- let t = bChc "AA" (bRef "Aleft") (bRef "two" ==> bRef "Aright" ||| bRef "one")  -- &&& bRef "two"
-  _ <- solveVerbose Nothing defWithModels t
-  !res <- solveGetDiag Nothing defWithModels t
-  putStrLn $ show res
+  -- _ <- solveVerbose Nothing defWithModels (bnot $ bnot t)
+  -- !res <- solveGetDiag Nothing defWithModels t
+  -- putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing

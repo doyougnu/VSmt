@@ -208,7 +208,7 @@ vsmtIsSoundBools (unOnlyBools -> p) = noNestedChoices p && isVariational p QC.==
     liftIO $ putStrLn "--------------------- Start  -----------------------------------"
     liftIO $ T.putStrLn $ "Proposition: " <> pretty p
     plainRes <- liftIO $! filter sSnd <$> vOnPByConfig p
-    !res    <- liftIO $! unCounter . fSatCnt . sSnd <$> solveGetDiag Nothing defSettings p
+    !res    <- liftIO $! unCounter . fSatCnt <$> solveGetDiag Nothing defSettings p
     !res2    <- liftIO $! getSatisfiableVCs <$> solve Nothing defSettings p
     liftIO $! putStrLn $ "Variational Result: " <> show res               <> "\n"
     liftIO $! putStrLn $ "Variational Model: " <> show (length res2)               <> "\n"
