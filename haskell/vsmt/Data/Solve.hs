@@ -55,7 +55,6 @@ import           Control.Monad.Trans                   (MonadIO, MonadTrans,
 import qualified Data.HashMap.Strict                   as Map
 import           Data.Maybe                            (fromJust)
 import           Data.Hashable                         (Hashable)
--- import           Data.Monoid                           (Sum(..))
 
 import qualified Z3.Monad                              as Z ( AST
                                                             , MonadZ3
@@ -924,6 +923,7 @@ isUnit (VarCore Unit) = True
 isUnit _              = False
 
 dispatchDOp :: Z.MonadZ3 z3 => BB_B -> SDimension -> SDimension -> z3 SDimension
+{-# INLINE dispatchDOp #-}
 dispatchDOp And  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkAnd     [l,r]
 dispatchDOp Or   (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkOr      [l,r]
 dispatchDOp Impl (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkImplies  l r
@@ -931,6 +931,7 @@ dispatchDOp Eqv  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkEq
 dispatchDOp XOr  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkXor      l r
 
 dispatchOp :: Z.MonadZ3 z3 => BB_B -> SBool -> SBool -> z3 SBool
+{-# INLINE dispatchOp #-}
 dispatchOp And  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkAnd     [l,r]
 dispatchOp Or   (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkOr      [l,r]
 dispatchOp Impl (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkImplies  l r
@@ -938,12 +939,14 @@ dispatchOp Eqv  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkEq       l r
 dispatchOp XOr  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkXor      l r
 
 dispatchUOp' :: Z.MonadZ3 z3 => N_N -> NRef -> z3 NRef
+{-# INLINE dispatchUOp' #-}
 dispatchUOp' Neg  (SI i) = SI . SInteger <$> Z.mkUnaryMinus (unSInteger i)
 dispatchUOp' Neg  (SD d) = SD . SDouble  <$> Z.mkUnaryMinus (unSDouble  d)
 dispatchUOp' Abs  _ = error "absolute value not implemented yet!"
 dispatchUOp' Sign _ = error "signum not implemented yet!"
 
 dispatchIOp' :: Z.MonadZ3 z3 => NN_N -> NRef -> NRef -> z3 NRef
+{-# INLINE dispatchIOp' #-}
 dispatchIOp' Add (SI l) (SI r)  = SI . SInteger <$> Z.mkAdd [unSInteger l, unSInteger r]
 dispatchIOp' Add (SD l) (SI r)  = SD . SDouble <$> Z.mkAdd  [unSDouble  l, unSInteger r]
 dispatchIOp' Add (SI l) (SD r)  = SD . SDouble <$> Z.mkAdd  [unSInteger l, unSDouble r]
@@ -970,14 +973,17 @@ dispatchIOp' Mod (SI l) (SD r)  = SD . SDouble <$> Z.mkMod  (unSInteger l) (unSD
 dispatchIOp' Mod (SD l) (SD r)  = SD . SDouble <$> Z.mkMod  (unSDouble l)  (unSDouble r)
 
 mkEq :: Z.MonadZ3 z3 => Z.AST -> Z.AST -> z3 Z.AST
+{-# INLINE mkEq #-}
 mkEq x y = do a <- Z.mkGe x y
               b <- Z.mkLe x y
               Z.mkAnd [a,b]
 
 mkNEq :: Z.MonadZ3 z3 => Z.AST -> Z.AST -> z3 Z.AST
+{-# INLINE mkNEq #-}
 mkNEq x y = Z.mkEq x y >>= Z.mkNot
 
 dispatchOp' :: Z.MonadZ3 z3 => NN_B -> NRef -> NRef -> z3 SBool
+{-# INLINE dispatchOp' #-}
 dispatchOp' LT  (SI l) (SI r) = SBool <$> Z.mkLt (unSInteger l)  (unSInteger r)
 dispatchOp' LT  (SD l) (SI r) = SBool <$> Z.mkLt (unSDouble  l)  (unSInteger r)
 dispatchOp' LT  (SI l) (SD r) = SBool <$> Z.mkLt (unSInteger l)  (unSDouble  r)
@@ -1017,15 +1023,20 @@ accumulate :: ( Z.MonadZ3 z3
               , MonadReader State z3
               , MonadLogger z3
               ) => IL -> z3 (V :/\ IL)
+{-# INLINE accumulate #-}
+{-# SPECIALIZE accumulate :: IL -> Solver (V :/\ IL) #-}
  -- computation rules
 accumulate Unit    = return (P :/\ Unit)
 accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
-accumulate x@(BOp Not (_ :/\ Ref r))  = memo x $! (P :/\ ) . Ref <$> sNot r
-accumulate x@(BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = memo x $! (P :/\ ) . Ref <$> dispatchOp op l r
+accumulate (BOp Not (_ :/\ Ref r))  =  -- memo x $!
+  (P :/\ ) . Ref <$> sNot r
+accumulate (BBOp op (_ :/\ Ref l) (_ :/\ Ref r)) = -- memo x $!
+  (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate x@(IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo x $ (P :/\ ) . Ref <$> dispatchOp' op l r
+accumulate (IBOp op (_ :/\ Ref' l) (_ :/\ Ref' r)) = -- memo x
+  (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
 accumulate x@(BBOp _ (_ :/\ Ref _)   (_ :/\ Chc {}))  = return (V :/\ x)
@@ -1034,36 +1045,36 @@ accumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-accumulate x@(BOp Not (P :/\ e)) = memo x $!
+accumulate (BOp Not (P :/\ e)) =  -- memo x $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp Not (P :/\ e')
      accumulate res
 
-accumulate x@(BOp Not (V :/\ e)) = memo x $!
+accumulate (BOp Not (V :/\ e)) =  -- memo x $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp Not (V :/\ e')
      return (V :/\ res)
 
-accumulate x@(BBOp op (P :/\ l) (P :/\ r)) = memo x $!
+accumulate (BBOp op (P :/\ l) (P :/\ r)) =  -- memo x $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
      let !res = BBOp op (P :/\ l') (P :/\ r')
      logInProducerWith "accumulating two refs: " res
      accumulate res
 
-accumulate x@(BBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
+accumulate (BBOp op (_ :/\ l) (_ :/\ r)) =  -- memo x $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
      let !res  = BBOp op (vl :/\ l') (vr :/\ r')
      return (vl <@> vr :/\ res)
 
-accumulate x@(IBOp op (P :/\ l) (P :/\ r)) = memo x $!
+accumulate (IBOp op (P :/\ l) (P :/\ r)) =  -- memo x $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
      let !res = IBOp op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate x@(IBOp op (_ :/\ l) (_ :/\ r)) = memo x $!
+accumulate (IBOp op (_ :/\ l) (_ :/\ r)) =  -- memo x $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp op a b
@@ -1107,15 +1118,6 @@ toSolver :: (Monad m, Z.MonadZ3 m, MonadLogger m, R.MonadReader State m) => SBoo
 {-# INLINE toSolver #-}
 toSolver (unSBool -> a) = do Z.assert a; logInProducerWith "Solver knows about: " a; return $! intoCore Unit
 
-isValue :: IL -> Bool
-isValue Unit    = True
-isValue (Ref _) = True
-isValue _       = False
-
-isValue' :: IL' -> Bool
-isValue' (Ref' _) = True
-isValue' _        = False
-
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
@@ -1125,6 +1127,8 @@ evaluate :: ( MonadLogger z3
             , MonadReader State z3
             , Cacheable   z3 IL (V :/\ IL)
             ) => IL -> z3 VarCore
+{-# INLINE evaluate #-}
+{-# SPECIALIZE evaluate :: IL -> Solver VarCore #-}
 evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
@@ -1222,6 +1226,7 @@ getVofCtx Top                           = P
 -- traversal of the context. Note that we can never go from P --> V thus we only
 -- need enough from one direction.
 updateCtxVs ::  Ctx -> V -> Ctx
+{-# INLINE updateCtxVs #-}
 updateCtxVs Top                                 _ = Top
 updateCtxVs (InL (_ :/\ parent) o r@(P :/\ _))  P = InL (P :/\ updateCtxVs parent P) o r
 updateCtxVs (InR r@(P :/\ _) o (_ :/\ parent))  P = InR r o (P :/\ updateCtxVs parent P)
@@ -1247,6 +1252,7 @@ toLocWith' a@InRB{} il = InNum  il (getVofCtx a :/\ a)
 toLocWith' a        _  = error $ "Creating Loc' with " ++ show a
 
 toLoc :: IL -> Loc
+{-# INLINE toLoc #-}
 toLoc i = toLocWith Top  (getVofIL i :/\ i)
 
 findChoice :: ( Z.MonadZ3 z3
@@ -1254,6 +1260,8 @@ findChoice :: ( Z.MonadZ3 z3
               , MonadLogger z3
               , MonadReader State z3
               ) => Loc -> z3 Loc
+{-# INLINE findChoice #-}
+{-# SPECIALIZE findChoice :: Loc -> Solver Loc #-}
   -- base cases
 findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ Top)) = return x
 findChoice x@(InBool (_ :/\ Unit) (_ :/\ Top))  = return x
@@ -1272,7 +1280,7 @@ findChoice (InBool (v :/\ BBOp op l@(V :/\ _) r@(P :/\ _)) ctx) =
 findChoice (InBool (v :/\ BBOp op l@(P :/\ _) r@(V :/\ _)) ctx) =
   findChoice (InBool r (v :/\ InR l op ctx))
   -- when both V prefer the left side
-findChoice (InBool (v :/\ BBOp op l@(V :/\ _) r@(V :/\ _)) ctx) =
+findChoice (InBool (v :/\ BBOp op l r) ctx) =
   findChoice (InBool l (v :/\ InL ctx op r))
 
   -- relational cases
@@ -1333,6 +1341,8 @@ accumulateCtx ::
   , Cacheable   z3 IL (V :/\ IL)
   , Cacheable   z3 Loc Loc
   ) => Loc -> z3 Loc
+{-# INLINE accumulateCtx #-}
+{-# SPECIALIZE accumulateCtx :: Loc -> Solver Loc #-}
   -- base cases, labels are out of sync here due to configuring choices so we
   -- have to rely on values
 accumulateCtx x@(InBool (_ :/\ Ref{}) (_ :/\ Top)) = return x
@@ -1342,59 +1352,59 @@ accumulateCtx x@(InNum  (_ :/\ Chc'{}) _)  = return x
 
   -- computation rules
   -- unary cases
-accumulateCtx x@(InBool r@(P :/\ _) (_ :/\ InU op ctx)) = memo x $
+accumulateCtx (InBool r@(P :/\ _) (_ :/\ InU op ctx)) =
   do new <- accumulate (BOp op r); accumulateCtx (InBool new ctx)
-accumulateCtx x@(InNum r@(P :/\ _) (_ :/\ InU' op ctx)) = memo x $
+accumulateCtx (InNum r@(P :/\ _) (_ :/\ InU' op ctx)) =
   do new <- iAccumulate' (IOp op r); accumulateCtx (InNum new ctx)
   -- bool cases
-accumulateCtx x@(InBool l@(P :/\ _) (P :/\ InL ctx op r)) = memo x $
+accumulateCtx (InBool l@(P :/\ _) (P :/\ InL ctx op r)) =
   do new <- accumulate (BBOp op l r); accumulateCtx (InBool new ctx)
-accumulateCtx x@(InBool r@(P :/\ _) (P :/\ InR l op ctx)) = memo x $
+accumulateCtx (InBool r@(P :/\ _) (P :/\ InR l op ctx)) =
   do new <- accumulate (BBOp op l r); accumulateCtx (InBool new ctx)
   -- inequalities
-accumulateCtx x@(InNum l@(P :/\ _) (P :/\ InLB ctx op r)) = memo x $
+accumulateCtx (InNum l@(P :/\ _) (P :/\ InLB ctx op r)) =
   do new <- accumulate (IBOp op l r); accumulateCtx (InBool new ctx)
-accumulateCtx x@(InNum r@(P :/\ _) (P :/\ InRB l op ctx)) = memo x $
+accumulateCtx (InNum r@(P :/\ _) (P :/\ InRB l op ctx)) =
   do new <- accumulate (IBOp op l r); accumulateCtx (InBool new ctx)
   -- numerics
-accumulateCtx x@(InNum l@(P :/\ _) (P :/\ InL' ctx op r)) = memo x $
+accumulateCtx (InNum l@(P :/\ _) (P :/\ InL' ctx op r)) =
   do new <- iAccumulate' (IIOp op l r); accumulateCtx (InNum new ctx)
-accumulateCtx x@(InNum r@(P :/\ _) (P :/\ InR' l op ctx)) = memo x $
+accumulateCtx (InNum r@(P :/\ _) (P :/\ InR' l op ctx)) =
   do new <- iAccumulate' (IIOp op l r); accumulateCtx (InNum new ctx)
 
   -- switch, if we get here then we can't accumulate more on this branch
   -- bools
-accumulateCtx x@(InBool (P :/\ l) (V :/\ InL ctx op r)) = memo x $
+accumulateCtx (InBool (P :/\ l) (V :/\ InL ctx op r)) = -- memo x $
   do new <- accumulate l; accumulateCtx (InBool r (V :/\ InR new op ctx))
-accumulateCtx x@(InBool (P :/\ r) (V :/\ InR l op ctx)) = memo x $
+accumulateCtx (InBool (P :/\ r) (V :/\ InR l op ctx)) = -- memo x $
   do new <- accumulate r; accumulateCtx (InBool l (V :/\ InL ctx op new))
   -- inequalities
-accumulateCtx x@(InNum (P :/\ l) (V :/\ InLB ctx op r)) = memo x $
+accumulateCtx (InNum (P :/\ l) (V :/\ InLB ctx op r)) =
   do new <- iAccumulate' l; accumulateCtx (InNum r (V :/\ InRB new op ctx))
-accumulateCtx x@(InNum (P :/\ r) (V :/\ InRB l op ctx)) = memo x $
+accumulateCtx (InNum (P :/\ r) (V :/\ InRB l op ctx)) =
   do new <- iAccumulate' r; accumulateCtx (InNum l (V :/\ InLB ctx op new))
   -- numerics
-accumulateCtx x@(InNum (P :/\ l) (V :/\ InL' ctx op r)) = memo x $
+accumulateCtx (InNum (P :/\ l) (V :/\ InL' ctx op r)) =
   do new <- iAccumulate' l; accumulateCtx (InNum r (V :/\ InR' new op ctx))
-accumulateCtx x@(InNum (P :/\ r) (V :/\ InR' l op ctx)) = memo x $
+accumulateCtx (InNum (P :/\ r) (V :/\ InR' l op ctx)) =
   do new <- iAccumulate' r; accumulateCtx (InNum l (V :/\ InL' ctx op new))
 
   -- recur
   -- bools
-accumulateCtx x@(InBool (V :/\ BOp op e) ctx)              = memo x $ accumulateCtx (InBool e (V :/\ InU op ctx))
-accumulateCtx x@(InBool (V :/\ BBOp op l@(P :/\ _) r) ctx) = memo x $ accumulateCtx (InBool l (V :/\ InL ctx op r))
-accumulateCtx x@(InBool (V :/\ BBOp op l r@(P :/\ _)) ctx) = memo x $ accumulateCtx (InBool r (V :/\ InR l op ctx))
+accumulateCtx (InBool (V :/\ BOp op e) ctx)              = accumulateCtx (InBool e (V :/\ InU op ctx))
+accumulateCtx (InBool (V :/\ BBOp op l@(P :/\ _) r) ctx) = accumulateCtx (InBool l (V :/\ InL ctx op r))
+accumulateCtx (InBool (V :/\ BBOp op l r@(P :/\ _)) ctx) = accumulateCtx (InBool r (V :/\ InR l op ctx))
   -- on the general case prefer the left side
-accumulateCtx x@(InBool (V :/\ BBOp op l r) ctx) = memo x $ accumulateCtx (InBool l (V :/\ InL ctx op r))
+accumulateCtx (InBool (V :/\ BBOp op l r) ctx) = accumulateCtx (InBool l (V :/\ InL ctx op r))
   -- inequalities
-accumulateCtx x@(InNum (V :/\ IOp op e) ctx)               = memo x $ accumulateCtx (InNum e (V :/\ InU' op ctx))
-accumulateCtx x@(InBool (V :/\ IBOp op l@(P :/\ _) r) ctx) = memo x $ accumulateCtx (InNum l (V :/\ InLB ctx op r))
-accumulateCtx x@(InBool (V :/\ IBOp op l r@(P :/\ _)) ctx) = memo x $ accumulateCtx (InNum r (V :/\ InRB l op ctx))
-accumulateCtx x@(InBool (V :/\ IBOp op l r) ctx)           = memo x $ accumulateCtx (InNum l (V :/\ InLB ctx op r))
+accumulateCtx (InNum (V :/\ IOp op e) ctx)               = accumulateCtx (InNum e (V :/\ InU' op ctx))
+accumulateCtx (InBool (V :/\ IBOp op l@(P :/\ _) r) ctx) = accumulateCtx (InNum l (V :/\ InLB ctx op r))
+accumulateCtx (InBool (V :/\ IBOp op l r@(P :/\ _)) ctx) = accumulateCtx (InNum r (V :/\ InRB l op ctx))
+accumulateCtx (InBool (V :/\ IBOp op l r) ctx)           = accumulateCtx (InNum l (V :/\ InLB ctx op r))
   -- numerics
-accumulateCtx x@(InNum (V :/\ IIOp op l@(P :/\ _) r) ctx) = memo x $ accumulateCtx (InNum l (V :/\ InL' ctx op r))
-accumulateCtx x@(InNum (V :/\ IIOp op l r@(P :/\ _)) ctx) = memo x $ accumulateCtx (InNum r (V :/\ InR' l op ctx))
-accumulateCtx x@(InNum (V :/\ IIOp op l r) ctx)           = memo x $ accumulateCtx (InNum l (V :/\ InL' ctx op r))
+accumulateCtx (InNum (V :/\ IIOp op l@(P :/\ _) r) ctx) = accumulateCtx (InNum l (V :/\ InL' ctx op r))
+accumulateCtx (InNum (V :/\ IIOp op l r@(P :/\ _)) ctx) = accumulateCtx (InNum r (V :/\ InR' l op ctx))
+accumulateCtx (InNum (V :/\ IIOp op l r) ctx)           = accumulateCtx (InNum l (V :/\ InL' ctx op r))
 
 accumulateCtx x = error $ "an impossible case happened" ++ show x
 
@@ -1404,6 +1414,8 @@ store ::
   , MonadLogger         io
   , Z.MonadZ3           io
   ) => Result -> io ()
+{-# INLINE store #-}
+{-# SPECIALIZE store :: Result -> Solver () #-}
 store r = do
   logInProducerWith "Storing result: " r
   asks (unResults . results)
@@ -1411,6 +1423,7 @@ store r = do
 
 -- | TODO newtype this maybe stuff, this is an alternative instance
 mergeVC :: Maybe VariantContext -> Maybe VariantContext -> Maybe VariantContext
+{-# INLINE mergeVC #-}
 mergeVC Nothing Nothing    = Nothing
 mergeVC a@(Just _) Nothing = a
 mergeVC Nothing b@(Just _) = b
@@ -1496,7 +1509,7 @@ removeChoices (VarCore Unit) = do !vC <- reads vConfig
                                   if b then succSatCnt else succUnSatCnt
                                   store r
 removeChoices (VarCore x@(Ref _)) = do _ <- evaluate x; removeChoices (VarCore Unit)
-removeChoices (VarCore l) = choose (toLoc l)
+removeChoices (VarCore l) = findChoice (toLoc l) >>= choose
 
 choose ::
   ( MonadLogger m
@@ -1507,8 +1520,8 @@ choose (InBool (_ :/\ l@Ref{}) _) = logInProducer "Choosing all done" >>
                                     evaluate l >>= removeChoices
 choose loc =
   do
-    loc' <- findChoice loc
-    case loc' of
+    -- loc' <- findChoice loc
+    case loc of
       (InBool (_ :/\ Chc d cl cr) (_ :/\ ctx)) -> do
         conf <- reads config
         -- we'd like to evaluate after IL but this makes the async harder so we
