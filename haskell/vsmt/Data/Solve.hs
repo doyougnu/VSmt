@@ -1217,6 +1217,20 @@ getVofCtx (InLB  (l :/\ _) _ (r :/\ _)) = l <@> r
 getVofCtx (InRB  (l :/\ _) _ (r :/\ _)) = l <@> r
 getVofCtx Top                           = P
 
+-- | When we configure a choice the focus may go from V --> P, thus we will need
+-- to update the zipper context accordingly. This should only be a log n
+-- traversal of the context. Note that we can never go from P --> V thus we only
+-- need enough from one direction.
+updateCtxVs ::  Ctx -> V -> Ctx
+updateCtxVs Top                                 _ = Top
+updateCtxVs (InL (_ :/\ parent) o r@(P :/\ _))  P = InL (P :/\ updateCtxVs parent P) o r
+updateCtxVs (InR r@(P :/\ _) o (_ :/\ parent))  P = InR r o (P :/\ updateCtxVs parent P)
+updateCtxVs (InU o (_ :/\ parent))              P = InU o (P :/\ updateCtxVs parent P)
+updateCtxVs (InL' (_ :/\ parent) o r@(P :/\ _)) P = InL' (P :/\ updateCtxVs parent P) o r
+updateCtxVs (InR' r@(P :/\ _) o (_ :/\ parent)) P = InR' r o (P :/\ updateCtxVs parent P)
+updateCtxVs (InU' o (_ :/\ parent))             P = InU' o (P :/\ updateCtxVs parent P)
+updateCtxVs ctx                                 _ = ctx
+
 toLocWith :: Ctx -> (V :/\ IL) -> Loc
 toLocWith Top     il = InBool il (P :/\ Top)
 toLocWith a@InL{} il = InBool il (getVofCtx a :/\ a)
@@ -1489,8 +1503,12 @@ choose loc =
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
-        let goLeft  = toIL cl >>= accumulate . sSnd >>= accumulateCtx . toLocWith ctx >>= findChoice >>= choose
-            goRight = toIL cr >>= accumulate . sSnd >>= accumulateCtx . toLocWith ctx >>= findChoice >>= choose
+        let goLeft  = do i@(v :/\ _) <- toIL cl >>= accumulate . sSnd
+                         let lCtx = updateCtxVs ctx v
+                         accumulateCtx (toLocWith lCtx i) >>= findChoice >>= choose
+            goRight = do i@(v :/\ _) <- toIL cr >>= accumulate . sSnd
+                         let rCtx = updateCtxVs ctx v
+                         accumulateCtx (toLocWith rCtx i) >>= findChoice >>= choose
 
         case find d conf of
           Just True  -> goLeft
