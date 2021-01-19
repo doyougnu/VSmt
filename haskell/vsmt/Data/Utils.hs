@@ -10,6 +10,7 @@
 -----------------------------------------------------------------------------
 
 {-# OPTIONS_GHC -Wall -Werror -fno-warn-orphans #-}
+{-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE TypeOperators        #-}
 {-# LANGUAGE TupleSections        #-}
@@ -19,8 +20,10 @@ module Utils where
 import qualified Control.Monad.State as St
 import qualified Data.Map            as M
 import qualified Data.SBV            as S
+import qualified Data.SBV.Control    as SC
 import           Data.SBV.Internals  (cvToBool)
 
+import           Control.Monad       (foldM)
 import           Data.String         (IsString (..))
 import           Data.List           (nub)
 import           Data.Text           (pack)
@@ -186,3 +189,26 @@ vOnPByConfig p = do
   putStrLn $ "Variants: " ++ show variants ++ "\n"
   putStrLn $ "Filtered Variants: " ++ show (nub variants) ++ "\n"
   Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs (nub variants)
+
+z3SatNoIncremental :: Int -> IO Z.Result
+z3SatNoIncremental i = Z.evalZ3 $
+                       mapM (Z.mkFreshBoolVar . show) [0..i]
+                       >>= Z.mkAnd >>= Z.assert >> Z.check
+
+z3SatInc :: Int -> IO Z.Result
+z3SatInc i = Z.evalZ3 $
+             Z.local $
+             mapM (Z.mkFreshBoolVar . show) [0..i]
+             >>= Z.mkAnd >>= Z.assert >> Z.check
+
+
+sbvSatInc :: Int -> IO S.SatResult
+sbvSatInc i = S.sat $
+             SC.query $ do bs <- mapM (SC.freshVar . show) [0..i]
+                           let go !x !acc = return $ x S..&& acc
+                           foldM go S.sTrue bs >>= S.constrain
+
+sbvSat :: Int -> IO S.SatResult
+sbvSat i = S.sat $ do bs <- mapM (S.sBool . show) [0..i]
+                      let go !x !acc = return $ x S..&& acc
+                      foldM go S.sTrue bs >>= S.constrain
