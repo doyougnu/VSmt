@@ -8,8 +8,8 @@ finResultsFile  <- "../munged_data/financial.csv"
 autoResultsFile <- "../munged_data/auto.csv"
 finDiag         <- read.csv(file="../munged_data/financial_diagnostics.csv") %>% mutate(data = "Fin")
 autoDiag        <- read.csv(file="../munged_data/auto_diagnostics.csv") %>% mutate(data = "Auto")
-## finRawFile <- "../data/fin_rq3_singletons.csv"
-## autoRawFile <- "../data/auto_rq3_singletons.csv"
+finRawFile <- "../data/fin_rq3_singletons.csv"
+autoRawFile <- "../data/auto_rq3_singletons.csv"
 
 finData <- read.csv(file=finResultsFile) %>%
   mutate(Algorithm = as.factor(Algorithm), Config = as.factor(Config)) %>%
@@ -39,8 +39,8 @@ breaksRq1 <- function(x) {
   }
 
 rq1 <- ggplot(rq1DF) +
-  geom_line(aes(x=sqrt(Variants), y=Mean, color=Algorithm)) +
-  geom_point(aes(x=sqrt(Variants), y=Mean, shape=Algorithm, color=Algorithm),size=3) +
+  geom_line(aes(x=Variants, y=Mean, color=Algorithm)) +
+  geom_point(aes(x=Variants, y=Mean, shape=Algorithm, color=Algorithm),size=3) +
   scale_shape_manual(values = c(1,6,5,17)) +
   facet_wrap(. ~ data, scales = "free") +
   theme_classic() +
