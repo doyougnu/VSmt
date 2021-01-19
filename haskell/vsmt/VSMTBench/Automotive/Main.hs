@@ -7,7 +7,7 @@ import           Gauge
 import           Data.Aeson              (decodeStrict, encodeFile)
 import           Data.Either             (lefts, rights)
 import qualified Data.ByteString         as BS (readFile, writeFile)
-import qualified Data.Text.IO            as T (writeFile, appendFile)
+import qualified Data.Text.IO            as T (writeFile, appendFile,putStrLn)
 import           Text.Megaparsec         (parse)
 import           Data.Maybe              (fromJust)
 -- import Control.Monad
@@ -17,8 +17,10 @@ import           Bench.Core
 import           Settings
 import           Core.Types
 import           Core.Core
+import           Core.Utils
+import           Core.Pretty
 import           Utils
-import           Solve (solveVerbose, solve,solveGetDiag)
+import           Solve (solveVerbose, solve,solveGetDiag,solveForCore,getCore)
 
 import           Lang
 import           Auto
@@ -217,10 +219,10 @@ main = do
 
   -- diagnostics "raw_data/auto_diagnostics_withfix.csv" defSettings
 
-  defaultMain $
-    [  bgroup "Z3" (benches defSettings)
-    --   bgroup "Z3" (compRatioBenches z3DefConf)
-    ]
+  -- defaultMain $
+  --   [  bgroup "Z3" (benches defSettings)
+  --   --   bgroup "Z3" (compRatioBenches z3DefConf)
+  --   ]
 
   -- let t = bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") <+>  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bnot $ bRef "one") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
@@ -228,8 +230,8 @@ main = do
   -- putStrLn $ show $ bProp
   -- let t = bChc "AA" (bRef "Aleft") (bRef "two" ==> bRef "Aright" ||| bRef "one")  -- &&& bRef "two"
   -- _ <- solveVerbose Nothing defWithModels (bnot $ bnot t)
-  -- !res <- solveGetDiag Nothing defWithModels t
-  -- putStrLn $ show res
+  !res <- getCore . sFst <$> solveForCore bProp
+  T.putStrLn $ pretty res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
   -- solveForCoreVerbose bProp Nothing
