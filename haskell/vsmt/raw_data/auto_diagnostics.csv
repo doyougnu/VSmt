@@ -1,5 +1,8 @@
-Algorithm,Config,Variants,SatCount,UnSatCount,CacheHits,CacheMiss
-v-->v,V1,2,2,0,95555,706
-v-->v,V1*V2,4,4,0,198052,678
-v-->v,V1*V2*V3,8,8,0,396400,741
-v-->v,V1*V2*V3*V4,16,16,0,796194,678
+v-->v,V1,2,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
+2,0,0,0
+v-->v,V1*V2,4,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
+3,1,0,0
+v-->v,V1*V2*V3,8,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
+4,4,0,0
+v-->v,V1*V2*V3*V4,16,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
+5,11,0,0
