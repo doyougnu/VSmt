@@ -13,7 +13,6 @@
 {-# LANGUAGE BangPatterns         #-}
 {-# LANGUAGE FlexibleInstances    #-}
 {-# LANGUAGE TypeOperators        #-}
-{-# LANGUAGE TupleSections        #-}
 
 module Utils where
 
@@ -190,10 +189,10 @@ vOnPByConfig p = do
   putStrLn $ "Filtered Variants: " ++ show (nub variants) ++ "\n"
   Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs (nub variants)
 
-z3SatNoIncremental :: Int -> IO Z.Result
-z3SatNoIncremental i = Z.evalZ3 $
-                       mapM (Z.mkFreshBoolVar . show) [0..i]
-                       >>= Z.mkAnd >>= Z.assert >> Z.check
+z3Sat :: Int -> IO Z.Result
+z3Sat i = Z.evalZ3 $
+          mapM (Z.mkFreshBoolVar . show) [0..i]
+          >>= Z.mkAnd >>= Z.assert >> Z.check
 
 z3SatInc :: Int -> IO Z.Result
 z3SatInc i = Z.evalZ3 $
@@ -202,11 +201,15 @@ z3SatInc i = Z.evalZ3 $
              >>= Z.mkAnd >>= Z.assert >> Z.check
 
 
-sbvSatInc :: Int -> IO S.SatResult
-sbvSatInc i = S.sat $
+sbvSatInc :: Int -> IO Bool
+sbvSatInc i = S.runSMT $
              SC.query $ do bs <- mapM (SC.freshVar . show) [0..i]
                            let go !x !acc = return $ x S..&& acc
                            foldM go S.sTrue bs >>= S.constrain
+                           c <- SC.checkSat
+                           return $ case c of
+                                      SC.Sat -> True
+                                      _      -> False
 
 sbvSat :: Int -> IO S.SatResult
 sbvSat i = S.sat $ do bs <- mapM (S.sBool . show) [0..i]
