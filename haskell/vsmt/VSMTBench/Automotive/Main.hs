@@ -142,41 +142,41 @@ main = do
   let benches :: Settings -> [Benchmark]
       benches ss = [
         -- v - v
-        -- mkBench   "v-->v" "V1" d1Conf (solve Nothing ss) (unPlain bPropV1)
-        -- , mkBench "v-->v" "V2" d2Conf (solve Nothing ss) (unPlain bPropV2)
-        -- , mkBench "v-->v" "V3" d3Conf (solve Nothing ss) (unPlain bPropV3)
-        -- , mkBench "v-->v" "V4" d4Conf (solve Nothing ss) (unPlain bPropV4)
-        -- , mkBench "v-->v" "V1"           justV1Conf   (solve Nothing ss) bPropJustV1
-          mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
-        -- , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve Nothing ss) bPropJustV123
-        -- , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
+        mkBench   "v-->v" "V1" d1Conf (solve Nothing ss) (unPlain bPropV1)
+        , mkBench "v-->v" "V2" d2Conf (solve Nothing ss) (unPlain bPropV2)
+        , mkBench "v-->v" "V3" d3Conf (solve Nothing ss) (unPlain bPropV3)
+        , mkBench "v-->v" "V4" d4Conf (solve Nothing ss) (unPlain bPropV4)
+        , mkBench "v-->v" "V1"           justV1Conf   (solve Nothing ss) bPropJustV1
+        , mkBench "v-->v" "V1*V2"        justV12Conf  (solve Nothing ss) bPropJustV12
+        , mkBench "v-->v" "V1*V2*V3"     justV123Conf (solve Nothing ss) bPropJustV123
+        , mkBench' "v-->v" "V1*V2*V3*V4"  (solve Nothing ss) bProp
 
        -- p - v
-        -- , mkBench'' "p-->v" "V1"  pOnV $ pure bPropV1
-        -- , mkBench'' "p-->v" "V2"  pOnV $ pure bPropV2
-        -- , mkBench'' "p-->v" "V3"  pOnV $ pure bPropV3
-        -- , mkBench'' "p-->v" "V4"  pOnV $ pure bPropV4
-        -- , mkBench'' "p-->v" "V1*V2"       pOnV v12Variants
-        -- , mkBench'' "p-->v" "V1*V2*V3"    pOnV v123Variants
-        -- , mkBench'' "p-->v" "V1*V2*V3*V4" pOnV allVariants
+        , mkBench'' "p-->v" "V1"  pOnV $ pure bPropV1
+        , mkBench'' "p-->v" "V2"  pOnV $ pure bPropV2
+        , mkBench'' "p-->v" "V3"  pOnV $ pure bPropV3
+        , mkBench'' "p-->v" "V4"  pOnV $ pure bPropV4
+        , mkBench'' "p-->v" "V1*V2"       pOnV v12Variants
+        , mkBench'' "p-->v" "V1*V2*V3"    pOnV v123Variants
+        , mkBench'' "p-->v" "V1*V2*V3*V4" pOnV allVariants
 
        -- p - p
-        -- , mkBench'' "p-->p" "V1"  pOnP $ pure bPropV1
-        -- , mkBench'' "p-->p" "V2"  pOnP $ pure bPropV2
-        -- , mkBench'' "p-->p" "V3"  pOnP $ pure bPropV3
-        -- , mkBench'' "p-->p" "V4"  pOnP $ pure bPropV4
+        , mkBench'' "p-->p" "V1"  pOnP $ pure bPropV1
+        , mkBench'' "p-->p" "V2"  pOnP $ pure bPropV2
+        , mkBench'' "p-->p" "V3"  pOnP $ pure bPropV3
+        , mkBench'' "p-->p" "V4"  pOnP $ pure bPropV4
         , mkBench'' "p-->p" "V1*V2"        pOnP v12Variants
-        -- , mkBench'' "p-->p" "V1*V2*V3"     pOnP v123Variants
-        -- , mkBench'' "p-->p" "V1*V2*V3*V4" pOnP allVariants
+        , mkBench'' "p-->p" "V1*V2*V3"     pOnP v123Variants
+        , mkBench'' "p-->p" "V1*V2*V3*V4" pOnP allVariants
 
         -- v - p
-        -- , mkBench "v-->p" "V1"  justV1Conf vOnP (unPlain bPropV1)
-        -- , mkBench "v-->p" "V2"  justV2Conf vOnP (unPlain bPropV2)
-        -- , mkBench "v-->p" "V3"  justV3Conf vOnP (unPlain bPropV3)
-        -- , mkBench "v-->p" "V4"  justV4Conf vOnP (unPlain bPropV4)
-        -- , mkBench "v-->p" "V1*V2"        justV12Conf vOnP bPropJustV12
-        -- , mkBench "v-->p" "V1*V2*V3"     justV123Conf vOnP bPropJustV123
-        -- , mkBench' "v-->p" "V1*V2*V3*V4"  vOnP bProp
+        , mkBench "v-->p" "V1"  justV1Conf vOnP (unPlain bPropV1)
+        , mkBench "v-->p" "V2"  justV2Conf vOnP (unPlain bPropV2)
+        , mkBench "v-->p" "V3"  justV3Conf vOnP (unPlain bPropV3)
+        , mkBench "v-->p" "V4"  justV4Conf vOnP (unPlain bPropV4)
+        , mkBench "v-->p" "V1*V2"        justV12Conf vOnP bPropJustV12
+        , mkBench "v-->p" "V1*V2*V3"     justV123Conf vOnP bPropJustV123
+        , mkBench' "v-->p" "V1*V2*V3*V4"  vOnP bProp
         ]
 
   let diagnostics :: FilePath -> Settings -> IO ()
@@ -215,7 +215,7 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  -- diagnostics "raw_data/auto_diagnostics_withfix.csv" defSettings
+  diagnostics "raw_data/auto_diagnostics.csv" defSettings
 
   defaultMain $
     [  bgroup "Z3" (benches defSettings)
