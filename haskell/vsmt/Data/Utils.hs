@@ -18,27 +18,24 @@ module Utils where
 
 import qualified Control.Monad.State as St
 import qualified Data.Map            as M
+
 import qualified Data.SBV            as S
 import qualified Data.SBV.Control    as SC
 import           Data.SBV.Internals  (cvToBool)
 
-import           Control.Monad       (foldM)
 import           Data.String         (IsString (..))
 import           Data.List           (nub)
-import           Data.Text           (pack)
 import           Data.Maybe          (fromJust)
-import           Z3.Monad            as Z
 
 import           Core.Types
 import           Core.Core
-import           Core.Result         as R (Result)
+import           Core.Result         as R (getResult,Result)
 import           Core.Utils
 import qualified Solve               as Sl
 import           Settings            (defSettings)
 
 
 type SimpleCache a m b = St.StateT (M.Map a S.SBool) m b
-type SimpleZCache a m b = St.StateT (M.Map a Sl.SBool) m b
 
 genConfigPool :: VariantContext -> IO [PartialConfig]
 genConfigPool p =
@@ -59,6 +56,9 @@ genVariants p =
 evalSBVPlain :: (Show a, Ord a) => Plain (Prop' a) -> S.Symbolic S.SBool
 evalSBVPlain = flip St.evalStateT mempty . evalSBV . unPlain
 
+evalSBVPlainQ :: (Show a, Ord a) => Plain (Prop' a) -> SC.Query S.SBool
+evalSBVPlainQ = flip St.evalStateT mempty . evalSBVQ . unPlain
+
 evalSBV :: (Show a, Ord a) => Prop' a -> SimpleCache a S.Symbolic S.SBool
 evalSBV (LitB True)     = return S.sTrue
 evalSBV (LitB False)    = return S.sFalse
@@ -77,6 +77,26 @@ evalSBV (OpBB op l r)  = do l' <- evalSBV l
 evalSBV ChcB {} = error "no choices here!"
 evalSBV OpIB {} = error "Type Chef throws smt problems?"
 
+evalSBVQ :: (Show a, Ord a) => Prop' a -> SimpleCache a SC.Query S.SBool
+evalSBVQ (LitB True)     = return S.sTrue
+evalSBVQ (LitB False)    = return S.sFalse
+evalSBVQ (RefB b)        = do st <- St.get
+                              case M.lookup b st of
+                                Just x  -> return x
+                                Nothing -> do
+                                  newSym <- St.lift $ SC.freshVar (show b)
+                                  St.modify' (M.insert b newSym)
+                                  return newSym
+evalSBVQ (OpB _ e)       = S.sNot <$> evalSBVQ e
+evalSBVQ (OpBB op l r)  = do l' <- evalSBVQ l
+                             r' <- evalSBVQ r
+                             let o = udispatchop op
+                             return $! o l' r'
+evalSBVQ ChcB {} = error "no choices here!"
+evalSBVQ OpIB {} = error "Type Chef throws smt problems?"
+
+
+
 udispatchop :: Boolean b => BB_B -> b -> b -> b
 udispatchop And  = (&&&)
 udispatchop Or   = (|||)
@@ -85,87 +105,47 @@ udispatchop Eqv  = (<=>)
 udispatchop XOr  = (<+>)
 
 
-runEvalZ3 :: (Show a, Ord a) => Plain (Prop' a) -> Z.Z3 Sl.SBool
-runEvalZ3 = flip St.evalStateT mempty . evalZPlain . unPlain
-
-evalZPlain :: (Show a, Ord a) => Prop' a -> SimpleZCache a Z.Z3 Sl.SBool
-evalZPlain (LitB True)     = St.lift Sl.sTrue
-evalZPlain (LitB False)    = St.lift Sl.sFalse
-evalZPlain (RefB b)        = do st <- St.get
-                                case M.lookup b st of
-                                  Just x  -> return x
-                                  Nothing -> do
-                                    newSym <- St.lift $ Sl.sBool $ pack $ show b
-                                    St.modify' (M.insert b newSym)
-                                    return newSym
-evalZPlain (OpB _ e)       = do e' <- evalZPlain e
-                                St.lift $ Sl.sNot e'
-evalZPlain (OpBB op l r)  = do l' <- evalZPlain l
-                               r' <- evalZPlain r
-                               St.lift $ Sl.dispatchOp op l' r'
-evalZPlain ChcB {} = error "no choices here!"
-evalZPlain OpIB {} = error "Type Chef throws smt problems?"
-
-instance Boolean S.SBool where
-  true  = S.sTrue
-  false = S.sFalse
-  bnot  = S.sNot
-  (&&&) = (S..&&)
-  (|||) = (S..||)
-  (<=>) = (S..<=>)
-  {-# INLINE true #-}
-  {-# INLINE false #-}
-  {-# INLINE (&&&) #-}
-  {-# INLINE (|||) #-}
-  {-# INLINE (<=>) #-}
-
 -- | Plain propositions on the variational solver testing the overhead of
 -- accumulate/evaluate
 pOnV :: [Plain Proposition] -> IO R.Result
 pOnV =  fmap mconcat . mapM (Sl.solve Nothing defSettings) . fmap unPlain
 
 -- | Plain propositions on the plain solver the brute force position
-pOnPModel :: [Plain Proposition] -> IO [Z.Result :/\  String]
+pOnPModel :: [Plain Proposition] -> IO [S.SatResult]
 pOnPModel ps = do
-  let go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
-                   Z.assert s
-                   (r,m) <- Z.getModel
-                   m' <- maybe (pure "") Z.modelToString m
-                   return (r :/\  m')
-  mapM (Z.evalZ3 . go) ps
+  let go prop = do s <- evalSBVPlain prop
+                   S.constrain s
+  mapM (S.sat . go) ps
 
-pOnP :: [Plain Proposition] -> IO [Z.Result]
+pOnP :: [Plain Proposition] -> IO [S.SatResult]
 pOnP ps = do
-  let go prop = do s <- Sl.unSBool <$> runEvalZ3 prop
-                   Z.assert s
-                   Z.check
-  mapM (Z.evalZ3 . go) ps
+  let go prop = do s <- evalSBVPlain prop
+                   S.constrain s
+  mapM (S.sat . go) ps
 
 -- | vOnP tests the performance of configuration. That is it should input a
 -- variational formula, then configure to all its variants, then run them each
 -- on a plain solver
-vOnPModel :: Proposition -> IO [Z.Result :/\ String]
+vOnPModel :: Proposition -> IO [Bool :/\ R.Result]
 vOnPModel p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) (configs)
-      go prop = Z.local $
-        do s <- Sl.unSBool <$> runEvalZ3 prop
-           Z.assert s
-           (r,m) <- Z.getModel
-           m' <- maybe (pure "") Z.modelToString m
-           return (r :/\  m')
-  Z.evalZ3 $ mapM go ps
+      go prop = SC.query $
+        SC.inNewAssertionStack $
+        do s <- evalSBVPlainQ prop
+           S.constrain s
+           R.getResult mempty
+  S.runSMT $ mapM go ps
 
-vOnP :: Proposition -> IO [Z.Result]
+vOnP :: Proposition -> IO [SC.CheckSatResult]
 vOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
-      go prop = Z.local $
-        do s <- Sl.unSBool <$> runEvalZ3 prop
-           Z.assert s
-           r <- Z.check
-           return r
-  Z.evalZ3 $ mapM go ps
+      go prop = SC.query $ SC.inNewAssertionStack $
+                do s <- evalSBVPlainQ prop
+                   S.constrain s
+                   SC.checkSat
+  S.runSMT $ mapM go ps
 
 vOnPByConfig :: Proposition -> IO [VariantContext :/\ Bool]
 vOnPByConfig p = do
@@ -176,42 +156,15 @@ vOnPByConfig p = do
       -- thus we have to remove duplicates because vsmt will never evaluate the
       -- a duplicate variant produced by nested choices.
       variants     = fmap (Plain . (`configure` p)) configAsFunc
-  let go prop  = Z.local $
-        do s <- Sl.unSBool <$> runEvalZ3 prop
-           Z.assert s
-           r <- Z.check
+  let go prop  = SC.query $ SC.inNewAssertionStack $
+        do s <- evalSBVPlainQ prop
+           S.constrain s
+           r <- SC.checkSat
            let res = case r of
-                 Z.Sat -> True
+                 SC.Sat -> True
                  _     -> False
            return res
   putStrLn $ "Config: " ++ show configs ++ "\n"
   putStrLn $ "Variants: " ++ show variants ++ "\n"
   putStrLn $ "Filtered Variants: " ++ show (nub variants) ++ "\n"
-  Z.evalZ3 $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs (nub variants)
-
-z3Sat :: Int -> IO Z.Result
-z3Sat i = Z.evalZ3 $
-          mapM (Z.mkFreshBoolVar . show) [0..i]
-          >>= Z.mkAnd >>= Z.assert >> Z.check
-
-z3SatInc :: Int -> IO Z.Result
-z3SatInc i = Z.evalZ3 $
-             Z.local $
-             mapM (Z.mkFreshBoolVar . show) [0..i]
-             >>= Z.mkAnd >>= Z.assert >> Z.check
-
-
-sbvSatInc :: Int -> IO Bool
-sbvSatInc i = S.runSMT $
-             SC.query $ do bs <- mapM (SC.freshVar . show) [0..i]
-                           let go !x !acc = return $ x S..&& acc
-                           foldM go S.sTrue bs >>= S.constrain
-                           c <- SC.checkSat
-                           return $ case c of
-                                      SC.Sat -> True
-                                      _      -> False
-
-sbvSat :: Int -> IO S.SatResult
-sbvSat i = S.sat $ do bs <- mapM (S.sBool . show) [0..i]
-                      let go !x !acc = return $ x S..&& acc
-                      foldM go S.sTrue bs >>= S.constrain
+  S.runSMT $ mapM (\(c,plnP) -> (configToContext c :/\) <$> go plnP) $ zip configs (nub variants)
