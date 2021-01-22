@@ -23,6 +23,7 @@
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE ScopedTypeVariables        #-}
+{-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE ViewPatterns               #-}
@@ -52,41 +53,10 @@ import qualified Data.IntMap.Strict                    as IMap
 import           Data.Maybe                            (fromJust)
 import           Data.Monoid                           (Sum(..))
 import           Data.Hashable                         (Hashable)
+import qualified Data.SBV.Internals                    as I
+import qualified Data.SBV.Trans                        as T
+import qualified Data.SBV.Trans.Control                as C
 
-import qualified Z3.Monad                              as Z ( AST
-                                                            , MonadZ3
-                                                            , Result(..)
-                                                            , Z3
-                                                            , astToString
-                                                            , getSolver
-                                                            , getContext
-                                                            , evalZ3
-                                                            , local
-                                                            , assert
-                                                            , check
-                                                            , mkFreshBoolVar
-                                                            , mkTrue
-                                                            , mkFalse
-                                                            , mkFreshIntVar
-                                                            , mkFreshRealVar
-                                                            , mkIntNum
-                                                            , mkRealNum
-                                                            , mkNot
-                                                            , mkAnd
-                                                            , mkOr
-                                                            , mkImplies
-                                                            , mkEq
-                                                            , mkXor
-                                                            , mkUnaryMinus
-                                                            , mkAdd
-                                                            , mkDiv
-                                                            , mkSub
-                                                            , mkMod
-                                                            , mkGe
-                                                            , mkLe
-                                                            , mkLt
-                                                            , mkGt
-                                                            )
 import qualified Data.Text                             as Text
 import           GHC.Generics                          (Generic)
 import           Control.DeepSeq                       (NFData)
@@ -110,13 +80,6 @@ logInProducerWith :: (R.MonadReader State m, MonadLogger m, Show a) =>
 logInProducerWith msg value = do tid <- R.asks (threadId . channels)
                                  logInThreadWith "Producer" tid msg value
 
--- | This will cause a memory leak so make sure it is not used when benchmarking
--- looks like the monadlogger instance logs this even for NoLogger!
-logInZ3AST :: (R.MonadReader State m, MonadLogger m, Z.MonadZ3 m) =>
-  Text.Text -> SBool -> m ()
-logInZ3AST msg (unSBool -> value) = do tid <- R.asks (threadId . channels)
-                                       Z.astToString value >>= logInThreadWith "Producer" tid msg
-
 logInConsumer :: (R.MonadReader State m, MonadLogger m) => Text.Text -> m ()
 logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
 
@@ -125,7 +88,7 @@ logInConsumer msg = R.asks (threadId . channels) >>= flip logInConsumer' msg
 findVCore :: ( MonadLogger z3
              , Cacheable   z3 Tag (V :/\ IL)
              , MonadReader State z3
-             , Z.MonadZ3   z3
+             , I.SolverContext z3
              ) => IL -> z3 VarCore
 findVCore = evaluate
 
@@ -143,19 +106,21 @@ solveGetDiag vc s p = readDiagnostics . sSnd =<< internalSolver runPreSolverNoLo
 
 -- TODO fix this horrendous type signature
 internalSolver ::
-  ( MonadLogger m
+  ( C.MonadQuery m
+  , I.SolverContext m
+  , T.MonadSymbolic m
+  , MonadLogger m
   , MonadLogger f
+  , MonadIO f
   , Constrainable f (ExRefType Var) IL'
   , Constrainable f Var IL
-  , Z.MonadZ3 m
-  , Z.MonadZ3 f
-  , R.MonadReader State f
-  ) => (State -> f IL -> Z.Z3 (IL :/\ State))
-  -> (State -> SolverT m Result -> Z.Z3 (Result :/\ State))
+  , MonadReader State f
+  ) => (State -> f IL -> T.SymbolicT IO (IL :/\ State))
+  -> (State -> SolverT m Result -> C.Query b)
   -> Maybe VariantContext
   -> Settings
   -> Prop' Var
-  -> IO (Result :/\ State)
+  -> IO b
 internalSolver preSlvr slvr conf s@Settings{..} i = do
   (toMain, fromVC)   <- U.newChan vcBufSize
   (toVC,   fromMain) <- U.newChan vcBufSize
@@ -167,6 +132,7 @@ internalSolver preSlvr slvr conf s@Settings{..} i = do
 
 
   let il = toIL i
+      solverConfig = unSolver solver
 
   -- init the channels
       vcChans   = VCChannels   (fromMain, toMain)
@@ -182,18 +148,17 @@ internalSolver preSlvr slvr conf s@Settings{..} i = do
       seasoning = preSlvr startState (sSnd <$> il)
 
       runVCWorkers =
-        A.mapConcurrently_ (vcWorker conf startState slvr)
+        A.mapConcurrently_ (vcWorker solverConfig conf startState slvr)
         [1..numVCWorkers]
 
       -- this thread will exit once it places requests on the producer
       -- chans. If the IL is a unit then it'll be caught by evaluate and
       -- placed on a result chan anyway
-      populateChans = Z.evalZ3 $
+      populateChans = T.runSMTWith solverConfig $
         do (il' :/\ st) <- seasoning
-           slvr st $
+           C.query $ slvr st $
              do void $ findVCore il' >>= removeChoices
-                r <- readWith (unResults . results)
-                return r
+                readWith (unResults . results)
 
   -- kick off
   !aWorkers  <- A.async runVCWorkers
@@ -214,7 +179,8 @@ solveForCore i = do
   initialDiagnostics <- newDiagnostics
   initialConstants   <- newConstants defSettings{generateModels=False}
 
-  let il              = toIL i
+  let il           = toIL i
+      solverConfig = unSolver . solver $ defSettings
 
       vcChans   = VCChannels   (fromMain, toMain)
       mainChans = MainChannels (fromVC, toVC)
@@ -228,9 +194,10 @@ solveForCore i = do
                          }
       seasoning = runPreSolverNoLog startState (sSnd <$> il)
 
-      populateChans = Z.evalZ3 $
+      populateChans = T.runSMTWith solverConfig $
         do (il' :/\ st) <- seasoning
-           runSolverNoLog st $ findVCore il'
+           C.query $
+             runSolverNoLog st $ findVCore il'
 
   populateChans
 
@@ -249,35 +216,35 @@ type ThreadID      = Int
 -- just as we would expect.
 vcWorker ::
   (MonadLogger f
-  , Z.MonadZ3  f
-  , Constrainable   f Dim SDimension
-  ) => Maybe VariantContext -> State -> (State -> f b -> Z.Z3 a) -> Int -> IO ()
-vcWorker Nothing s@State{..} slvr tid =
+  , C.MonadQuery f
+  , MonadIO         f
+  , I.SolverContext f
+  , Constrainable   f Dim (T.SBV Bool)
+  ) => T.SMTConfig -> Maybe VariantContext -> State -> (State -> f b -> C.Query a) -> Int -> IO ()
+vcWorker c Nothing s@State{..} slvr tid =
   let (fromMain, toMain) = getVcChans . vcChans $ channels
-  in Z.evalZ3 $ vcHelper fromMain toMain s slvr tid
-vcWorker (Just vc) s@State{..} slvr tid =
-  Z.evalZ3 $ do
+  in T.runSMTWith c $ vcHelper fromMain toMain s slvr tid
+vcWorker c (Just vc) s@State{..} slvr tid =
+  T.runSMTWith c $ do
   -- season the solver
   let (fromMain, toMain) = getVcChans . vcChans $ channels
   (b :/\ st) <- runPreSolverLog s $ contextToSBool vc
-  Z.assert (unSDimension b)
+  T.constrain b
   -- now run the helper
   vcHelper fromMain toMain st slvr tid
 
-vcHelper ::
-  ( MonadLogger f1
-  , Z.MonadZ3 f1
-  , Constrainable f1 a1 SDimension
-  , Functor f2
-  ) => U.OutChan (a1, Bool, Maybe SDimension)
-  -> U.InChan (Bool, Maybe SDimension)
+vcHelper :: (C.ExtractIO m, MonadLogger f, C.MonadQuery f,
+             Constrainable f a1 T.SBool, I.SolverContext f, MonadIO f) =>
+  U.OutChan (a1, Bool, T.SBV Bool)
+  -> U.InChan (Bool, T.SBV Bool)
   -> t
-  -> (t -> f1 b -> f2 a2)
+  -> (t -> f b -> C.QueryT m a2)
   -> Int
-  -> f2 ()
+  -> T.SymbolicT m ()
 vcHelper fromMain toMain st slvr _ =
   -- listen to the channel forever and check requests incrementally against the
   -- context if there is one
+  C.query $
     void $
     slvr st $
     forever $
@@ -285,19 +252,15 @@ vcHelper fromMain toMain st slvr _ =
        -- logInVC' tid "Waiting"
        (d, shouldNegate, vc') <- liftIO $ U.readChan fromMain
        -- logInVC' tid "got request"
-       Z.local $
+       C.inNewAssertionStack $
          do sD <- constrain d
             -- logInVCWith tid "before" sD
-            !new <- case vc' of
-                      Just e  -> if shouldNegate
-                                 then sDNot sD >>= sDAnd e
-                                 else sDAnd e sD
-                      Nothing -> return sD
+            let !new = if shouldNegate then bnot sD else sD &&& vc'
             -- logInVCWith tid "created" new
-            Z.assert (unSDimension new)
-            Z.check >>= liftIO . \case
-              Z.Sat -> U.writeChan toMain (True, Just new)
-              _     -> U.writeChan toMain (False, Just new)
+            T.constrain new
+            C.checkSat >>= liftIO . \case
+              C.Sat -> U.writeChan toMain (True, new)
+              _     -> U.writeChan toMain (False, new)
 
 ------------------------------ Data Types --------------------------------------
 -- | Solver configuration is a mapping of dimensions to boolean values, we
@@ -307,59 +270,11 @@ vcHelper fromMain toMain st slvr _ =
 -- separate thread to check variant context sat calls when removing choices
 type Store = Map.HashMap
 
-newtype SInteger   = SInteger   { unSInteger   :: Z.AST }
-  deriving stock (Eq,Show,Generic,Ord)
-newtype SDouble    = SDouble    { unSDouble    :: Z.AST }
-  deriving stock (Eq,Show,Generic,Ord)
-newtype SBool      = SBool      { unSBool      :: Z.AST }
-  deriving stock (Eq,Show,Generic,Ord)
-newtype SDimension = SDimension { unSDimension :: Z.AST }
-  deriving stock (Eq,Show,Ord)
-
-sBool :: Z.MonadZ3 z3 => Text.Text -> z3 SBool
-sBool = fmap SBool . Z.mkFreshBoolVar . Text.unpack
-
-sTrue :: Z.MonadZ3 z3 => z3 SBool
-sTrue = SBool <$> Z.mkTrue
-
-sFalse :: Z.MonadZ3 z3 => z3 SBool
-sFalse = SBool <$> Z.mkFalse
-
-sDTrue :: Z.MonadZ3 z3 => z3 SDimension
-sDTrue = SDimension <$> Z.mkTrue
-
-sDFalse :: Z.MonadZ3 z3 => z3 SDimension
-sDFalse = SDimension <$> Z.mkFalse
-
-sDimension :: Z.MonadZ3 z3 => Dim -> z3 SDimension
-sDimension = fmap SDimension . Z.mkFreshBoolVar . Text.unpack . getDim
-
-sInteger :: Z.MonadZ3 z3 => Text.Text -> z3 SInteger
-sInteger = fmap SInteger . Z.mkFreshIntVar . Text.unpack
-
-sDouble :: Z.MonadZ3 z3 => Text.Text -> z3 SDouble
-sDouble = fmap SDouble . Z.mkFreshRealVar . Text.unpack
-
-literalInt :: (Z.MonadZ3 z3, Integral i) => i -> z3 SInteger
-literalInt = fmap SInteger . Z.mkIntNum
-
-literalReal :: (Z.MonadZ3 z3, Real r) => r -> z3 SDouble
-literalReal = fmap SDouble . Z.mkRealNum
-
-sDNot :: Z.MonadZ3 z3 => SDimension -> z3 SDimension
-sDNot = fmap SDimension . Z.mkNot . unSDimension
-
-sNot :: Z.MonadZ3 z3 => SBool -> z3 SBool
-sNot = fmap SBool . Z.mkNot . unSBool
-
-sDAnd :: Z.MonadZ3 z3 => SDimension -> SDimension -> z3 SDimension
-sDAnd (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkAnd [l,r]
-
 -- Stores of various things
-type Ints         = Store Var SInteger
-type Doubles      = Store Var SDouble
-type Bools        = Store Var SBool
-type Dimensions   = Store Dim SDimension
+type Ints         = Store Var T.SInteger
+type Doubles      = Store Var T.SDouble
+type Bools        = Store Var T.SBool
+type Dimensions   = Store Dim T.SBool
 type Context      = Store Dim Bool
 type ShouldNegate = Bool
 
@@ -399,7 +314,9 @@ instance IxStorable Dim where add    = Map.insert
                               find   = Map.lookup
                               adjust = Map.adjust
 
-type SVariantContext = Maybe SDimension
+type SVariantContext = T.SBool
+instance Semigroup SVariantContext where (<>) = (&&&)
+instance Monoid    SVariantContext where mempty = true
 
 -- | The internal state of the solver is just a record that accumulates results
 -- and a configuration to track choice decisions. We make a trade off of memory
@@ -506,7 +423,7 @@ newResults = Results <$> STM.newTVarIO mempty
 
 newStore :: IO Stores
 newStore = do vConfig    <- STM.newTVarIO mempty
-              sConfig    <- STM.newTVarIO Nothing
+              sConfig    <- STM.newTVarIO mempty
               config     <- STM.newTVarIO mempty
               ints       <- STM.newTVarIO mempty
               doubles    <- STM.newTVarIO mempty
@@ -599,18 +516,57 @@ freezeCache = do st          <- R.asks caches
 newtype SolverT m a = SolverT { runSolverT :: R.ReaderT State m a }
   deriving newtype ( Functor,Applicative,Monad,MonadIO
                    , MonadError e, MonadLogger, R.MonadReader State
-                   , MonadTrans, Z.MonadZ3
+                   , MonadTrans, T.MonadSymbolic, C.MonadQuery
                    )
 
 -- mapSolverT :: (m (a1, Stores) -> m (a2, Stores)) -> SolverT m a1 -> SolverT m a2
 mapSolverT :: R.MonadReader r m => (r -> r) -> SolverT m a -> SolverT m a
 mapSolverT f = SolverT . R.mapReaderT (local f) . runSolverT
 
+-- | Unfortunately we have to write this one by hand. This type class tightly
+-- couples use to SBV and is the mechanism to constrain things in the solver
+instance (Monad m, I.SolverContext m) => I.SolverContext (SolverT m) where
+  constrain       = lift . T.constrain
+  softConstrain   = lift . T.softConstrain
+  setOption       = lift . T.setOption
+  namedConstraint = (lift .) . T.namedConstraint
+  addAxiom        = (lift .) . T.addAxiom
+  contextState    = lift I.contextState
+  constrainWithAttribute = (lift .) . T.constrainWithAttribute
+
+instance (Monad m, I.SolverContext m) => I.SolverContext (LoggingT m) where
+  constrain       = lift . T.constrain
+  softConstrain   = lift . T.softConstrain
+  setOption       = lift . T.setOption
+  namedConstraint = (lift .) . T.namedConstraint
+  addAxiom        = (lift .) . T.addAxiom
+  contextState    = lift I.contextState
+  constrainWithAttribute = (lift .) . T.constrainWithAttribute
+
+instance (Monad m, I.SolverContext m) => I.SolverContext (NoLoggingT m) where
+  constrain       = lift . T.constrain
+  softConstrain   = lift . T.softConstrain
+  setOption       = lift . T.setOption
+  namedConstraint = (lift .) . T.namedConstraint
+  addAxiom        = (lift .) . T.addAxiom
+  contextState    = lift I.contextState
+  constrainWithAttribute = (lift .) . T.constrainWithAttribute
+
+
+instance C.MonadQuery m    => C.MonadQuery (LoggingT m)      where
+  queryState  = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (LoggingT m)   where
+  symbolicEnv = lift T.symbolicEnv
+instance C.MonadQuery m    => C.MonadQuery (NoLoggingT m)    where
+  queryState  = lift C.queryState
+instance T.MonadSymbolic m => T.MonadSymbolic (NoLoggingT m) where
+  symbolicEnv = lift T.symbolicEnv
+
 -- | A solver type enabled with query operations and logging
-type SolverLog    = SolverT    (LoggingT   Z.Z3)
-type Solver       = SolverT    (NoLoggingT Z.Z3)
-type PreSolverLog = PreSolverT (LoggingT   Z.Z3)
-type PreSolver    = PreSolverT (NoLoggingT Z.Z3)
+type SolverLog    = SolverT    (LoggingT   C.Query)
+type Solver       = SolverT    (NoLoggingT C.Query)
+type PreSolverLog = PreSolverT (LoggingT   T.Symbolic)
+type PreSolver    = PreSolverT (NoLoggingT T.Symbolic)
 
 -- | A presolver runs the first stage of the evaluation/accumulation loop, that
 -- is, it is a solver which doesn't understand async, nor incremental push/pops.
@@ -618,74 +574,71 @@ type PreSolver    = PreSolverT (NoLoggingT Z.Z3)
 newtype PreSolverT m a = PreSolverT { runPreSolverT :: (R.ReaderT State m) a }
   deriving newtype ( Functor,Applicative,Monad,MonadIO
                    , MonadError e, MonadTrans, MonadLogger
-                   , R.MonadReader State, Z.MonadZ3
+                   , R.MonadReader State, T.MonadSymbolic
+                   , C.MonadQuery
                    )
 
-runPreSolverLog :: State -> PreSolverLog a -> Z.Z3 (a :/\ State)
-runPreSolverLog s = fmap ( :/\ s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
+runPreSolverLog :: State -> PreSolverLog a -> T.Symbolic (a :/\ State)
+runPreSolverLog s = fmap (:/\s) . runStdoutLoggingT . flip R.runReaderT s . runPreSolverT
 
-runPreSolverNoLog :: State -> PreSolver a -> Z.Z3 (a :/\ State)
-runPreSolverNoLog s = fmap ( :/\ s) . runNoLoggingT . flip R.runReaderT s . runPreSolverT
+runPreSolverNoLog :: State -> PreSolver a -> T.Symbolic (a :/\ State)
+runPreSolverNoLog s = fmap (:/\s) . runNoLoggingT . flip R.runReaderT s . runPreSolverT
 
-runSolverNoLog :: State -> Solver a -> Z.Z3 (a :/\ State)
-runSolverNoLog s = fmap ( :/\ s) . runNoLoggingT . flip R.runReaderT s . runSolverT
+runSolverNoLog :: State -> Solver a -> C.Query (a :/\ State)
+runSolverNoLog s = fmap (:/\s) . runNoLoggingT . flip R.runReaderT s . runSolverT
 
-runSolverLog :: State -> SolverLog a -> Z.Z3 (a :/\ State)
-runSolverLog s = fmap ( :/\ s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
+runSolverLog :: State -> SolverLog a -> C.Query (a :/\ State)
+runSolverLog s = fmap (:/\s) . runStdoutLoggingT . flip R.runReaderT s . runSolverT
+
+type PreRun m a = State -> m a -> T.Symbolic (a :/\ State)
+type Run m    a = State  -> SolverT m a -> C.Query (a :/\ State)
 
 class RunPreSolver s where
-  runPreSolver :: State -> s a -> Z.Z3 (a :/\ State)
+  runPreSolver :: State -> s a -> T.Symbolic (a :/\ State)
 
 class RunSolver s where
-  runSolver :: State -> s a -> Z.Z3 (a :/\  State)
-
-instance Z.MonadZ3 z => Z.MonadZ3 (LoggingT z) where
-  getSolver  = lift Z.getSolver
-  getContext = lift Z.getContext
-
-instance Z.MonadZ3 z => Z.MonadZ3 (NoLoggingT z) where
-  getSolver  = lift Z.getSolver
-  getContext = lift Z.getContext
-
+  runSolver :: State -> s a -> C.Query (a :/\ State)
 
 instance RunSolver SolverLog       where runSolver    = runSolverLog
 instance RunSolver Solver          where runSolver    = runSolverNoLog
 instance RunPreSolver PreSolverLog where runPreSolver = runPreSolverLog
 instance RunPreSolver PreSolver    where runPreSolver = runPreSolverNoLog
 
+
 class Show a => Constrainable m a b where constrain :: a -> m b
 
 -- -- TODO fix this duplication with derivingVia
-instance (Monad m, MonadLogger m, Z.MonadZ3 m) =>
+instance (Monad m, T.MonadSymbolic m, C.MonadQuery m, MonadLogger m) =>
   Constrainable (SolverT m) Var IL where
   constrain ref = do
     st <- reads bools
     case find ref st of
-      Just x -> return (Ref x)
+      Just x -> logWith "Cache Hit" ref >> return (Ref x)
       Nothing -> do
         logInProducerWith "Cache miss on" ref
-        newSym <- sBool ref
+        newSym <- T.label (Text.unpack ref) <$> C.freshVar (Text.unpack ref)
         update bools (add ref newSym)
         return (Ref newSym)
 
-instance (Z.MonadZ3 m, MonadIO m, MonadLogger m, Monad m) =>
-  Constrainable (SolverT m) Dim SDimension where
+instance (MonadLogger m, Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
+  Constrainable (SolverT m) Dim T.SBool where
   constrain d = do
     st <- reads dimensions
     case find d st of
       Just x -> return x
       Nothing -> do
-        newSym <- sDimension d
+        let ref = Text.unpack $ getDim d
+        newSym <- T.label ref <$> C.freshVar ref
         update dimensions (add d newSym)
         return newSym
 
-instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
+instance (Monad m, T.MonadSymbolic m, C.MonadQuery m) =>
   Constrainable (SolverT m) (ExRefType Var) IL' where
   constrain (ExRefTypeI i) =
     do st <- reads ints
        case find i st of
          Just x  -> return . Ref' . SI $ x
-         Nothing -> do newSym <- sInteger i
+         Nothing -> do newSym <- T.label (Text.unpack i) <$> C.freshVar (Text.unpack i)
                        update ints (add i newSym)
                        return (Ref' . SI $ newSym)
 
@@ -693,47 +646,48 @@ instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
     do st <- reads doubles
        case find d st of
          Just x  -> return . Ref' $ SD x
-         Nothing -> do newSym <- sDouble d
+         Nothing -> do newSym <- T.label (Text.unpack d) <$> C.freshVar (Text.unpack d)
                        update doubles (add d newSym)
                        return $! Ref' $ SD newSym
 
-instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
+instance (Monad m, T.MonadSymbolic m, MonadLogger m) =>
   Constrainable (PreSolverT m) Var IL where
-  constrain ref   = do st <- readWith (bools . stores)
+  constrain ref   = do st <- reads bools
                        case find ref st of
                          Just x  -> return (Ref x)
-                         Nothing -> do newSym <- sBool ref
-                                       updateWith (bools . stores) (add ref newSym)
+                         Nothing -> do newSym <- T.sBool (Text.unpack ref)
+                                       update bools (add ref newSym)
                                        return (Ref newSym)
 
 
-instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
+instance (Monad m, T.MonadSymbolic m) =>
   Constrainable (PreSolverT m) (ExRefType Var) IL' where
   constrain (ExRefTypeI i) =
-    do st <- readWith (ints . stores)
+    do st <- reads ints
        case find i st of
          Just x  -> return . Ref' . SI $ x
-         Nothing -> do newSym <- sInteger i
-                       updateWith (ints . stores) (add i newSym)
+         Nothing -> do newSym <- T.sInteger (Text.unpack i)
+                       update ints (add i newSym)
                        return (Ref' . SI $ newSym)
 
   constrain (ExRefTypeD d) =
-    do st <- readWith (doubles . stores)
+    do st <- reads doubles
        case find d st of
          Just x  -> return . Ref' $ SD x
-         Nothing -> do newSym <- sDouble d
-                       updateWith (doubles . stores) (add d newSym)
+         Nothing -> do newSym <- T.sDouble (Text.unpack d)
+                       update doubles (add d newSym)
                        return $! Ref' $ SD newSym
 
-instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
-  Constrainable (PreSolverT m) Dim SDimension where
+instance (Monad m, T.MonadSymbolic m) =>
+  Constrainable (PreSolverT m) Dim T.SBool where
   constrain d = do
-    ds <- readWith (dimensions . stores)
+    ds <- reads dimensions
     case find d ds of
       Just x -> return x
       Nothing -> do
-        newSym <- sDimension d
-        updateWith (dimensions . stores) (add d newSym)
+        let ref = Text.unpack $ getDim d
+        newSym <- T.sBool ref
+        update dimensions (add d newSym)
         return newSym
 
 -- | A general caching mechanism using StableNames. There is a small chance of a
@@ -770,7 +724,7 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
                                             return b
 
 ----------------------------------- IL -----------------------------------------
-type BRef = SBool
+type BRef = T.SBool
 
 generateAccKey :: (MonadIO m, R.MonadReader State m) => m Tag
 generateAccKey = updateWith (accTagSeed . caches) succ
@@ -780,9 +734,116 @@ generateCtxKey :: (MonadIO m, R.MonadReader State m) => m Tag
 generateCtxKey = updateWith (ctxTagSeed . caches) succ
                  >> readWith (ctxTagSeed . caches)
 
-data NRef = SI SInteger
-          | SD SDouble
-    deriving stock (Generic,Show,Eq,Ord)
+data NRef = SI T.SInteger
+          | SD T.SDouble
+    deriving stock (Generic,Show,Eq)
+
+instance Num NRef where
+  fromInteger = SI . T.literal . fromInteger
+
+  abs (SI i) = SI $ abs i
+  abs (SD d) = SD $ T.fpAbs d
+
+  negate (SI i) = SI $ negate i
+  negate (SD d) = SD $ T.fpNeg d
+
+  signum (SI i) = SI $ signum i
+  signum (SD d) = SD $ signum (T.fromSDouble T.sRoundNearestTiesToAway d)
+
+  (SI i) + (SI i') = SI $ i + i'
+  (SD d) + (SI i)  = SD $ d + T.sFromIntegral i
+  (SI i) + (SD d)  = SD $ T.sFromIntegral i + d
+  (SD d) + (SD d') = SD $ d + d'
+
+  (SI i) - (SI i') = SI $ i - i'
+  (SD d) - (SI i)  = SD $ d - T.sFromIntegral i
+  (SI i) - (SD d)  = SD $ T.sFromIntegral i - d
+  (SD d) - (SD d') = SD $ d - d'
+
+  (SI i) * (SI i') = SI $ i * i'
+  (SD d) * (SI i)  = SD $ d * T.sFromIntegral i
+  (SI i) * (SD d)  = SD $ d * T.sFromIntegral i
+  (SD d) * (SD d') = SD $ d * d'
+
+instance PrimN NRef where
+  (SI i) ./ (SI i') = SI $ i ./ i'
+  (SD d) ./ (SI i)  = SD $ d ./ T.sFromIntegral i
+  (SI i) ./ (SD d)  = SD $ T.sFromIntegral i ./ d
+  (SD d) ./ (SD d') = SD $ d ./ d'
+
+
+  (SI i) .% (SI i') = SI $ i .% i'
+  (SD d) .% (SI i)  = SI $ T.fromSDouble T.sRoundNearestTiesToAway d .% i
+  (SI i) .% (SD d)  = SI $ i .% T.fromSDouble T.sRoundNearestTiesToAway d
+  (SD d) .% (SD d') = SD $ T.fpRem d d'
+
+instance T.Mergeable NRef where
+  symbolicMerge _ b thn els
+    | Just res <- T.unliteral b = if res then thn else els
+    | otherwise = els
+
+instance T.EqSymbolic NRef where
+  (.==) (SI i) (SI i') = (T..==) i i'
+  (.==) (SD d) (SI i') = (T..==) d (T.sFromIntegral i')
+  (.==) (SI i) (SD d)  = (T..==) (T.sFromIntegral i) d
+  (.==) (SD d) (SD d') = (T..==) d d'
+
+  (./=) (SI i) (SI i') = (T../=) i i'
+  (./=) (SD d) (SI i') = (T../=) d (T.sFromIntegral i')
+  (./=) (SI i) (SD d)  = (T../=) (T.sFromIntegral i) d
+  (./=) (SD d) (SD d') = (T../=) d d'
+
+instance T.OrdSymbolic NRef where
+  (.<) (SI i) (SI i') = (T..<) i i'
+  (.<) (SD d) (SI i)  = (T..<) d (T.sFromIntegral i)
+  (.<) (SI i) (SD d)  = (T..<) (T.sFromIntegral i) d
+  (.<) (SD d) (SD d') = (T..<) d d'
+
+  (.<=) (SI i) (SI i') = (T..<=) i i'
+  (.<=) (SD d) (SI i)  = (T..<=) d (T.sFromIntegral i)
+  (.<=) (SI i) (SD d)  = (T..<=) (T.sFromIntegral i) d
+  (.<=) (SD d) (SD d') = (T..<=) d d'
+
+  (.>=) (SI i) (SI i') = (T..>=) i i'
+  (.>=) (SD d) (SI i)  = (T..>=) d (T.sFromIntegral i)
+  (.>=) (SI i) (SD d)  = (T..>=) (T.sFromIntegral i) d
+  (.>=) (SD d) (SD d') = (T..>=) d d'
+
+  (.>) (SI i) (SI i') = (T..>) i i'
+  (.>) (SD d) (SI i)  = (T..>) d (T.sFromIntegral i)
+  (.>) (SI i) (SD d)  = (T..>) (T.sFromIntegral i) d
+  (.>) (SD d) (SD d') = (T..>) d d'
+
+instance Prim T.SBool NRef where
+  (.<) (SI i) (SI i') = (T..<) i i'
+  (.<) (SD d) (SI i)  = (T..<) d (T.sFromIntegral i)
+  (.<) (SI i) (SD d)  = (T..<) (T.sFromIntegral i) d
+  (.<) (SD d) (SD d') = (T..<) d d'
+
+  (.<=) (SI i) (SI i') = (T..<=) i i'
+  (.<=) (SD d) (SI i)  = (T..<=) d (T.sFromIntegral i)
+  (.<=) (SI i) (SD d)  = (T..<=) (T.sFromIntegral i) d
+  (.<=) (SD d) (SD d') = (T..<=) d d'
+
+  (.>=) (SI i) (SI i') = (T..>=) i i'
+  (.>=) (SD d) (SI i)  = (T..>=) d (T.sFromIntegral i)
+  (.>=) (SI i) (SD d)  = (T..>=) (T.sFromIntegral i) d
+  (.>=) (SD d) (SD d') = (T..>=) d d'
+
+  (.>) (SI i) (SI i') = (T..>) i i'
+  (.>) (SD d) (SI i)  = (T..>) d (T.sFromIntegral i)
+  (.>) (SI i) (SD d)  = (T..>) (T.sFromIntegral i) d
+  (.>) (SD d) (SD d') = (T..>) d d'
+
+  (.==) (SI i) (SI i') = (T..==) i i'
+  (.==) (SD d) (SI i') = (T..==) d (T.sFromIntegral i')
+  (.==) (SI i) (SD d)  = (T..==) (T.sFromIntegral i) d
+  (.==) (SD d) (SD d') = (T..==) d d'
+
+  (./=) (SI i) (SI i') = (T../=) i i'
+  (./=) (SD d) (SI i') = (T../=) d (T.sFromIntegral i')
+  (./=) (SI i) (SD d)  = (T../=) (T.sFromIntegral i) d
+  (./=) (SD d) (SD d') = (T../=) d d'
 
 newtype Tag = Tag { unTag :: Int }
   deriving stock (Eq,Ord,Generic,Show)
@@ -802,28 +863,18 @@ data IL = Unit
     | BBOp Tag BB_B (V :/\ IL)  (V :/\ IL)
     | IBOp Tag NN_B (V :/\ IL') (V :/\ IL')
     | Chc Dim !Proposition !Proposition
-    deriving stock (Generic, Show, Eq,Ord)
+    deriving stock (Generic, Show, Eq)
 
 data IL' = Ref' !NRef
     | IOp  Tag  N_N  (V :/\ IL')
     | IIOp Tag  NN_N (V :/\ IL') (V :/\ IL')
     | Chc' Dim NExpression NExpression
-    deriving stock (Generic, Show, Eq,Ord)
+    deriving stock (Generic, Show, Eq)
 
 instance NFData IL
 instance NFData IL'
 instance NFData V
 instance NFData NRef
-instance NFData SInteger
-instance NFData SDouble
-instance NFData SBool
-
-instance Hashable IL
-instance Hashable IL'
-instance Hashable NRef
-instance Hashable SInteger
-instance Hashable SDouble
-instance Hashable SBool
 
 -- | tags which describes where in the tree there is variation
 data V = P | V deriving (Generic, Show, Eq, Hashable,Ord)
@@ -899,14 +950,14 @@ vCoreMetrics i = do (core :/\ _) <- solveForCore i
 -- | Convert a proposition into the intermediate language to generate a
 -- Variational Core
 toIL ::
-  ( MonadLogger m
+  ( MonadLogger      m
+  , MonadIO          m
   , Constrainable    m (ExRefType Var) IL'
   , Constrainable    m Var IL
   , R.MonadReader State m
-  , Z.MonadZ3   m
   ) => Prop' Var -> m (V :/\ IL)
-toIL (LitB True)  = (P :/\) . Ref <$> sTrue
-toIL (LitB False) = (P :/\) . Ref <$> sFalse
+toIL (LitB True)  = return . (P :/\) . Ref $ T.sTrue
+toIL (LitB False) = return . (P :/\) . Ref $ T.sFalse
 toIL (RefB ref)   = (P :/\) <$> constrain ref
 toIL (OpB op e)      = do (v :/\ e') <- toIL e
                           k <- generateAccKey
@@ -921,14 +972,14 @@ toIL (OpIB op l r) = do l'@(vl :/\ _) <- toIL' l
                         return (vl <@> vr :/\ IBOp k op l' r')
 toIL (ChcB d l r)  = return (V :/\ Chc d l r)
 
-toIL' :: ( Constrainable    m (ExRefType Var) IL'
-         , MonadLogger m
-         , Z.MonadZ3   m
+toIL' :: ( Constrainable m (ExRefType Var) IL'
+         , MonadLogger   m
+         , MonadIO       m
          , R.MonadReader State m
          ) =>
          NExpr' Var -> m (V :/\ IL')
-toIL' (LitI (I i))  = (P :/\ ) . Ref' . SI <$> literalInt i
-toIL' (LitI (D d))  = (P :/\ ) . Ref' . SD <$> literalReal d
+toIL' (LitI (I i))  = return . (P :/\ ) . Ref' . SI $ T.literal i
+toIL' (LitI (D d))  = return . (P :/\ ) . Ref' . SD $ T.literal d
 toIL' (RefI a)      = (P :/\ ) <$> constrain a
 toIL' (OpI op e)    = do e'@(v :/\ _)  <- toIL' e
                          k  <- generateAccKey
@@ -960,104 +1011,42 @@ isUnit :: VarCore -> Bool
 isUnit (VarCore Unit) = True
 isUnit _              = False
 
-dispatchDOp :: Z.MonadZ3 z3 => BB_B -> SDimension -> SDimension -> z3 SDimension
-{-# INLINE dispatchDOp #-}
-dispatchDOp And  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkAnd     [l,r]
-dispatchDOp Or   (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkOr      [l,r]
-dispatchDOp Impl (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkImplies  l r
-dispatchDOp Eqv  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkEq       l r
-dispatchDOp XOr  (unSDimension -> l) (unSDimension -> r) = SDimension <$> Z.mkXor      l r
-
-dispatchOp :: Z.MonadZ3 z3 => BB_B -> SBool -> SBool -> z3 SBool
+dispatchOp :: Boolean b => BB_B -> b -> b -> b
 {-# INLINE dispatchOp #-}
-dispatchOp And  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkAnd     [l,r]
-dispatchOp Or   (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkOr      [l,r]
-dispatchOp Impl (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkImplies  l r
-dispatchOp Eqv  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkEq       l r
-dispatchOp XOr  (unSBool -> !l) (unSBool -> !r) = SBool <$> Z.mkXor      l r
+{-# SPECIALIZE dispatchOp :: BB_B -> T.SBool -> T.SBool -> T.SBool #-}
+dispatchOp And  = (&&&)
+dispatchOp Or   = (|||)
+dispatchOp Impl = (==>)
+dispatchOp Eqv  = (<=>)
+dispatchOp XOr  = (<+>)
 
-dispatchUOp' :: Z.MonadZ3 z3 => N_N -> NRef -> z3 NRef
+dispatchUOp' :: Num a => N_N -> a -> a
 {-# INLINE dispatchUOp' #-}
-dispatchUOp' Neg  (SI i) = SI . SInteger <$> Z.mkUnaryMinus (unSInteger i)
-dispatchUOp' Neg  (SD d) = SD . SDouble  <$> Z.mkUnaryMinus (unSDouble  d)
-dispatchUOp' Abs  _ = error "absolute value not implemented yet!"
-dispatchUOp' Sign _ = error "signum not implemented yet!"
+dispatchUOp' Neg  = negate
+dispatchUOp' Abs  = abs
+dispatchUOp' Sign = signum
 
-dispatchIOp' :: Z.MonadZ3 z3 => NN_N -> NRef -> NRef -> z3 NRef
+dispatchIOp' :: PrimN a => NN_N -> a -> a -> a
 {-# INLINE dispatchIOp' #-}
-dispatchIOp' Add (SI l) (SI r)  = SI . SInteger <$> Z.mkAdd [unSInteger l, unSInteger r]
-dispatchIOp' Add (SD l) (SI r)  = SD . SDouble <$> Z.mkAdd  [unSDouble  l, unSInteger r]
-dispatchIOp' Add (SI l) (SD r)  = SD . SDouble <$> Z.mkAdd  [unSInteger l, unSDouble r]
-dispatchIOp' Add (SD l) (SD r)  = SD . SDouble <$> Z.mkAdd  [unSDouble  l, unSDouble r]
+dispatchIOp' Add  = (+)
+dispatchIOp' Sub  = (-)
+dispatchIOp' Div  = (./)
+dispatchIOp' Mult = (*)
+dispatchIOp' Mod  = (.%)
 
-dispatchIOp' Mult (SI l) (SI r)  = SI . SInteger <$> Z.mkDiv (unSInteger l) (unSInteger r)
-dispatchIOp' Mult (SD l) (SI r)  = SD . SDouble <$> Z.mkDiv  (unSDouble l)  (unSInteger r)
-dispatchIOp' Mult (SI l) (SD r)  = SD . SDouble <$> Z.mkDiv  (unSInteger l) (unSDouble r)
-dispatchIOp' Mult (SD l) (SD r)  = SD . SDouble <$> Z.mkDiv  (unSDouble l)  (unSDouble r)
-
-dispatchIOp' Sub (SI l) (SI r)  = SI . SInteger <$> Z.mkSub [unSInteger l, unSInteger r]
-dispatchIOp' Sub (SD l) (SI r)  = SD . SDouble <$> Z.mkSub  [unSDouble  l, unSInteger r]
-dispatchIOp' Sub (SI l) (SD r)  = SD . SDouble <$> Z.mkSub  [unSInteger l, unSDouble r]
-dispatchIOp' Sub (SD l) (SD r)  = SD . SDouble <$> Z.mkSub  [unSDouble  l, unSDouble r]
-
-dispatchIOp' Div (SI l) (SI r)  = SI . SInteger <$> Z.mkDiv (unSInteger l) (unSInteger r)
-dispatchIOp' Div (SD l) (SI r)  = SD . SDouble <$> Z.mkDiv  (unSDouble l)  (unSInteger r)
-dispatchIOp' Div (SI l) (SD r)  = SD . SDouble <$> Z.mkDiv  (unSInteger l) (unSDouble r)
-dispatchIOp' Div (SD l) (SD r)  = SD . SDouble <$> Z.mkDiv  (unSDouble l)  (unSDouble r)
-
-dispatchIOp' Mod (SI l) (SI r)  = SI . SInteger <$> Z.mkMod (unSInteger l) (unSInteger r)
-dispatchIOp' Mod (SD l) (SI r)  = SD . SDouble <$> Z.mkMod  (unSDouble l)  (unSInteger r)
-dispatchIOp' Mod (SI l) (SD r)  = SD . SDouble <$> Z.mkMod  (unSInteger l) (unSDouble r)
-dispatchIOp' Mod (SD l) (SD r)  = SD . SDouble <$> Z.mkMod  (unSDouble l)  (unSDouble r)
-
-mkEq :: Z.MonadZ3 z3 => Z.AST -> Z.AST -> z3 Z.AST
-{-# INLINE mkEq #-}
-mkEq x y = do a <- Z.mkGe x y
-              b <- Z.mkLe x y
-              Z.mkAnd [a,b]
-
-mkNEq :: Z.MonadZ3 z3 => Z.AST -> Z.AST -> z3 Z.AST
-{-# INLINE mkNEq #-}
-mkNEq x y = Z.mkEq x y >>= Z.mkNot
-
-dispatchOp' :: Z.MonadZ3 z3 => NN_B -> NRef -> NRef -> z3 SBool
+dispatchOp' :: T.OrdSymbolic a => NN_B -> a -> a -> T.SBool
 {-# INLINE dispatchOp' #-}
-dispatchOp' LT  (SI l) (SI r) = SBool <$> Z.mkLt (unSInteger l)  (unSInteger r)
-dispatchOp' LT  (SD l) (SI r) = SBool <$> Z.mkLt (unSDouble  l)  (unSInteger r)
-dispatchOp' LT  (SI l) (SD r) = SBool <$> Z.mkLt (unSInteger l)  (unSDouble  r)
-dispatchOp' LT  (SD l) (SD r) = SBool <$> Z.mkLt (unSDouble  l)  (unSDouble  r)
-
-dispatchOp' LTE  (SI l) (SI r) = SBool <$> Z.mkLe (unSInteger l)  (unSInteger r)
-dispatchOp' LTE  (SD l) (SI r) = SBool <$> Z.mkLe (unSDouble  l)  (unSInteger r)
-dispatchOp' LTE  (SI l) (SD r) = SBool <$> Z.mkLe (unSInteger l)  (unSDouble  r)
-dispatchOp' LTE  (SD l) (SD r) = SBool <$> Z.mkLe (unSDouble  l)  (unSDouble  r)
-
-dispatchOp' EQ  (SI l) (SI r) = SBool <$> Z.mkEq (unSInteger l)  (unSInteger r)
-dispatchOp' EQ  (SD l) (SI r) = SBool <$> Z.mkEq (unSDouble  l)  (unSInteger r)
-dispatchOp' EQ  (SI l) (SD r) = SBool <$> Z.mkEq (unSInteger l)  (unSDouble  r)
-dispatchOp' EQ  (SD l) (SD r) = SBool <$> Z.mkEq (unSDouble  l)  (unSDouble  r)
-
-dispatchOp' NEQ (SI l) (SI r) = SBool <$> mkNEq (unSInteger l)  (unSInteger r)
-dispatchOp' NEQ (SD l) (SI r) = SBool <$> mkNEq (unSDouble  l)  (unSInteger r)
-dispatchOp' NEQ (SI l) (SD r) = SBool <$> mkNEq (unSInteger l)  (unSDouble  r)
-dispatchOp' NEQ (SD l) (SD r) = SBool <$> mkNEq (unSDouble  l)  (unSDouble  r)
-
-dispatchOp' GT (SI l) (SI r) = SBool <$> Z.mkGt (unSInteger l)  (unSInteger r)
-dispatchOp' GT (SD l) (SI r) = SBool <$> Z.mkGt (unSDouble  l)  (unSInteger r)
-dispatchOp' GT (SI l) (SD r) = SBool <$> Z.mkGt (unSInteger l)  (unSDouble  r)
-dispatchOp' GT (SD l) (SD r) = SBool <$> Z.mkGt (unSDouble  l)  (unSDouble  r)
-
-dispatchOp' GTE (SI l) (SI r) = SBool <$> Z.mkGe (unSInteger l)  (unSInteger r)
-dispatchOp' GTE (SD l) (SI r) = SBool <$> Z.mkGe (unSDouble  l)  (unSInteger r)
-dispatchOp' GTE (SI l) (SD r) = SBool <$> Z.mkGe (unSInteger l)  (unSDouble  r)
-dispatchOp' GTE (SD l) (SD r) = SBool <$> Z.mkGe (unSDouble  l)  (unSDouble  r)
-
+dispatchOp' LT  = (T..<)
+dispatchOp' LTE = (T..<=)
+dispatchOp' EQ  = (T..==)
+dispatchOp' NEQ = (T../=)
+dispatchOp' GT  = (T..> )
+dispatchOp' GTE = (T..>=)
 
 -- | Unmemoized internal Accumulation: we purposefully are verbose to provide
 -- the optimizer better opportunities. Accumulation seeks to combine as much as
 -- possible the plain terms in the AST into symbolic references
-accumulate :: ( Z.MonadZ3 z3
-              , Cacheable z3 Tag (V :/\ IL)
+accumulate :: ( Cacheable z3 Tag (V :/\ IL)
               , MonadReader State z3
               , MonadLogger z3
               ) => IL -> z3 (V :/\ IL)
@@ -1069,12 +1058,12 @@ accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
 accumulate (BOp _ Not (_ :/\ Ref r))  = -- memo t $!
-  (P :/\ ) . Ref <$> sNot r
+  return $! (P :/\ ) . Ref $! bnot r
 accumulate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r)) = -- memo t $!
-  (P :/\ ) . Ref <$> dispatchOp op l r
+  return $! (P :/\ ) . Ref $! dispatchOp op l r
   -- numerics
 accumulate (IBOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r)) = -- memo t $!
-  (P :/\ ) . Ref <$> dispatchOp' op l r
+  return $! (P :/\ ) . Ref $! dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
 accumulate x@(BBOp _ _ (_ :/\ Ref _)   (_ :/\ Chc {}))  = return (V :/\ x)
@@ -1118,13 +1107,12 @@ accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
      let !res = IBOp t op a b
      return (vl <@> vr :/\  res)
 
-iAccumulate' :: (Z.MonadZ3 z3
-                , MonadReader State z3
+iAccumulate' :: ( MonadReader State z3
                 ) => IL' -> z3 (V :/\ IL')
   -- computation rules
 iAccumulate' x@(Ref' _)                               = return (P :/\  x)
-iAccumulate' (IOp _ op (_ :/\ Ref' n))                  = (P :/\ ) . Ref' <$> dispatchUOp' op n
-iAccumulate' (IIOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r))  = (P :/\) . Ref' <$> dispatchIOp' op l r
+iAccumulate' (IOp _ op (_ :/\ Ref' n))                  = return $! (P :/\ ) . Ref' $! dispatchUOp' op n
+iAccumulate' (IIOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r))  = return $! (P :/\) . Ref' $! dispatchIOp' op l r
   -- choices
 iAccumulate' x@Chc' {}                                    = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
@@ -1154,19 +1142,23 @@ iAccumulate' (IIOp k o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
                                                  return (vl <@> vr :/\  res)
 
 -------------------------------- Evaluation -----------------------------------
-toSolver :: (Monad m, Z.MonadZ3 m, MonadLogger m, R.MonadReader State m) =>
-  SBool -> m VarCore
+toSolver ::
+  ( Monad               m
+  , R.MonadReader State m
+  , I.SolverContext     m
+  , MonadLogger         m
+  ) => T.SBool -> m VarCore
 {-# INLINE toSolver #-}
-toSolver (unSBool -> a) = do Z.assert a
-                             logInProducerWith "Solver knows about: " a
-                             return $! intoCore Unit
+toSolver a = do T.constrain a
+                logInProducerWith "Solver knows about: " a
+                return $! intoCore Unit
 
 -- | Evaluation will remove plain terms when legal to do so, "sending" these
 -- terms to the solver, replacing them to Unit to reduce the size of the
 -- variational core
   -- computation rules
 evaluate :: ( MonadLogger z3
-            , Z.MonadZ3   z3
+            , I.SolverContext z3
             , MonadReader State z3
             , Cacheable   z3 Tag (V :/\ IL)
             ) => IL -> z3 VarCore
@@ -1176,10 +1168,10 @@ evaluate Unit     = return $! intoCore Unit
 evaluate (Ref b)  = toSolver b
 evaluate x@Chc {} = return $! intoCore x
   -- bools
-evaluate (BOp _ Not (_ :/\ Ref r))                  = sNot r >>= toSolver
-evaluate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r))    = toSolver =<< dispatchOp op l r
+evaluate (BOp _ Not (_ :/\ Ref r))                  = toSolver $! bnot r
+evaluate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r))    = toSolver $! dispatchOp op l r
   -- numerics
-evaluate (IBOp _ op  (_ :/\ Ref' l) (_ :/\ Ref' r)) = toSolver =<< dispatchOp' op l r
+evaluate (IBOp _ op  (_ :/\ Ref' l) (_ :/\ Ref' r)) = toSolver $! dispatchOp' op l r
   -- choices
 evaluate x@(BBOp _ _ (V :/\ _) (V :/\ _)) = return $! intoCore x
 evaluate x@(IBOp _ _ (V :/\ _) (V :/\ _)) = return $! intoCore x
@@ -1249,9 +1241,6 @@ data Loc = InBool (V :/\ IL)  (V :/\ Ctx)
          | InNum  (V :/\ IL') (V :/\ Ctx)
          deriving (Show, Eq, Generic)
 
-instance Hashable Ctx
-instance Hashable Loc
-
 getVofCtx :: Ctx -> V
 {-# INLINE getVofCtx #-}
 getVofCtx (InU  _ _ (v :/\ _))            = v
@@ -1298,8 +1287,7 @@ toLoc :: IL -> Loc
 {-# INLINE toLoc #-}
 toLoc i = toLocWith Top  (getVofIL i :/\ i)
 
-findChoice :: ( Z.MonadZ3 z3
-              , Cacheable z3 Tag (V :/\ IL)
+findChoice :: ( Cacheable z3 Tag (V :/\ IL)
               , MonadLogger z3
               , MonadReader State z3
               ) => Loc -> z3 Loc
@@ -1379,7 +1367,6 @@ findChoice x = error $ "catch all error in findchoice with " ++ show x
 
 accumulateCtx ::
   ( MonadLogger z3
-  , Z.MonadZ3   z3
   , MonadReader State z3
   , Cacheable   z3 Tag (V :/\ IL)
   , Cacheable   z3 Tag Loc
@@ -1455,7 +1442,6 @@ store ::
   ( R.MonadReader State io
   ,  MonadIO            io
   , MonadLogger         io
-  , Z.MonadZ3           io
   ) => Result -> io ()
 {-# INLINE store #-}
 {-# SPECIALIZE store :: Result -> Solver () #-}
@@ -1504,9 +1490,9 @@ resetCache FrozenCaches{..} = do updateCache accCache (const faccCache)
 -- way to continue with the right alternative. Spawn two new subprocesses that
 -- process the alternatives plugging the choice hole with its respective
 alternative ::
-  ( MonadIO     n
-  , MonadLogger n
-  , Z.MonadZ3   n
+  ( MonadIO      n
+  , MonadLogger  n
+  , C.MonadQuery n
   ) => Dim -> SolverT n () -> SolverT n () -> SolverT n ()
 alternative dim goLeft goRight =
   do !s <- freeze
@@ -1527,7 +1513,7 @@ alternative dim goLeft goRight =
      (checkDimTrue,!newSConfigL) <- liftIO $
        U.writeChan toVC (dim, dontNegate, symbolicContext) >> U.readChan fromVC
      when checkDimTrue $ do
-       let !continueLeft = Z.local $
+       let !continueLeft = C.inNewAssertionStack $
                            do logInProducerWith "Left Alternative of" dim
                               resetTo s
 
@@ -1542,7 +1528,7 @@ alternative dim goLeft goRight =
      (checkDimFalse,!newSConfigR) <- liftIO $
        U.writeChan toVC (dim, pleaseNegate, symbolicContext) >> U.readChan fromVC
      when checkDimFalse $ do
-       let !continueRight = Z.local $
+       let !continueRight = C.inNewAssertionStack $
                             do logInProducerWith "Right Alternative of" dim
                                resetTo s
                                -- resetCache c
@@ -1551,8 +1537,11 @@ alternative dim goLeft goRight =
        continueRight
 
 removeChoices ::
-  ( MonadLogger m
-  , Z.MonadZ3   m
+  ( MonadLogger     m
+  , MonadIO         m
+  , C.MonadQuery    m
+  , I.SolverContext m
+  , T.MonadSymbolic m
   ) => VarCore -> SolverT m ()
 removeChoices (VarCore Unit) = do !vC <- reads vConfig
                                   wantModels <- readWith (genModels . constants)
@@ -1566,8 +1555,11 @@ removeChoices (VarCore x@(Ref _)) = do _ <- evaluate x; removeChoices (VarCore U
 removeChoices (VarCore l) = findChoice (toLoc l) >>= choose
 
 choose ::
-  ( MonadLogger m
-  , Z.MonadZ3   m
+  ( MonadLogger       m
+  , MonadIO           m
+  , C.MonadQuery      m
+  , T.MonadSymbolic   m
+  , I.SolverContext   m
   ) => Loc -> SolverT m ()
 choose (InBool (_ :/\ Unit) (_ :/\ Top))  = removeChoices (VarCore Unit)
 choose (InBool (_ :/\ l@Ref{}) _) = logInProducer "Choosing all done" >>
@@ -1611,18 +1603,18 @@ choose loc =
 
 --------------------------- Variant Context Helpers ----------------------------
 contextToSBool :: ( Monad m
-                   , Constrainable m Dim SDimension
-                   , Z.MonadZ3 m
-                   ) => VariantContext -> m SDimension
+                   , Constrainable m Dim T.SBool
+                   ) => VariantContext -> m T.SBool
 contextToSBool (getVarFormula -> x) = go x
   where -- go :: Show a => Prop' a -> m SDimension
-        go (LitB True)  = sDTrue
-        go (LitB False) = sDFalse
+        go (LitB True)  = return T.sTrue
+        go (LitB False) = return T.sFalse
         go (RefB d)     = constrain d
-        go (OpB Not e) = fmap SDimension $ go e >>= Z.mkNot . unSDimension
+        go (OpB Not e) = bnot <$> go e
         go (OpBB op l r) = do l' <- go l
                               r' <- go r
-                              dispatchDOp op l' r'
+                              let op' = dispatchOp op
+                              return $! l' `op'` r'
         go OpIB {} = error "numeric expressions are invalid in variant context"
         go ChcB {} = error "variational expressions are invalid in variant context"
 
@@ -1631,8 +1623,6 @@ instance Pretty V where
   pretty P = "plain"
   pretty V = "var"
 
-instance Pretty Z.AST where pretty = Text.pack . show
-instance Pretty SBool where pretty (unSBool -> b) = pretty b
 instance (Pretty a, Pretty b) => Pretty (a :/\ b) where
   pretty (a :/\ b) = "(" <> pretty a <> "," <> pretty b <> ")"
 
