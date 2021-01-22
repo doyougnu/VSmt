@@ -23,11 +23,13 @@
 
 module Core.Types where
 
+import           Control.Monad       (liftM2)
 import           Control.DeepSeq     (NFData)
 import           Data.Fixed          (mod')
 import           Data.Hashable       (Hashable)
 import qualified Data.HashMap.Strict as M
 import qualified Data.Sequence       as Seq
+import qualified Data.SBV.Trans      as S
 import           Data.String         (IsString)
 import           Data.Text           (Text,pack,unpack)
 import           GHC.Generics        (Generic)
@@ -380,6 +382,30 @@ instance Boolean VariantContext where
   (==>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Impl   x y
   (<=>) (getVarFormula -> x) (getVarFormula -> y) = VariantContext $ OpBB Eqv    x y
 
+instance Boolean S.SBool where
+  true  = S.sTrue
+  false = S.sFalse
+  bnot  = S.sNot
+  (&&&) = (S..&&)
+  (|||) = (S..||)
+  (<=>) = (S..<=>)
+  {-# INLINE true #-}
+  {-# INLINE false #-}
+  {-# INLINE (&&&) #-}
+  {-# INLINE (|||) #-}
+  {-# INLINE (<=>) #-}
+
+instance Boolean b => Boolean (S.Symbolic b) where
+  true  = return true
+  false = return false
+  bnot  = fmap bnot
+  (&&&) = liftM2 (&&&)
+  (|||) = liftM2 (|||)
+  {-# INLINE true  #-}
+  {-# INLINE false #-}
+  {-# INLINE bnot  #-}
+  {-# INLINE (&&&) #-}
+  {-# INLINE (|||) #-}
 -- | Boilerplate to make Num (NExpr' a) work out
 instance Num NPrim where
   fromInteger = I . fromInteger
