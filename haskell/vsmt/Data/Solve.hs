@@ -437,8 +437,9 @@ instance Monoid    Counter where mempty = Counter 0
 unCounter :: Counter -> Int
 unCounter = fromEnum
 
-data Constants = Constants { genModels :: STM.TVar Bool
-                           , tagSeed   :: STM.TVar Tag
+data Constants = Constants { genModels  :: STM.TVar Bool
+                           , accTagSeed :: STM.TVar Tag
+                           , ctxTagSeed :: STM.TVar Tag
                            }
 
 data Diagnostics = Diagnostics
@@ -504,8 +505,9 @@ newStore = do vConfig    <- STM.newTVarIO mempty
               return Stores{..}
 
 newConstants :: Settings -> IO Constants
-newConstants Settings{..} = do genModels <- STM.newTVarIO generateModels
-                               tagSeed   <- STM.newTVarIO (Tag 0)
+newConstants Settings{..} = do genModels  <- STM.newTVarIO generateModels
+                               accTagSeed <- STM.newTVarIO (Tag 0)
+                               ctxTagSeed <- STM.newTVarIO (Tag 0)
                                return Constants{..}
 
 newDiagnostics :: IO Diagnostics
@@ -724,7 +726,7 @@ instance (Monad m, MonadIO m, Z.MonadZ3 m) =>
 -- doubt it'll ever actually occur
 -- TODO use Type Families to abstract over the monad and cache
 class Cacheable m a b where
-  memo    :: a -> m b -> m b
+  memo  :: a -> m b -> m b
 
 instance (Monad m, MonadIO m, MonadLogger m) =>
   Cacheable (SolverT m) Tag (V :/\ IL) where
@@ -755,9 +757,13 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
 ----------------------------------- IL -----------------------------------------
 type BRef = SBool
 
-generateKey :: (MonadIO m, R.MonadReader State m) => m Tag
-generateKey = updateWith (tagSeed . constants) succ
-              >> readWith (tagSeed . constants)
+generateAccKey :: (MonadIO m, R.MonadReader State m) => m Tag
+generateAccKey = updateWith (accTagSeed . constants) succ
+                 >> readWith (accTagSeed . constants)
+
+generateCtxKey :: (MonadIO m, R.MonadReader State m) => m Tag
+generateCtxKey = updateWith (ctxTagSeed . constants) succ
+                 >> readWith (ctxTagSeed . constants)
 
 data NRef = SI SInteger
           | SD SDouble
@@ -887,15 +893,15 @@ toIL (LitB True)  = (P :/\) . Ref <$> sTrue
 toIL (LitB False) = (P :/\) . Ref <$> sFalse
 toIL (RefB ref)   = (P :/\) <$> constrain ref
 toIL (OpB op e)      = do (v :/\ e') <- toIL e
-                          k <- generateKey
+                          k <- generateAccKey
                           return (v :/\  BOp k op (v :/\ e'))
 toIL (OpBB op l r) = do l'@(vl :/\ _) <- toIL l
                         r'@(vr :/\ _) <- toIL r
-                        k <- generateKey
+                        k <- generateAccKey
                         return (vl <@> vr :/\ BBOp k op l' r')
 toIL (OpIB op l r) = do l'@(vl :/\ _) <- toIL' l
                         r'@(vr :/\ _) <- toIL' r
-                        k <- generateKey
+                        k <- generateAccKey
                         return (vl <@> vr :/\ IBOp k op l' r')
 toIL (ChcB d l r)  = return (V :/\ Chc d l r)
 
@@ -909,11 +915,11 @@ toIL' (LitI (I i))  = (P :/\ ) . Ref' . SI <$> literalInt i
 toIL' (LitI (D d))  = (P :/\ ) . Ref' . SD <$> literalReal d
 toIL' (RefI a)      = (P :/\ ) <$> constrain a
 toIL' (OpI op e)    = do e'@(v :/\ _)  <- toIL' e
-                         k  <- generateKey
+                         k  <- generateAccKey
                          return (v :/\  IOp k op e')
 toIL' (OpII op l r) = do l'@(vl :/\ _) <- toIL' l
                          r'@(vr :/\ _) <- toIL' r
-                         k <- generateKey
+                         k <- generateAccKey
                          return (vl <@> vr :/\ IIOp k op l' r')
 toIL' (ChcI d l r)  = return (V :/\ Chc' d l r)
 
@@ -1046,12 +1052,12 @@ accumulate Unit    = return (P :/\ Unit)
 accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
-accumulate (BOp t Not (_ :/\ Ref r))  =  memo t $!
+accumulate (BOp _ Not (_ :/\ Ref r))  = -- memo t $!
   (P :/\ ) . Ref <$> sNot r
-accumulate (BBOp t op (_ :/\ Ref l) (_ :/\ Ref r)) = memo t $!
+accumulate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r)) = -- memo t $!
   (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate (IBOp t op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo t $!
+accumulate (IBOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r)) = -- memo t $!
   (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
@@ -1061,45 +1067,39 @@ accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-accumulate (BOp t Not (P :/\ e)) =  memo t $!
+accumulate (BOp t Not (P :/\ e)) = -- memo t $!
   do (_ :/\ e') <- accumulate e
-     k <- generateKey
-     let !res = BOp k Not (P :/\ e')
+     let !res = BOp t Not (P :/\ e')
      accumulate res
 
-accumulate (BOp t Not (V :/\ e)) =  memo t $!
+accumulate (BOp t Not (V :/\ e)) =  -- memo t $!
   do (_ :/\ e') <- accumulate e
-     k <- generateKey
-     let !res = BOp k Not (V :/\ e')
+     let !res = BOp t Not (V :/\ e')
      return (V :/\ res)
 
-accumulate (BBOp t op (P :/\ l) (P :/\ r)) =  memo t $!
+accumulate (BBOp t op (P :/\ l) (P :/\ r)) = --  memo t $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
-     k <- generateKey
-     let !res = BBOp k op (P :/\ l') (P :/\ r')
+     let !res = BBOp t op (P :/\ l') (P :/\ r')
      logInProducerWith "accumulating two refs: " res
      accumulate res
 
-accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  memo t $!
+accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
-     k <- generateKey
-     let !res  = BBOp k op (vl :/\ l') (vr :/\ r')
+     let !res  = BBOp t op (vl :/\ l') (vr :/\ r')
      return (vl <@> vr :/\ res)
 
-accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  memo t $!
+accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  -- memo t $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
-     k <- generateKey
-     let !res = IBOp k op (P :/\ l') (P :/\ r')
+     let !res = IBOp t op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  memo t $!
+accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
-     k <- generateKey
-     let !res = IBOp k op a b
+     let !res = IBOp t op a b
      return (vl <@> vr :/\  res)
 
 iAccumulate' :: (Z.MonadZ3 z3
@@ -1115,31 +1115,31 @@ iAccumulate' x@(IIOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
 iAccumulate' (IIOp _ op c@(_ :/\ Chc'{}) (P :/\ r)) = do !r' <- iAccumulate' r
-                                                         k <- generateKey
+                                                         k <- generateAccKey
                                                          return (V :/\ IIOp k op c r')
 iAccumulate' (IIOp _ op (P :/\ l) c@(_ :/\ Chc'{})) = do !l' <- iAccumulate' l
-                                                         k <- generateKey
+                                                         k <- generateAccKey
                                                          return (V :/\ IIOp k op l' c)
   -- congruence rules
 iAccumulate' (IIOp _ o (P :/\ l) (P :/\ r)) = do !x <- iAccumulate' l
                                                  !y <- iAccumulate' r
-                                                 k <- generateKey
+                                                 k <- generateAccKey
                                                  let !res = IIOp k o x y
                                                  iAccumulate' res
 
 iAccumulate' (IOp _ o (P :/\  e))  = do !e' <- iAccumulate' e
-                                        k <- generateKey
+                                        k <- generateAccKey
                                         let !res = IOp k o e'
                                         iAccumulate' res
 
 iAccumulate' (IOp _ o (_ :/\  e))  = do (v :/\ e') <- iAccumulate' e
-                                        k <- generateKey
+                                        k <- generateAccKey
                                         let res = IOp k o (v :/\ e')
                                         return (v :/\ res)
 
 iAccumulate' (IIOp _ o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
                                                  y@(vr :/\ _) <- iAccumulate' r
-                                                 k <- generateKey
+                                                 k <- generateAccKey
                                                  let !res = IIOp k o x y
                                                  return (vl <@> vr :/\  res)
 
@@ -1178,51 +1178,43 @@ evaluate (BBOp _ And (_ :/\ l) (_ :/\ Unit))      = evaluate l
 evaluate (BBOp _ And (_ :/\ Unit) (_ :/\ r))      = evaluate r
 evaluate (BBOp _ And (_ :/\ l) (_ :/\ x@(Ref _))) = do _ <- evaluate x; evaluate l
 evaluate (BBOp _ And (_ :/\ x@(Ref _)) (_ :/\ r)) = do _ <- evaluate x; evaluate r
-evaluate (IBOp _ op (P :/\ l) (P :/\ r))          = do !l' <- iAccumulate' l
+evaluate (IBOp k op (P :/\ l) (P :/\ r))          = do !l' <- iAccumulate' l
                                                        !r' <- iAccumulate' r
-                                                       k <- generateKey
                                                        let !res = IBOp k op l' r'
                                                        evaluate res
 
-evaluate (IBOp _ op (_ :/\ l) (_ :/\ r))          = do l' <- iAccumulate' l
+evaluate (IBOp k op (_ :/\ l) (_ :/\ r))          = do l' <- iAccumulate' l
                                                        r' <- iAccumulate' r
-                                                       k <- generateKey
                                                        let res = IBOp k op l' r'
                                                        return $! intoCore res
 
   -- accumulation cases
 evaluate x@(BOp _ Not (P :/\ _))  = accumulate x >>= evaluate . sSnd
 evaluate x@(BOp _ Not (V :/\ _))  = intoCore . sSnd <$> accumulate x
-evaluate (BBOp _ And (P :/\ l) (P :/\ r)) = log "[Eval P P] And case" >>
+evaluate (BBOp k And (P :/\ l) (P :/\ r)) = log "[Eval P P] And case" >>
   do (VarCore l') <- evaluate l
      (VarCore r') <- evaluate r
-     k <- generateKey
      let !res = BBOp k And (P :/\ l') (P :/\ r')
      evaluate res
-evaluate (BBOp _ And (V :/\ l) (P :/\ r)) = log "[Eval V P] And case" >>
+evaluate (BBOp k And (V :/\ l) (P :/\ r)) = log "[Eval V P] And case" >>
   do (VarCore r') <- evaluate r
-     k <- generateKey
      let !res = BBOp k And (V :/\ l) (P :/\ r')
      evaluate res
-evaluate (BBOp _ And (P :/\ l) (V :/\ r)) = log "[Eval P V] And case" >>
+evaluate (BBOp k And (P :/\ l) (V :/\ r)) = log "[Eval P V] And case" >>
   do (VarCore l') <- evaluate l
-     k <- generateKey
      let !res = BBOp k And (P :/\ l') (V :/\ r)
      evaluate res
-evaluate (BBOp _ op (P :/\ l) (P :/\ r)) = log "[Eval P P] General Case" >>
+evaluate (BBOp k op (P :/\ l) (P :/\ r)) = log "[Eval P P] General Case" >>
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
-     k <- generateKey
      let !res = BBOp k op (P :/\ l') (P :/\ r')
      evaluate res
-evaluate (BBOp _ op (V :/\ l) (P :/\ r)) = log "[Eval V P] General Case" >>
+evaluate (BBOp k op (V :/\ l) (P :/\ r)) = log "[Eval V P] General Case" >>
   do (_ :/\ r') <- accumulate r
-     k <- generateKey
      let !res = BBOp k op (V :/\ l) (P :/\ r')
      return $! intoCore res
-evaluate (BBOp _ op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
+evaluate (BBOp k op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
   do (_ :/\ l') <- accumulate l
-     k <- generateKey
      let !res = BBOp k op (P :/\ l') (V :/\ r)
      return $! intoCore res
 
@@ -1432,20 +1424,20 @@ accumulateCtx (InNum (P :/\ r) (V :/\ InR' l t op ctx)) =
 
   -- recur
   -- bools
-accumulateCtx (InBool (V :/\ BOp t op e) ctx)              = memo t $! accumulateCtx (InBool e (V :/\ InU t op ctx))
-accumulateCtx (InBool (V :/\ BBOp t op l@(P :/\ _) r) ctx) = memo t $! accumulateCtx (InBool l (V :/\ InL ctx t op r))
-accumulateCtx (InBool (V :/\ BBOp t op l r@(P :/\ _)) ctx) = memo t $! accumulateCtx (InBool r (V :/\ InR l t op ctx))
+accumulateCtx (InBool (V :/\ BOp t op e) ctx)              = accumulateCtx (InBool e (V :/\ InU t op ctx))
+accumulateCtx (InBool (V :/\ BBOp t op l@(P :/\ _) r) ctx) = accumulateCtx (InBool l (V :/\ InL ctx t op r))
+accumulateCtx (InBool (V :/\ BBOp t op l r@(P :/\ _)) ctx) = accumulateCtx (InBool r (V :/\ InR l t op ctx))
   -- on the general case prefer the left side
 accumulateCtx (InBool (V :/\ BBOp t op l r) ctx) = accumulateCtx (InBool l (V :/\ InL ctx t op r))
   -- inequalities
-accumulateCtx (InNum (V :/\ IOp t op e) ctx)               = memo t $! accumulateCtx (InNum e (V :/\ InU' t op ctx))
-accumulateCtx (InBool (V :/\ IBOp t op l@(P :/\ _) r) ctx) = memo t $! accumulateCtx (InNum l (V :/\ InLB ctx t op r))
-accumulateCtx (InBool (V :/\ IBOp t op l r@(P :/\ _)) ctx) = memo t $! accumulateCtx (InNum r (V :/\ InRB l t op ctx))
-accumulateCtx (InBool (V :/\ IBOp t op l r) ctx)           = memo t $! accumulateCtx (InNum l (V :/\ InLB ctx t op r))
+accumulateCtx (InNum (V :/\ IOp t op e) ctx)               = accumulateCtx (InNum e (V :/\ InU' t op ctx))
+accumulateCtx (InBool (V :/\ IBOp t op l@(P :/\ _) r) ctx) = accumulateCtx (InNum l (V :/\ InLB ctx t op r))
+accumulateCtx (InBool (V :/\ IBOp t op l r@(P :/\ _)) ctx) = accumulateCtx (InNum r (V :/\ InRB l t op ctx))
+accumulateCtx (InBool (V :/\ IBOp t op l r) ctx)           = accumulateCtx (InNum l (V :/\ InLB ctx t op r))
   -- numerics
-accumulateCtx (InNum (V :/\ IIOp t op l@(P :/\ _) r) ctx) = memo t $! accumulateCtx (InNum l (V :/\ InL' ctx t op r))
-accumulateCtx (InNum (V :/\ IIOp t op l r@(P :/\ _)) ctx) = memo t $! accumulateCtx (InNum r (V :/\ InR' l t op ctx))
-accumulateCtx (InNum (V :/\ IIOp t op l r) ctx)           = memo t $! accumulateCtx (InNum l (V :/\ InL' ctx t op r))
+accumulateCtx (InNum (V :/\ IIOp t op l@(P :/\ _) r) ctx) = accumulateCtx (InNum l (V :/\ InL' ctx t op r))
+accumulateCtx (InNum (V :/\ IIOp t op l r@(P :/\ _)) ctx) = accumulateCtx (InNum r (V :/\ InR' l t op ctx))
+accumulateCtx (InNum (V :/\ IIOp t op l r) ctx)           = accumulateCtx (InNum l (V :/\ InL' ctx t op r))
 
 accumulateCtx x = error $ "an impossible case happened" ++ show x
 
