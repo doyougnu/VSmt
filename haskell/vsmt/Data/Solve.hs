@@ -50,6 +50,7 @@ import           Control.Monad.Trans                   (MonadIO, MonadTrans,
 import qualified Data.HashMap.Strict                   as Map
 import qualified Data.IntMap.Strict                    as IMap
 import           Data.Maybe                            (fromJust)
+import           Data.Monoid                           (Sum(..))
 import           Data.Hashable                         (Hashable)
 
 import qualified Z3.Monad                              as Z ( AST
@@ -438,8 +439,6 @@ unCounter :: Counter -> Int
 unCounter = fromEnum
 
 data Constants = Constants { genModels  :: STM.TVar Bool
-                           , accTagSeed :: STM.TVar Tag
-                           , ctxTagSeed :: STM.TVar Tag
                            }
 
 data Diagnostics = Diagnostics
@@ -457,9 +456,18 @@ data FrozenDiags = FrozenDiags
                    , fAccCacheMiss :: !Counter
                    } deriving (Generic, Show)
 
+data FrozenCaches = FrozenCaches
+                    { faccCache :: ACache
+                    , fctxCache :: CtxCache
+                    , faccTagSeed :: Tag
+                    , fctxTagSeed :: Tag
+                    }
+
 data Caches = Caches
               { accCache :: STM.TVar ACache
               , ctxCache :: STM.TVar CtxCache
+              , accTagSeed :: STM.TVar Tag
+              , ctxTagSeed :: STM.TVar Tag
               }
 
 data Stores = Stores
@@ -489,6 +497,8 @@ data Channels = Channels { vcChans   :: VCChannels
 newCaches :: IO Caches
 newCaches = do accCache <- STM.newTVarIO mempty
                ctxCache <- STM.newTVarIO mempty
+               accTagSeed <- STM.newTVarIO (Tag 0)
+               ctxTagSeed <- STM.newTVarIO (Tag 0)
                return Caches{..}
 
 newResults :: IO Results
@@ -506,8 +516,6 @@ newStore = do vConfig    <- STM.newTVarIO mempty
 
 newConstants :: Settings -> IO Constants
 newConstants Settings{..} = do genModels  <- STM.newTVarIO generateModels
-                               accTagSeed <- STM.newTVarIO (Tag 0)
-                               ctxTagSeed <- STM.newTVarIO (Tag 0)
                                return Constants{..}
 
 newDiagnostics :: IO Diagnostics
@@ -578,6 +586,13 @@ freeze = do st       <- R.asks stores
             fdimensions <- read dimensions st
             return FrozenStores{..}
 
+freezeCache :: (R.MonadReader State io, MonadIO io) => io FrozenCaches
+freezeCache = do st          <- R.asks caches
+                 faccCache   <- read accCache   st
+                 fctxCache   <- read ctxCache   st
+                 faccTagSeed <- read accTagSeed st
+                 fctxTagSeed <- read ctxTagSeed st
+                 return FrozenCaches{..}
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores
@@ -758,12 +773,12 @@ instance (Monad m, MonadIO m, MonadLogger m) =>
 type BRef = SBool
 
 generateAccKey :: (MonadIO m, R.MonadReader State m) => m Tag
-generateAccKey = updateWith (accTagSeed . constants) succ
-                 >> readWith (accTagSeed . constants)
+generateAccKey = updateWith (accTagSeed . caches) succ
+                 >> readWith (accTagSeed . caches)
 
 generateCtxKey :: (MonadIO m, R.MonadReader State m) => m Tag
-generateCtxKey = updateWith (ctxTagSeed . constants) succ
-                 >> readWith (ctxTagSeed . constants)
+generateCtxKey = updateWith (ctxTagSeed . caches) succ
+                 >> readWith (ctxTagSeed . caches)
 
 data NRef = SI SInteger
           | SD SDouble
@@ -771,8 +786,9 @@ data NRef = SI SInteger
 
 newtype Tag = Tag { unTag :: Int }
   deriving stock (Eq,Ord,Generic,Show)
+  deriving (Enum, Num) via Int
   deriving anyclass (NFData,Hashable)
-  deriving Enum via Int
+  deriving (Semigroup,Monoid) via (Sum Int)
 
 -- | The intermediate language, we express negation but negation will not exist
 -- in a variational core. The IL language is intermediate and used to collapse
@@ -1052,12 +1068,12 @@ accumulate Unit    = return (P :/\ Unit)
 accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
-accumulate (BOp _ Not (_ :/\ Ref r))  = -- memo t $!
+accumulate (BOp t Not (_ :/\ Ref r))  = memo t $!
   (P :/\ ) . Ref <$> sNot r
-accumulate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r)) = -- memo t $!
+accumulate (BBOp t op (_ :/\ Ref l) (_ :/\ Ref r)) = memo t $!
   (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate (IBOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r)) = -- memo t $!
+accumulate (IBOp t op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo t $!
   (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
@@ -1067,36 +1083,36 @@ accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-accumulate (BOp t Not (P :/\ e)) = -- memo t $!
+accumulate (BOp t Not (P :/\ e)) = memo t $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp t Not (P :/\ e')
      accumulate res
 
-accumulate (BOp t Not (V :/\ e)) =  -- memo t $!
+accumulate (BOp t Not (V :/\ e)) =  memo t $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp t Not (V :/\ e')
      return (V :/\ res)
 
-accumulate (BBOp t op (P :/\ l) (P :/\ r)) = --  memo t $!
+accumulate (BBOp t op (P :/\ l) (P :/\ r)) =  memo t $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
      let !res = BBOp t op (P :/\ l') (P :/\ r')
      logInProducerWith "accumulating two refs: " res
      accumulate res
 
-accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
+accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  memo t $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
      let !res  = BBOp t op (vl :/\ l') (vr :/\ r')
      return (vl <@> vr :/\ res)
 
-accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  -- memo t $!
+accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  memo t $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
      let !res = IBOp t op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
+accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  memo t $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp t op a b
@@ -1114,32 +1130,26 @@ iAccumulate' x@Chc' {}                                    = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
-iAccumulate' (IIOp _ op c@(_ :/\ Chc'{}) (P :/\ r)) = do !r' <- iAccumulate' r
-                                                         k <- generateAccKey
+iAccumulate' (IIOp k op c@(_ :/\ Chc'{}) (P :/\ r)) = do !r' <- iAccumulate' r
                                                          return (V :/\ IIOp k op c r')
-iAccumulate' (IIOp _ op (P :/\ l) c@(_ :/\ Chc'{})) = do !l' <- iAccumulate' l
-                                                         k <- generateAccKey
+iAccumulate' (IIOp k op (P :/\ l) c@(_ :/\ Chc'{})) = do !l' <- iAccumulate' l
                                                          return (V :/\ IIOp k op l' c)
   -- congruence rules
-iAccumulate' (IIOp _ o (P :/\ l) (P :/\ r)) = do !x <- iAccumulate' l
+iAccumulate' (IIOp k o (P :/\ l) (P :/\ r)) = do !x <- iAccumulate' l
                                                  !y <- iAccumulate' r
-                                                 k <- generateAccKey
                                                  let !res = IIOp k o x y
                                                  iAccumulate' res
 
-iAccumulate' (IOp _ o (P :/\  e))  = do !e' <- iAccumulate' e
-                                        k <- generateAccKey
+iAccumulate' (IOp k o (P :/\  e))  = do !e' <- iAccumulate' e
                                         let !res = IOp k o e'
                                         iAccumulate' res
 
-iAccumulate' (IOp _ o (_ :/\  e))  = do (v :/\ e') <- iAccumulate' e
-                                        k <- generateAccKey
+iAccumulate' (IOp k o (_ :/\  e))  = do (v :/\ e') <- iAccumulate' e
                                         let res = IOp k o (v :/\ e')
                                         return (v :/\ res)
 
-iAccumulate' (IIOp _ o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
+iAccumulate' (IIOp k o (_ :/\ l) (_ :/\ r)) = do x@(vl :/\ _) <- iAccumulate' l
                                                  y@(vr :/\ _) <- iAccumulate' r
-                                                 k <- generateAccKey
                                                  let !res = IIOp k o x y
                                                  return (vl <@> vr :/\  res)
 
@@ -1482,6 +1492,14 @@ resetTo FrozenStores{..} = do update config  (const fconfig)
                               update sConfig (const fsConfig)
                               update vConfig (const fvConfig)
 
+resetCache :: (R.MonadReader State io, MonadIO io) => FrozenCaches -> io ()
+{-# INLINE     resetCache #-}
+{-# SPECIALIZE resetCache :: FrozenCaches -> Solver () #-}
+resetCache FrozenCaches{..} = do updateCache accCache (const faccCache)
+                                 updateCache ctxCache (const fctxCache)
+                                 updateCache accTagSeed (const faccTagSeed)
+                                 updateCache ctxTagSeed (const fctxTagSeed)
+
 -- | Given a dimensions and a way to continue with the left alternative, and a
 -- way to continue with the right alternative. Spawn two new subprocesses that
 -- process the alternatives plugging the choice hole with its respective
@@ -1492,6 +1510,7 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> SolverT n ()
 alternative dim goLeft goRight =
   do !s <- freeze
+     c <- freezeCache
      symbolicContext <- reads sConfig
      chans <- R.asks channels
      logInProducerWith "In alternative with Dim" dim
@@ -1511,6 +1530,7 @@ alternative dim goLeft goRight =
        let !continueLeft = Z.local $
                            do logInProducerWith "Left Alternative of" dim
                               resetTo s
+
                               updateConfigs (bRef dim) (dim,True) newSConfigL
                               goLeft
        logInProducer "Writing to continue left"
@@ -1525,6 +1545,7 @@ alternative dim goLeft goRight =
        let !continueRight = Z.local $
                             do logInProducerWith "Right Alternative of" dim
                                resetTo s
+                               resetCache c
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
                                goRight
        continueRight
