@@ -14,6 +14,7 @@
 
 module Settings
   ( Settings(..)
+  , unSolver
   , defSettings
   , defWithModels
   , defSettingsOnlySat
@@ -23,8 +24,10 @@ module Settings
   ) where
 
 import GHC.Generics (Generic)
+import qualified Data.SBV  as S (z3, SMTConfig(..), name)
 
-data Settings = Settings { seed             :: Maybe Integer
+data Settings = Settings { solver           :: Solver
+                         , seed             :: Maybe Integer
                          , numResults       :: Maybe Int
                          , generateModels   :: Bool
                          , verboseMode      :: Bool
@@ -36,11 +39,14 @@ data Settings = Settings { seed             :: Maybe Integer
                          , numVCWorkers     :: Int
                          } deriving (Show, Generic)
 
+newtype Solver = Solver { unSolver :: S.SMTConfig }
+instance Show Solver where show = show . S.name . S.solver . unSolver
 
 -- | Convert an interfacial interface to an SMT one
 -- | A default configuration uses z3 and tries to shrink propositions
 defSettings :: Settings
-defSettings = Settings{ seed            = Nothing
+defSettings = Settings{ solver          = Solver S.z3
+                      , seed            = Nothing
                       , generateModels  = False
                       , verboseMode     = False
                       , vcBufSize       = 25000
@@ -56,7 +62,8 @@ defSettingsOnlySat :: Settings
 defSettingsOnlySat = defSettings{generateModels = False}
 
 minSettings :: Settings
-minSettings = Settings{ seed            = Nothing
+minSettings = Settings{ solver          = Solver S.z3
+                      , seed            = Nothing
                       , generateModels  = False
                       , verboseMode     = False
                       , vcBufSize       = 200
