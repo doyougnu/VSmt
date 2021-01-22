@@ -140,11 +140,11 @@ getSatisfiableVCs :: Result -> Maybe VariantContext
 getSatisfiableVCs = satisfiableVCs . unboxResult
 
 -- | check if the current context is sat or not
-isSat :: C.Query Bool
+isSat :: C.Query (Bool :/\ Result)
 isSat = do cs <- C.checkSat
            return $! case cs of
-                       C.Sat -> True
-                       _     -> False
+                       C.Sat -> True  :/\ mempty
+                       _     -> False :/\ mempty
 
 wasSat :: Result -> Bool
 wasSat = isJust . satisfiableVCs . unboxResult
@@ -155,11 +155,10 @@ getVSMTModel = force <$> T.getSMTResult
 
 -- TODO: https://github.com/doyougnu/VSmt/issues/5
 -- | Get a VSMT model in any supported monad.
-getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
+getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m (Bool :/\ Result)
 getResult !vf =
   do !model <- getVSMTModel
      return $!
-       Result $!
        case model of
          m@(S.Satisfiable _ _)         ->
         -- when satisfiable we get the model dictionary, turn it into a
@@ -168,14 +167,14 @@ getResult !vf =
            let !gMD = S.getModelDictionary $! m
                xs = toList gMD
                res = toResMap xs
-               in res
+               in  True :/\ Result res
       -- (S.Unsatisfiable _ unsatCore) ->
         -- we apply f to True here because in the case of an unsat we want to
         -- save the proposition that produced the unsat, if we applied to
         -- false then we would have the negation of that proposition for
         -- unsat
         -- unSatToResult (f True) $ fromMaybe mempty unsatCore
-         _                           -> mempty
+         _                           -> False :/\ mempty
  where
    toResMap !m' =
      -- Result' {variables = VariableMap $! M.foldMapWithKey
