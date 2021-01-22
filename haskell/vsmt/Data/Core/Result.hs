@@ -140,11 +140,13 @@ getSatisfiableVCs :: Result -> Maybe VariantContext
 getSatisfiableVCs = satisfiableVCs . unboxResult
 
 -- | check if the current context is sat or not
-isSat :: C.Query (Bool :/\ Result)
-isSat = do cs <- C.checkSat
-           return $! case cs of
-                       C.Sat -> True  :/\ mempty
-                       _     -> False :/\ mempty
+isSat :: Maybe VariantContext -> C.Query (Bool :/\ Result)
+isSat vcs = do cs <- C.checkSat
+               return $! case cs of
+                 C.Sat -> (True :/\) $ Result $! Result' {variables=mempty
+                                                         ,satisfiableVCs=vcs
+                                                         }
+                 _     -> (False :/\ mempty)
 
 wasSat :: Result -> Bool
 wasSat = isJust . satisfiableVCs . unboxResult
