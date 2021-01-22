@@ -20,6 +20,8 @@ module Core.Pretty where
 import qualified Data.Text       as Text
 import           Prelude         hiding (EQ, GT, LT, log)
 import qualified Data.HashMap.Strict as M
+import qualified Data.SBV.Internals     as I
+import qualified Data.SBV.Trans         as S
 
 import           Core.Types
 
@@ -136,6 +138,6 @@ instance Pretty [(Maybe VariantContext, Value)] where
   pretty ((Just ctx, val):xs) = "ite" <> space <> pretty ctx <> space
                                <> parens (pretty val) <> space <> pretty xs
 
--- instance {-# OVERLAPS #-} Pretty a => Pretty [a] where
---   pretty [] = mempty
---   pretty xs = mconcat $ pretty <$> xs
+instance Pretty S.Kind where pretty = Text.pack . show
+instance Pretty I.CV where pretty = Text.pack . show
+instance Pretty S.SBool where pretty = Text.pack . show

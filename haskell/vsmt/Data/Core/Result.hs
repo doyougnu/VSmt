@@ -24,22 +24,29 @@
 
 module Core.Result where
 
-import           Control.Monad.IO.Class (MonadIO,liftIO)
+import           Control.Monad.IO.Class (MonadIO)
 
-import           Control.Monad.Logger   (MonadLogger)
-import           Control.DeepSeq        (NFData)
+import           Control.DeepSeq        (NFData,force)
 import           Data.Hashable          (Hashable)
-import           Data.Text              (Text, pack, unpack)
+import           Data.Text              (Text, unpack)
+import           Data.String            (fromString)
+import           Data.Maybe             (isJust)
 import           GHC.Generics           (Generic)
+import           Data.Map               (toList)
 
 import qualified Data.HashMap.Strict    as M
 import qualified Data.Sequence          as Seq
-import qualified Z3.Monad               as Z
+
+import qualified Data.SBV.Control       as C
+import qualified Data.SBV.Internals     as I
+import qualified Data.SBV.Trans         as S
+import qualified Data.SBV.Trans.Control as T
+
 
 import           Core.Pretty
 import           Core.Types
 import           Core.Utils             ((:/\) (..))
-import           Parser.Z3
+
 
 -- | An SMT Result formula, spine strict, we leave values lazy because they may
 -- not be needed. We will be incrementally building these formulas through
@@ -49,7 +56,7 @@ import           Parser.Z3
 -- You should view this as an internal datatype, in the average case this will
 -- be transformed into a Map of "variable" -> SMTLIB2 program where the SMTLIB2
 -- program will dispatch the right value based on the values of dimensions
-newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext :/\ Value))
+newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext :/\ I.CV))
     deriving (Eq,Show,Semigroup,Monoid,Generic,NFData)
 
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
@@ -84,13 +91,13 @@ instance Pretty (Result' Var) where
 
 -- TODO: use Text.PrintF from base for better formatted output
 deriving instance Pretty d => Pretty (VariableMap d)
-instance Pretty (Seq.Seq (Maybe VariantContext :/\ Value)) where pretty = prettyResultFormula
+instance Pretty (Seq.Seq (Maybe VariantContext :/\ I.CV)) where pretty = prettyResultFormula
 instance Pretty d => Pretty (M.HashMap d ResultFormula) where
   pretty = M.foldMapWithKey (\k v -> pretty k <> "   -->   " <> pretty v <> newline)
 
 -- | We use a Maybe to form the mempty for monoid, this leads to prettier pretty
 -- printing
-prettyResultFormula :: Seq.Seq (Maybe VariantContext :/\ Value) -> Text
+prettyResultFormula :: Seq.Seq (Maybe VariantContext :/\ I.CV) -> Text
 prettyResultFormula Seq.Empty = mempty
 prettyResultFormula ((Nothing :/\ val) Seq.:<| Seq.Empty)  = pretty val
 prettyResultFormula ((Just !ctx :/\ val) Seq.:<| Seq.Empty) =
@@ -133,26 +140,48 @@ getSatisfiableVCs :: Result -> Maybe VariantContext
 getSatisfiableVCs = satisfiableVCs . unboxResult
 
 -- | check if the current context is sat or not
-isSat :: Z.MonadZ3 m => Maybe VariantContext -> m (Bool :/\ Result)
-isSat vcs = do cs <- Z.check
-               return $! case cs of
-                           Z.Sat -> (True :/\) $ Result $! Result' {variables=mempty
-                                                                   ,satisfiableVCs=vcs
-                                                                   }
-                           _     -> (False :/\ mempty)
+isSat :: C.Query Bool
+isSat = do cs <- C.checkSat
+           return $! case cs of
+                       C.Sat -> True
+                       _     -> False
+
+wasSat :: Result -> Bool
+wasSat = isJust . satisfiableVCs . unboxResult
 
 -- | Generate a VSMT model
-getResult :: (Z.MonadZ3 m, MonadIO m, MonadLogger m) => Maybe VariantContext -> m (Bool :/\ Result)
-getResult !vc =
-  do (!r,!m) <- Z.getModel
-     case r of
-       Z.Unsat -> liftIO $ putStrLn "Unsat" >> return (False :/\ mempty)
-       Z.Undef -> liftIO $ putStrLn "undef" >> return (False :/\ mempty)
-       _       ->
-         do m' <- maybe (pure mempty) Z.modelToString m
-            let !ms  = parseModel . pack $! m'
-                bindings = VariableMap $!
-                           M.fromList $!
-                           fmap (\(k :/\ v) ->
-                                   (k, ResultFormula $! pure (vc :/\ v))) ms
-            return $ (True :/\) . Result $! Result' {variables = bindings, satisfiableVCs = vc}
+getVSMTModel :: (T.MonadQuery m, MonadIO m) => m S.SMTResult
+getVSMTModel = force <$> T.getSMTResult
+
+-- TODO: https://github.com/doyougnu/VSmt/issues/5
+-- | Get a VSMT model in any supported monad.
+getResult :: (MonadIO m, T.MonadQuery m) => Maybe VariantContext -> m Result
+getResult !vf =
+  do !model <- getVSMTModel
+     return $!
+       Result $!
+       case model of
+         m@(S.Satisfiable _ _)         ->
+        -- when satisfiable we get the model dictionary, turn it into a
+        -- result map and then insert the config proposition that created the
+        -- satisfiable result into the __Sat element of the map
+           let !gMD = S.getModelDictionary $! m
+               xs = toList gMD
+               res = toResMap xs
+               in res
+      -- (S.Unsatisfiable _ unsatCore) ->
+        -- we apply f to True here because in the case of an unsat we want to
+        -- save the proposition that produced the unsat, if we applied to
+        -- false then we would have the negation of that proposition for
+        -- unsat
+        -- unSatToResult (f True) $ fromMaybe mempty unsatCore
+         _                           -> mempty
+ where
+   toResMap !m' =
+     -- Result' {variables = VariableMap $! M.foldMapWithKey
+     --          (\(!k) (!a) -> M.singleton (fromString k) (ResultFormula $! pure (vf, a))) m'
+     --         ,satResult=vf}
+     Result' {variables = VariableMap $!
+                          M.fromList $!
+                          fmap (\(!k,!v) -> (fromString k, ResultFormula $! pure (vf :/\ v))) m'
+             ,satisfiableVCs=vf}
