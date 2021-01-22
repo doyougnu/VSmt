@@ -21,6 +21,7 @@ module Settings
   , minSettings
   , debugSettings
   , minAsyncSettings
+  , with
   ) where
 
 import GHC.Generics (Generic)
@@ -42,6 +43,8 @@ data Settings = Settings { solver           :: Solver
 newtype Solver = Solver { unSolver :: S.SMTConfig }
 instance Show Solver where show = show . S.name . S.solver . unSolver
 
+with :: Settings -> S.SMTConfig ->  Settings
+with s c = s{solver = Solver c}
 -- | Convert an interfacial interface to an SMT one
 -- | A default configuration uses z3 and tries to shrink propositions
 defSettings :: Settings

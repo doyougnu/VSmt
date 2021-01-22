@@ -1,8 +1,0 @@
-v-->v,V1,2,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
-2,0,0,0
-v-->v,V1*V2,4,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
-3,1,0,0
-v-->v,V1*V2*V3,8,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
-4,4,0,0
-v-->v,V1*V2*V3*V4,16,fSatCnt,fUnSatCnt,fAccCacheHits,fAccCacheMiss
-5,11,0,0

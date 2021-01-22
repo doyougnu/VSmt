@@ -87,8 +87,9 @@ mkDescription alg confDesc props = desc
              , "Variants"   , show variants
              ]
     !desc = mconcat $ intersperse "/" $ pure alg ++ pure confDesc ++ desc'
-    !nPln = average $ plainCount <$> props
-    !nChc = average $ choiceCount <$> props
+    nPln,nChc :: Int
+    !nPln = floor $ average $ plainCount <$> props
+    !nChc = floor $ average $ choiceCount <$> props
     ratio :: Float
     !ratio = average $ compressionRatio <$> props
     vCoreTotalSum, vCorePlainSum, vCoreVarSum :: Int

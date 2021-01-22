@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module    : Utils
@@ -22,6 +23,7 @@ import qualified Data.Map            as M
 import qualified Data.SBV            as S
 import qualified Data.SBV.Control    as SC
 import           Data.SBV.Internals  (cvToBool)
+
 
 import           Data.String         (IsString (..))
 import           Data.List           (nub)
@@ -95,15 +97,12 @@ evalSBVQ (OpBB op l r)  = do l' <- evalSBVQ l
 evalSBVQ ChcB {} = error "no choices here!"
 evalSBVQ OpIB {} = error "Type Chef throws smt problems?"
 
-
-
 udispatchop :: Boolean b => BB_B -> b -> b -> b
 udispatchop And  = (&&&)
 udispatchop Or   = (|||)
 udispatchop Impl = (==>)
 udispatchop Eqv  = (<=>)
 udispatchop XOr  = (<+>)
-
 
 -- | Plain propositions on the variational solver testing the overhead of
 -- accumulate/evaluate
@@ -130,22 +129,23 @@ vOnPModel :: Proposition -> IO [Bool :/\ R.Result]
 vOnPModel p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) (configs)
-      go prop = SC.query $
-        SC.inNewAssertionStack $
+      go prop = SC.inNewAssertionStack $
         do s <- evalSBVPlainQ prop
            S.constrain s
            R.getResult mempty
-  S.runSMT $ mapM go ps
+  S.runSMT $ SC.query $ mapM go ps
 
-vOnP :: Proposition -> IO [SC.CheckSatResult]
+vOnP :: Proposition -> IO [Bool]
 vOnP p = do
   let configs = genConfigs p
       ps = fmap (Plain . (`configure` p)) configs
-      go prop = SC.query $ SC.inNewAssertionStack $
+      go prop = SC.inNewAssertionStack $
                 do s <- evalSBVPlainQ prop
                    S.constrain s
-                   SC.checkSat
-  S.runSMT $ mapM go ps
+                   SC.checkSat >>= return . \case
+                     SC.Sat -> True
+                     _      -> False
+  S.runSMT $ SC.query $ mapM go ps
 
 vOnPByConfig :: Proposition -> IO [VariantContext :/\ Bool]
 vOnPByConfig p = do
