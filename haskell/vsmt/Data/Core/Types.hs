@@ -333,6 +333,84 @@ instance Enum Value where
   fromEnum (N (D _)) = error "Enum on double"
   fromEnum (B b)     = fromEnum b
 
+instance PrimN S.SDouble where
+  (./)  = S.fpDiv S.sRoundNearestTiesToAway
+  (.%)  = undefined
+
+instance PrimN S.SInt8 where
+  (./)  = S.sDiv
+  (.%)  = S.sMod
+
+instance PrimN S.SInt16 where
+  (./)  = S.sDiv
+  (.%)  = S.sMod
+
+instance PrimN S.SInt32 where
+  (./)  = S.sDiv
+  (.%)  = S.sMod
+
+instance PrimN S.SInt64 where
+  (./)  = S.sDiv
+  (.%)  = S.sMod
+
+instance PrimN S.SInteger where
+  (./)  = S.sDiv
+  (.%)  = S.sMod
+
+instance Prim S.SBool S.SInt8 where
+  (.<)  = (S..<)
+  (.<=) = (S..<=)
+  (.==) = (S..==)
+  (./=) = (S../=)
+  (.>=) = (S..>=)
+  (.>)  = (S..>)
+
+instance Prim S.SBool S.SInt16 where
+  (.<)  = (S..<)
+  (.<=) = (S..<=)
+  (.==) = (S..==)
+  (./=) = (S../=)
+  (.>=) = (S..>=)
+  (.>)  = (S..>)
+
+instance Prim S.SBool S.SInt32 where
+  (.<)  = (S..<)
+  (.<=) = (S..<=)
+  (.==) = (S..==)
+  (./=) = (S../=)
+  (.>=) = (S..>=)
+  (.>)  = (S..>)
+
+instance Prim S.SBool S.SInt64 where
+  (.<)  = (S..<)
+  (.<=) = (S..<=)
+  (.==) = (S..==)
+  (./=) = (S../=)
+  (.>=) = (S..>=)
+  (.>)  = (S..>)
+
+instance Prim S.SBool S.SDouble where
+  (.<)  = (S..<)
+  (.<=) = (S..<=)
+  (.==) = (S..==)
+  (./=) = (S../=)
+  (.>=) = (S..>=)
+  (.>)  = (S..>)
+
+instance Prim S.SBool S.SInteger where
+  (.<)  = (S..<)
+  (.<=) = (S..<=)
+  (.==) = (S..==)
+  (./=) = (S../=)
+  (.>=) = (S..>=)
+  (.>)  = (S..>)
+
+-- | make prop mergeable so choices can use symbolic conditionals
+instance S.Mergeable (Prop' a) where
+  symbolicMerge _ b thn els
+    | Just result <- S.unliteral b = if result then thn else els
+  symbolicMerge _ _ _ _ = undefined -- quite -WALL
+
 -- | We can treat a variational proposition as a boolean formulae
 class Boolean b where
   true  :: b
