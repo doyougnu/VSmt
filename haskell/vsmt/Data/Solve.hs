@@ -1068,12 +1068,12 @@ accumulate Unit    = return (P :/\ Unit)
 accumulate x@Ref{} = return (P :/\ x)
 accumulate x@Chc{} = return (V :/\ x)
   -- bools
-accumulate (BOp t Not (_ :/\ Ref r))  = memo t $!
+accumulate (BOp _ Not (_ :/\ Ref r))  = -- memo t $!
   (P :/\ ) . Ref <$> sNot r
-accumulate (BBOp t op (_ :/\ Ref l) (_ :/\ Ref r)) = memo t $!
+accumulate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r)) = -- memo t $!
   (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate (IBOp t op (_ :/\ Ref' l) (_ :/\ Ref' r)) = memo t $!
+accumulate (IBOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r)) = -- memo t $!
   (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
@@ -1083,36 +1083,36 @@ accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ _ (_ :/\ Ref' _)  (_ :/\ Chc' {})) = return (V :/\ x)
 accumulate x@(IBOp _ _ (_ :/\ Chc' {}) (_ :/\ Ref' _))  = return (V :/\ x)
  -- congruence rules
-accumulate (BOp t Not (P :/\ e)) = memo t $!
+accumulate (BOp t Not (P :/\ e)) = -- memo t $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp t Not (P :/\ e')
      accumulate res
 
-accumulate (BOp t Not (V :/\ e)) =  memo t $!
+accumulate (BOp t Not (V :/\ e)) =  -- memo t $!
   do (_ :/\ e') <- accumulate e
      let !res = BOp t Not (V :/\ e')
      return (V :/\ res)
 
-accumulate (BBOp t op (P :/\ l) (P :/\ r)) =  memo t $!
+accumulate (BBOp t op (P :/\ l) (P :/\ r)) = --  memo t $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
      let !res = BBOp t op (P :/\ l') (P :/\ r')
      logInProducerWith "accumulating two refs: " res
      accumulate res
 
-accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  memo t $!
+accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
   do (vl :/\ l') <- accumulate l
      (vr :/\ r') <- accumulate r
      let !res  = BBOp t op (vl :/\ l') (vr :/\ r')
      return (vl <@> vr :/\ res)
 
-accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  memo t $!
+accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  -- memo t $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
      let !res = IBOp t op (P :/\ l') (P :/\ r')
      accumulate res
 
-accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  memo t $!
+accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp t op a b
@@ -1510,7 +1510,7 @@ alternative ::
   ) => Dim -> SolverT n () -> SolverT n () -> SolverT n ()
 alternative dim goLeft goRight =
   do !s <- freeze
-     c <- freezeCache
+     -- c <- freezeCache
      symbolicContext <- reads sConfig
      chans <- R.asks channels
      logInProducerWith "In alternative with Dim" dim
@@ -1545,7 +1545,7 @@ alternative dim goLeft goRight =
        let !continueRight = Z.local $
                             do logInProducerWith "Right Alternative of" dim
                                resetTo s
-                               resetCache c
+                               -- resetCache c
                                updateConfigs (bnot $ bRef dim) (dim,False) newSConfigR
                                goRight
        continueRight
