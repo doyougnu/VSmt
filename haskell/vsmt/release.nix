@@ -19,7 +19,7 @@ let
               # };
 
               # sbv = haskellPackagesNew.callPackage ./lib/sbv/sbv.nix { };
-              sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
+              # sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
               # sbv = haskellPackagesNew.callPackage ~/Programming/sbv/sbv.nix { };
               unordered-containers = haskellPackagesNew.callPackage ./unordered-containers.nix {};
             };

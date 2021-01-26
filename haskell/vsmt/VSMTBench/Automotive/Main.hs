@@ -215,7 +215,7 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  diagnostics "raw_data/auto_diagnostics.csv" defSettings
+  -- diagnostics "raw_data/auto_diagnostics.csv" defSettings
 
   defaultMain $
     [  bgroup "Z3" (benches defSettings)

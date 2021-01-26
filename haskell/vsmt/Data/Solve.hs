@@ -862,7 +862,7 @@ data IL = Unit
     | BOp  Tag  B_B (V :/\ IL)
     | BBOp Tag BB_B (V :/\ IL)  (V :/\ IL)
     | IBOp Tag NN_B (V :/\ IL') (V :/\ IL')
-    | Chc Dim !Proposition !Proposition
+    | Chc Dim Proposition Proposition
     deriving stock (Generic, Show, Eq)
 
 data IL' = Ref' !NRef
@@ -1226,217 +1226,113 @@ evaluate (BBOp k op (P :/\ l) (V :/\ r)) = log "[Eval P V] General Case" >>
 -- removes the need to perform tree rotations. We make this as strict as
 -- possible because we know we will be consuming the entire structure so there
 -- is not need to build thunks
-data Ctx = InL  (V :/\ Ctx)  Tag BB_B  (V :/\ IL)
-         | InR  (V :/\ IL)   Tag BB_B  (V :/\ Ctx)
-         | InLB (V :/\ Ctx)  Tag NN_B  (V :/\ IL')
-         | InRB (V :/\ IL')  Tag NN_B  (V :/\ Ctx)
-         | InL' (V :/\ Ctx)  Tag NN_N  (V :/\ IL')
-         | InR' (V :/\ IL')  Tag NN_N  (V :/\ Ctx)
-         | InU  Tag B_B   (V :/\ Ctx)
-         | InU' Tag N_N   (V :/\ Ctx)
+data Ctx = InL  !Ctx   BB_B  IL
+         | InR  !T.SBool BB_B  !Ctx
+         | InLB !Ctx   NN_B  IL'
+         | InRB NRef   NN_B  !Ctx
+         | InL' !Ctx   NN_N  IL'
+         | InR' NRef   NN_N  !Ctx
+         | InU         B_B   !Ctx
+         | InU'        N_N   !Ctx
          | Top
-    deriving (Show, Eq, Generic)
+    deriving Show
 
-data Loc = InBool (V :/\ IL)  (V :/\ Ctx)
-         | InNum  (V :/\ IL') (V :/\ Ctx)
-         deriving (Show, Eq, Generic)
-
-getVofCtx :: Ctx -> V
-{-# INLINE getVofCtx #-}
-getVofCtx (InU  _ _ (v :/\ _))            = v
-getVofCtx (InU' _ _ (v :/\ _))            = v
-getVofCtx (InL   (l :/\ _) _ _ (r :/\ _)) = l <@> r
-getVofCtx (InR   (l :/\ _) _ _ (r :/\ _)) = l <@> r
-getVofCtx (InL'  (l :/\ _) _ _ (r :/\ _)) = l <@> r
-getVofCtx (InR'  (l :/\ _) _ _ (r :/\ _)) = l <@> r
-getVofCtx (InLB  (l :/\ _) _ _ (r :/\ _)) = l <@> r
-getVofCtx (InRB  (l :/\ _) _ _ (r :/\ _)) = l <@> r
-getVofCtx Top                           = P
-
--- | When we configure a choice the focus may go from V --> P, thus we will need
--- to update the zipper context accordingly. This should only be a log n
--- traversal of the context. Note that we can never go from P --> V thus we only
--- need enough from one direction.
-updateCtxVs ::  Ctx -> V -> Ctx
-{-# INLINE updateCtxVs #-}
-updateCtxVs Top                                 _ = Top
-updateCtxVs (InL (_ :/\ parent) k o r@(P :/\ _))  P = InL (P :/\ updateCtxVs parent P) k o r
-updateCtxVs (InR r@(P :/\ _) k o (_ :/\ parent))  P = InR r k o (P :/\ updateCtxVs parent P)
-updateCtxVs (InU k o (_ :/\ parent))              P = InU k o (P :/\ updateCtxVs parent P)
-updateCtxVs (InL' (_ :/\ parent) k o r@(P :/\ _)) P = InL' (P :/\ updateCtxVs parent P) k o r
-updateCtxVs (InR' r@(P :/\ _) k o (_ :/\ parent)) P = InR' r k o (P :/\ updateCtxVs parent P)
-updateCtxVs (InU' k o (_ :/\ parent))             P = InU' k o (P :/\ updateCtxVs parent P)
-updateCtxVs ctx                                 _ = ctx
-
-toLocWith :: Ctx -> (V :/\ IL) -> Loc
-toLocWith Top     il = InBool il (P :/\ Top)
-toLocWith a@InL{} il = InBool il (getVofCtx a :/\ a)
-toLocWith a@InR{} il = InBool il (getVofCtx a :/\ a)
-toLocWith a@InU{} il = InBool il (getVofCtx a :/\ a)
-toLocWith a        _  = error $ "Creating Loc with " ++ show a
-
-toLocWith' :: Ctx -> (V :/\ IL') -> Loc
-toLocWith' a@InU'{} il = InNum  il (getVofCtx a :/\ a)
-toLocWith' a@InL'{} il = InNum  il (getVofCtx a :/\ a)
-toLocWith' a@InR'{} il = InNum  il (getVofCtx a :/\ a)
-toLocWith' a@InLB{} il = InNum  il (getVofCtx a :/\ a)
-toLocWith' a@InRB{} il = InNum  il (getVofCtx a :/\ a)
-toLocWith' a        _  = error $ "Creating Loc' with " ++ show a
+data Loc = InBool !IL !Ctx
+         | InNum !IL' !Ctx
+         deriving Show
 
 toLoc :: IL -> Loc
-{-# INLINE toLoc #-}
-toLoc i = toLocWith Top  (getVofIL i :/\ i)
+toLoc = toLocWith Top
+
+toLoc' :: IL' -> Loc
+toLoc' = toLocWith' Top
+
+toLocWith :: Ctx -> IL -> Loc
+toLocWith = flip InBool
+
+toLocWith' :: Ctx -> IL' -> Loc
+toLocWith' = flip InNum
 
 findChoice :: ( Cacheable z3 Tag (V :/\ IL)
               , MonadLogger z3
               , MonadReader State z3
               ) => Loc -> z3 Loc
-{-# INLINE findChoice #-}
-{-# SPECIALIZE findChoice :: Loc -> Solver Loc #-}
   -- base cases
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ Top)) = return x
-findChoice x@(InBool (_ :/\ Unit) (_ :/\ Top))  = return x
-findChoice x@(InBool (_ :/\ Chc {}) _)  = return x
-findChoice x@(InNum  (_ :/\ Chc'{}) _)  = return x
+findChoice x@(InBool Ref{} Top) = return x
+findChoice x@(InBool Unit Top)  = return x
+findChoice x@(InBool Chc {} _)  = return x
+findChoice x@(InNum Chc' {} _)  = return x
+  -- discharge two references
+findChoice x@(InBool l@Ref {} (InL parent op r@Ref {}))   =
+  do (_ :/\ n) <- accumulate $ BBOp mempty op (P :/\ l) (P :/\ r)
+     logInProducerWith "findChoice BRef: " x
+     logInProducerWith "findChoice BRef constructed to: " $ BBOp mempty op (P :/\ l) (P :/\ r)
+     logInProducerWith "findChoice BRef accumulated to: " n
+     findChoice (InBool n parent)
 
-  -- unary cases
-findChoice (InBool (V :/\ BOp t op e) ctx)  =
-  findChoice (InBool e (V :/\ InU t op ctx))
-findChoice (InNum  (V :/\ IOp t op e) ctx)  =
-  findChoice (InNum  e (V :/\ InU' t op ctx))
+findChoice (InNum l@Ref' {} (InLB parent op r@Ref' {})) =
+  do (_ :/\ n) <- accumulate  $ IBOp mempty op (P :/\ l) (P :/\ r)
+     findChoice (InBool n parent)
 
-  -- bool cases
-findChoice (InBool (v :/\ BBOp t op l@(V :/\ _) r@(P :/\ _)) ctx) =
-  findChoice (InBool l (v :/\ InL ctx t op r))
-findChoice (InBool (v :/\ BBOp t op l@(P :/\ _) r@(V :/\ _)) ctx) =
-  findChoice (InBool r (v :/\ InR l t op ctx))
-  -- when both V prefer the left side
-findChoice (InBool (v :/\ BBOp t op l r) ctx) =
-  findChoice (InBool l (v :/\ InL ctx t op r))
+findChoice (InNum l@Ref' {} (InL' parent op r@Ref' {})) =
+  do (_ :/\ n) <- iAccumulate' $ IIOp mempty op (P :/\ l) (P :/\ r)
+     findChoice (InNum n parent)
 
-  -- relational cases
-findChoice (InBool (v :/\ IBOp t op l@(V :/\ _) r@(P :/\ _)) ctx) =
-  do findChoice (InNum l (v :/\ InLB ctx t op r))
-findChoice (InBool (v :/\ IBOp t op l@(P :/\ _) r@(V :/\ _)) ctx) =
-  do findChoice (InNum r (v :/\ InRB l t op ctx))
-  -- when both V prefer the left side
-findChoice (InBool (v :/\ IBOp t op l@(V :/\ _) r@(V :/\ _)) ctx) =
-  do findChoice (InNum l (v :/\ InLB ctx t op r))
+  -- folds
+findChoice (InBool r@Ref{} (InU o e))   =
+  do (_ :/\ n) <- accumulate $! BOp mempty o (P :/\ r)
+     findChoice (InBool n e)
+findChoice (InNum r@Ref'{}  (InU' o e)) =
+  do (_ :/\ n) <- iAccumulate' $! IOp mempty o (P :/\ r)
+     findChoice (InNum n e)
 
-  -- numeric cases
-findChoice (InNum  (v :/\ IIOp t op l@(V :/\ _) r@(P :/\ _)) ctx) =
-  do findChoice (InNum l (v :/\ InL' ctx t op r))
-findChoice (InNum (v :/\ IIOp t op l@(P :/\ _) r@(V :/\ _)) ctx) =
-  do findChoice (InNum r (v :/\ InR' l t op ctx))
-  -- when both V prefer the left side
-findChoice (InNum (v :/\ IIOp t op l@(V :/\ _) r@(V :/\ _)) ctx) =
-  do findChoice (InNum l (v :/\ InL' ctx t op r))
+findChoice (InBool r@Ref {} (InR acc op parent)) =
+  do (_ :/\ n) <- accumulate $! BBOp mempty op (P :/\ Ref acc) (P :/\ r)
+     findChoice (InBool n parent)
 
+findChoice (InNum r@Ref' {} (InRB acc op parent)) =
+  do (_ :/\ n) <- accumulate $! IBOp mempty op (P :/\ Ref' acc) (P :/\ r)
+     findChoice (InBool n parent)
+
+findChoice (InNum r@Ref' {} (InR' acc op parent)) =
+  do (_ :/\ n) <- iAccumulate' $! IIOp mempty op (P :/\ Ref' acc) (P :/\ r)
+     findChoice (InNum n parent)
   -- switch
-findChoice (InBool l@(P :/\ _) (V :/\ InL parent t op r)) =
-  findChoice (InBool r $! V :/\ InR l t op parent)
-findChoice (InBool r@(P :/\ _) (V :/\ InR l t op parent)) =
-  findChoice (InBool l $! V :/\ InL parent t op r)
-
-findChoice (InNum  l@(P :/\ _) (V :/\ InLB parent t op r)) =
-  findChoice (InNum r $! V :/\ InRB l t op parent)
-findChoice (InNum  r@(P :/\ _) (V :/\ InRB l t op parent)) =
-  findChoice (InNum l $! V :/\ InLB parent t op r)
-
-findChoice (InNum  l@(P :/\ _) (V :/\ InL' parent t op r)) =
-  findChoice (InNum  r $ V :/\ InR' l t op parent)
-findChoice (InNum  r@(P :/\ _) (V :/\ InR' l t op parent)) =
-  findChoice (InNum  l $ V :/\ InL' parent t op r)
+findChoice (InBool (Ref l) (InL parent op r))   = findChoice (InBool r $ InR l op parent)
+findChoice (InNum  (Ref' l) (InLB parent op r)) = findChoice (InNum  r $ InRB l op parent)
+findChoice (InNum  (Ref' l) (InL' parent op r)) = findChoice (InNum  r $ InR' l op parent)
+  -- recur
+findChoice (InBool (BBOp _ op l@(P :/\ _) r@(P :/\ _)) ctx) =
+  do (_ :/\ a) <- accumulate $! BBOp mempty op l r
+     return (InBool a ctx)
+findChoice (InBool (BBOp _ op (V :/\ l) (P :/\ r)) ctx) = findChoice (InBool l $ InL ctx op r)
+findChoice (InBool (BBOp _ op (P :/\ l) (V :/\ r)) ctx) = do
+  (_ :/\ new) <- accumulate l
+  let (Ref l') = new
+  findChoice (InBool r $ InR l' op ctx)
+findChoice (InBool (BBOp _ op (V :/\ l) (V :/\ r)) ctx) = findChoice (InBool l $ InL ctx op r)
+findChoice (InBool (IBOp _ op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InLB ctx op r)
+findChoice (InBool (BOp  _ o  (_ :/\ e))           ctx) = findChoice (InBool e $ InU o ctx)
+findChoice (InNum  (IOp  _ o  (_ :/\ e))           ctx) = findChoice (InNum  e $ InU' o ctx)
+findChoice (InNum  (IIOp _ op (_ :/\ l) (_ :/\ r)) ctx) = findChoice (InNum  l $ InL' ctx op r)
+  -- legal to discharge Units under a conjunction only
+findChoice (InBool Unit (InL parent And r))   = findChoice (InBool r $ InR true And parent)
+findChoice (InBool Unit (InR acc And parent)) = findChoice (InBool (Ref acc) parent)
   -- TODO Not sure if unit can ever exist with a context, most of these will
   -- never pass the parser and cannot be constructed in the Prop' data type, but
   -- the IL allows for them
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InL{})) = error $ "Ref in left of binary bool op, why did you think you had choices?" ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InR{})) = error $ "Ref in right of binary bool op, why did you think you had choices?" ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InU{})) = error $ "Ref in unary bool op, why did you think you had choices?" ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InU'{})) = error $ "Numeric unary operator applied to boolean: " ++ show x
-findChoice x@(InNum (_ :/\ Ref'{}) (_ :/\ InU{}))  = error $ "Boolean unary operator applied to numeric: " ++ show x
-findChoice (InBool (_ :/\ Unit) ctx)       = error $ "Unit with a context" ++ show ctx
-findChoice x@(InNum (_ :/\ Ref'{}) (_ :/\ Top))    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InLB{})) = error $ "An impossible case bool reference in inequality: "  ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InRB{})) = error $ "An impossible case bool reference in inequality: "  ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InL'{})) = error $ "An impossible case bool reference in arithmetic: " ++ show x
-findChoice x@(InBool (_ :/\ Ref{}) (_ :/\ InR'{})) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
-findChoice x@(InNum (_ :/\ Ref'{}) (_ :/\ InL{})) = error $ "An impossible case: " ++ show x
-findChoice x@(InNum (_ :/\ Ref'{}) (_ :/\ InR{})) = error $ "An impossible case: " ++ show x
-findChoice x = error $ "catch all error in findchoice with " ++ show x
+findChoice x@(InBool Ref{} InU'{}) = error $ "Numeric unary operator applied to boolean: " ++ show x
+findChoice x@(InNum Ref'{} InU{})  = error $ "Boolean unary operator applied to numeric: " ++ show x
+findChoice (InBool Unit ctx)       = error $ "Unit with a context" ++ show ctx
+findChoice x@(InNum Ref'{} Top)    = error $ "Numerics can only exist in SMT within a relation: " ++ show x
+findChoice x@(InBool Ref{} InLB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
+findChoice x@(InBool Ref{} InRB{}) = error $ "An impossible case bool reference in inequality: "  ++ show x
+findChoice x@(InBool Ref{} InL'{}) = error $ "An impossible case bool reference in arithmetic: " ++ show x
+findChoice x@(InBool Ref{} InR'{}) = error $ "An impossible case bool reference in arithmetic: "  ++ show x
+findChoice x@(InNum Ref'{} InL{})  = error $ "An impossible case: " ++ show x
+findChoice x@(InNum Ref'{} InR{})  = error $ "An impossible case: " ++ show x
 
-accumulateCtx ::
-  ( MonadLogger z3
-  , MonadReader State z3
-  , Cacheable   z3 Tag (V :/\ IL)
-  , Cacheable   z3 Tag Loc
-  ) => Loc -> z3 Loc
-{-# INLINE accumulateCtx #-}
-{-# SPECIALIZE accumulateCtx :: Loc -> Solver Loc #-}
-  -- base cases, labels are out of sync here due to configuring choices so we
-  -- have to rely on values
-accumulateCtx x@(InBool (_ :/\ Ref{}) (_ :/\ Top)) = return x
-accumulateCtx x@(InBool (_ :/\ Unit) (_ :/\ Top))  = return x
-accumulateCtx x@(InBool (_ :/\ Chc {}) _)  = return x
-accumulateCtx x@(InNum  (_ :/\ Chc'{}) _)  = return x
 
-  -- computation rules
-  -- unary cases
-accumulateCtx (InBool r@(P :/\ _) (_ :/\ InU t op ctx)) =
-  do new <- accumulate (BOp t op r); accumulateCtx (InBool new ctx)
-accumulateCtx (InNum r@(P :/\ _) (_ :/\ InU' t op ctx)) =
-  do new <- iAccumulate' (IOp t op r); accumulateCtx (InNum new ctx)
-  -- bool cases
-accumulateCtx (InBool l@(P :/\ _) (P :/\ InL ctx t op r)) =
-  do new <- accumulate (BBOp t op l r); accumulateCtx (InBool new ctx)
-accumulateCtx (InBool r@(P :/\ _) (P :/\ InR l t op ctx)) =
-  do new <- accumulate (BBOp t op l r); accumulateCtx (InBool new ctx)
-  -- inequalities
-accumulateCtx (InNum l@(P :/\ _) (P :/\ InLB ctx t op r)) =
-  do new <- accumulate (IBOp t op l r); accumulateCtx (InBool new ctx)
-accumulateCtx (InNum r@(P :/\ _) (P :/\ InRB l t op ctx)) =
-  do new <- accumulate (IBOp t op l r); accumulateCtx (InBool new ctx)
-  -- numerics
-accumulateCtx (InNum l@(P :/\ _) (P :/\ InL' ctx t op r)) =
-  do new <- iAccumulate' (IIOp t op l r); accumulateCtx (InNum new ctx)
-accumulateCtx (InNum r@(P :/\ _) (P :/\ InR' l t op ctx)) =
-  do new <- iAccumulate' (IIOp t op l r); accumulateCtx (InNum new ctx)
-
-  -- switch, if we get here then we can't accumulate more on this branch
-  -- bools
-accumulateCtx (InBool (P :/\ l) (V :/\ InL ctx t op r)) = -- memo x $
-  do new <- accumulate l; accumulateCtx (InBool r (V :/\ InR new t op ctx))
-accumulateCtx (InBool (P :/\ r) (V :/\ InR l t op ctx)) = -- memo x $
-  do new <- accumulate r; accumulateCtx (InBool l (V :/\ InL ctx t op new))
-  -- inequalities
-accumulateCtx (InNum (P :/\ l) (V :/\ InLB ctx t op r)) =
-  do new <- iAccumulate' l; accumulateCtx (InNum r (V :/\ InRB new t op ctx))
-accumulateCtx (InNum (P :/\ r) (V :/\ InRB l t op ctx)) =
-  do new <- iAccumulate' r; accumulateCtx (InNum l (V :/\ InLB ctx t op new))
-  -- numerics
-accumulateCtx (InNum (P :/\ l) (V :/\ InL' ctx t op r)) =
-  do new <- iAccumulate' l; accumulateCtx (InNum r (V :/\ InR' new t op ctx))
-accumulateCtx (InNum (P :/\ r) (V :/\ InR' l t op ctx)) =
-  do new <- iAccumulate' r; accumulateCtx (InNum l (V :/\ InL' ctx t op new))
-
-  -- recur
-  -- bools
-accumulateCtx (InBool (V :/\ BOp t op e) ctx)              = accumulateCtx (InBool e (V :/\ InU t op ctx))
-accumulateCtx (InBool (V :/\ BBOp t op l@(P :/\ _) r) ctx) = accumulateCtx (InBool l (V :/\ InL ctx t op r))
-accumulateCtx (InBool (V :/\ BBOp t op l r@(P :/\ _)) ctx) = accumulateCtx (InBool r (V :/\ InR l t op ctx))
-  -- on the general case prefer the left side
-accumulateCtx (InBool (V :/\ BBOp t op l r) ctx) = accumulateCtx (InBool l (V :/\ InL ctx t op r))
-  -- inequalities
-accumulateCtx (InNum (V :/\ IOp t op e) ctx)               = accumulateCtx (InNum e (V :/\ InU' t op ctx))
-accumulateCtx (InBool (V :/\ IBOp t op l@(P :/\ _) r) ctx) = accumulateCtx (InNum l (V :/\ InLB ctx t op r))
-accumulateCtx (InBool (V :/\ IBOp t op l r@(P :/\ _)) ctx) = accumulateCtx (InNum r (V :/\ InRB l t op ctx))
-accumulateCtx (InBool (V :/\ IBOp t op l r) ctx)           = accumulateCtx (InNum l (V :/\ InLB ctx t op r))
-  -- numerics
-accumulateCtx (InNum (V :/\ IIOp t op l@(P :/\ _) r) ctx) = accumulateCtx (InNum l (V :/\ InL' ctx t op r))
-accumulateCtx (InNum (V :/\ IIOp t op l r@(P :/\ _)) ctx) = accumulateCtx (InNum r (V :/\ InR' l t op ctx))
-accumulateCtx (InNum (V :/\ IIOp t op l r) ctx)           = accumulateCtx (InNum l (V :/\ InL' ctx t op r))
-
-accumulateCtx x = error $ "an impossible case happened" ++ show x
 
 store ::
   ( R.MonadReader State io
@@ -1561,37 +1457,33 @@ choose ::
   , T.MonadSymbolic   m
   , I.SolverContext   m
   ) => Loc -> SolverT m ()
-choose (InBool (_ :/\ Unit) (_ :/\ Top))  = removeChoices (VarCore Unit)
-choose (InBool (_ :/\ l@Ref{}) _) = logInProducer "Choosing all done" >>
-                                    evaluate l >>= removeChoices
+choose (InBool Unit Top)  = removeChoices (VarCore Unit)
+choose (InBool l@Ref{} _) = logInProducer "Choosing all done" >>
+                            evaluate l >>= removeChoices
 choose loc =
   do
     -- loc' <- findChoice loc
     case loc of
-      (InBool (_ :/\ Chc d cl cr) (_ :/\ ctx)) -> do
+      (InBool (Chc d cl cr) ctx) -> do
         conf <- reads config
         -- we'd like to evaluate after IL but this makes the async harder so we
         -- accumulate instead. Specifically there is an interaction with in new
         -- assertion stack. When requests come out of order the assertion stack
         -- scope is also out of order, because evaluation relies on this
         -- ordering we cannot use it.
-        let goLeft  = do i@(v :/\ _) <- toIL cl >>= accumulate . sSnd
-                         let lCtx = updateCtxVs ctx v
-                         accumulateCtx (toLocWith lCtx i) >>= findChoice >>= choose
-            goRight = do i@(v :/\ _) <- toIL cr >>= accumulate . sSnd
-                         let rCtx = updateCtxVs ctx v
-                         accumulateCtx (toLocWith rCtx i) >>= findChoice >>= choose
+        let goLeft  = toIL cl >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
+            goRight = toIL cr >>= accumulate . sSnd >>= findChoice . toLocWith ctx . sSnd >>= choose
 
         case find d conf of
           Just True  -> goLeft
           Just False -> goRight
           Nothing    -> alternative d goLeft goRight
 
-      (InNum (_ :/\ Chc' d cl cr) (_ :/\ ctx)) -> do
+      (InNum (Chc' d cl cr) ctx) -> do
         logInProducer "Got choice in context InNum"
         conf <- reads config
-        let goLeft  = toIL' cl >>= iAccumulate' . sSnd >>= accumulateCtx . toLocWith' ctx >>= findChoice >>= choose
-            goRight = toIL' cr >>= iAccumulate' . sSnd >>= accumulateCtx . toLocWith' ctx >>= findChoice >>= choose
+        let goLeft  = toIL' cl >>= iAccumulate' . sSnd >>= findChoice . toLocWith' ctx . sSnd >>= choose
+            goRight = toIL' cr >>= iAccumulate' . sSnd >>= findChoice . toLocWith' ctx . sSnd >>= choose
 
         case find d conf of
           Just True  -> logInProducer "Cache hit --- Left Selected"  >> goLeft
