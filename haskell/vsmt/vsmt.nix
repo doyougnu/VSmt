@@ -3,7 +3,7 @@
 , parser-combinators, QuickCheck, sbv, silently, stdenv, tasty
 , tasty-golden, tasty-hspec, tasty-hunit, tasty-quickcheck, text
 , transformers, unordered-containers, z3, zlib, unagi-chan
-, async, directory, aeson, cassava, z3-haskell
+, async, directory, aeson, cassava, boolector, yices, cvc4
 }:
 mkDerivation {
   pname = "vsmt";
@@ -12,19 +12,19 @@ mkDerivation {
   libraryHaskellDepends = [
     base bifunctors containers deepseq hashable megaparsec monad-logger
     mtl parser-combinators sbv text transformers unordered-containers
-    unagi-chan async z3-haskell
+    unagi-chan async
   ];
-  librarySystemDepends    = [ z3 zlib ];
-  executableSystemDepends = [ z3 zlib ];
+  librarySystemDepends    = [ z3 zlib boolector yices cvc4 ];
+  executableSystemDepends = [ z3 zlib boolector yices cvc4 ];
   testHaskellDepends = [
     base bytestring containers filepath QuickCheck sbv tasty
     tasty-golden tasty-hspec tasty-hunit tasty-quickcheck text
-    unordered-containers z3-haskell
+    unordered-containers boolector yices cvc4 z3
   ];
 
   benchmarkHaskellDepends = [ base deepseq gauge silently megaparsec text
                               parser-combinators sbv containers directory
-                              aeson z3-haskell cassava
+                              aeson cassava boolector yices cvc4 z3
                             ];
   homepage = "https://github.com/doyougnu/VSmt";
   description = "SMT Based Verification with first class variational programming capabilities";

@@ -50,7 +50,7 @@ library
                , monad-logger
                , mtl
                , parser-combinators
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , stm
                , text
@@ -126,7 +126,7 @@ Test-Suite VSMTTest
                   , tasty-hunit
                   , text
                   , QuickCheck
-                  , z3-haskell
+                  -- , z3-haskell
                   , sbv
                   , unordered-containers
                   , vsmt
@@ -206,7 +206,7 @@ benchmark busybox
                , megaparsec
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -252,7 +252,7 @@ benchmark financial
                , mtl
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -296,7 +296,7 @@ benchmark auto
                , mtl
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench/
@@ -309,16 +309,15 @@ benchmark auto
                  , Bench.Core
 
 benchmark auto-smt
-  type            : exitcode-stdio-1.0
+  type : exitcode-stdio-1.0
   default-language: Haskell2010
-  ghc-options     : -O2 -threaded -rtsopts
+  ghc-options : -O2 -threaded -rtsopts
   other-extensions: BangPatterns
                     DataKinds
                     DeriveAnyClass
                     DeriveDataTypeable
                     FlexibleContexts
                     GeneralizedNewtypeDeriving
-                    OverloadedLists
                     OverloadedStrings
                     Rank2Types
                     RankNTypes
@@ -340,17 +339,17 @@ benchmark auto-smt
                , mtl
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench/
-                  , VSMTBench/AutomotiveSMT
-  main-is:       Main.hs
+                , VSMTBench/AutomotiveSMT
+  main-is: Main.hs
   Other-modules: Utils.VSMTBenchFramework
-                 , Auto
-                 , Parser
-                 , Lang
-                 , Bench.Core
+               , Auto
+               , Parser
+               , Lang
+               , Bench.Core
 
 benchmark financial-smt
   type            : exitcode-stdio-1.0
@@ -384,7 +383,7 @@ benchmark financial-smt
                , mtl
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -428,7 +427,7 @@ benchmark linux
                , mtl
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
@@ -472,7 +471,7 @@ benchmark solvers
                , mtl
                , parser-combinators
                , text
-               , z3-haskell
+               -- , z3-haskell
                , sbv
                , vsmt
   hs-source-dirs: VSMTBench
