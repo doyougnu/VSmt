@@ -12,6 +12,10 @@ let
               vsmt = haskellPackagesNew.callPackage ./vsmt.nix {
                 # z3-haskell = haskellPackagesNew.callPackage /home/doyougnu/programming/haskell-z3/z3.nix { z3 = pkgs.z3; };
                 zlib = pkgs.zlib;
+                yices = pkgs.yices;
+                boolector = pkgs.boolector;
+                cvc4 = pkgs.cvc4;
+                z3 = pkgs.z3;
               };
 
               # sbv = haskellPackagesNew.callPackage ./sbv.nix {
@@ -20,7 +24,11 @@ let
 
               # sbv = haskellPackagesNew.callPackage ./lib/sbv/sbv.nix { };
               # sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
-              sbv = haskellPackagesNew.callPackage ~/Programming/sbv/sbv.nix { };
+              sbv = haskellPackagesNew.callPackage ~/Programming/sbv/sbv.nix { z3 = pkgs.z3;
+                                                                               yices = pkgs.yices;
+                                                                               boolector = pkgs.boolector;
+                                                                               cvc4 = pkgs.cvc4;
+                                                                             };
               unordered-containers = haskellPackagesNew.callPackage ./unordered-containers.nix {};
             };
           };
