@@ -22,10 +22,14 @@ module Settings
   , debugSettings
   , minAsyncSettings
   , with
+  , z3
+  , yices
+  , boolector
+  , cvc4
   ) where
 
 import GHC.Generics (Generic)
-import qualified Data.SBV  as S (z3, SMTConfig(..), name)
+import qualified Data.SBV  as S (z3,yices,boolector,cvc4, SMTConfig(..), name)
 
 data Settings = Settings { solver           :: Solver
                          , seed             :: Maybe Integer
@@ -86,3 +90,15 @@ debugSettings = minSettings{verboseMode=True}
 
 defWithModels :: Settings
 defWithModels = defSettings{generateModels=True}
+
+cvc4 :: Settings
+cvc4 = defSettings `with` S.cvc4
+
+boolector :: Settings
+boolector = defSettings `with` S.boolector
+
+yices :: Settings
+yices = defSettings `with` S.yices
+
+z3 :: Settings
+z3 = defSettings
