@@ -27,6 +27,9 @@ import           Solve                   (Counter (..), FrozenDiags (..),
 import           Utils                   (genConfigPool)
 
 
+benchConfig :: Gauge.Config
+benchConfig = defaultConfig{minSamples=Just 3}
+
 run :: NFData a => String -> (t -> IO a) -> t -> Benchmark
 run !desc !f prop = bench desc $! nfIO (f prop)
 
@@ -73,6 +76,7 @@ mkDescription alg confDesc [prop] = desc
     !ratio = compressionRatio prop
     vCoreTotal, vCorePlain, vCoreVar :: Int
     !(vCoreTotal, vCorePlain, vCoreVar) = unsafePerformIO $ vCoreMetrics prop
+    variants :: Int
     !variants = 2 ^ (Set.size $ dimensions prop)
 -- copying code, the greatest of all possible sins. This just isn't important
 -- enough to handle properly
@@ -96,7 +100,8 @@ mkDescription alg confDesc props = desc
     !(vCoreTotalSum, vCorePlainSum, vCoreVarSum) =
       (foldr (\(x,y,z) (xAcc, yAcc, zAcc) -> (x + xAcc, y + yAcc, z + zAcc)) (0,0,0)
       $ (unsafePerformIO . vCoreMetrics) <$> props)
-    !variants = average $ (\p -> 2 ^ (Set.size $ dimensions p)) <$> props
+    variants :: Int
+    !variants = length props
     !l = genericLength props
     myDiv = (/) `on` fromIntegral
     -- (vCoreTotal, vCorePlain, vCoreVar) = ( vCoreTotalSum `myDiv` l
