@@ -28,7 +28,7 @@ import           Utils                   (genConfigPool)
 
 
 benchConfig :: Gauge.Config
-benchConfig = defaultConfig{minSamples=Just 3}
+benchConfig = defaultConfig{minSamples=Just 3, timeLimit = Just 600.0}
 
 run :: NFData a => String -> (t -> IO a) -> t -> Benchmark
 run !desc !f prop = bench desc $! nfIO (f prop)

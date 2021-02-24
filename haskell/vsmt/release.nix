@@ -24,7 +24,7 @@ let
 
               # sbv = haskellPackagesNew.callPackage ./lib/sbv/sbv.nix { };
               # sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
-              sbv = haskellPackagesNew.callPackage ~/Programming/sbv/sbv.nix { z3 = pkgs.z3;
+              sbv = haskellPackagesNew.callPackage ~/programming/sbv/sbv.nix { z3 = pkgs.z3;
                                                                                yices = pkgs.yices;
                                                                                boolector = pkgs.boolector;
                                                                                cvc4 = pkgs.cvc4;

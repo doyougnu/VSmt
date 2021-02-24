@@ -368,9 +368,12 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnP (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
-  -- diagnostics "raw_data/financial_diagnostics.csv" defSettings
+  -- diagnostics "raw_data/financial_diagnostics.csv" yices
 
-  defaultMain $
-        [ bgroup "Z3" (benches defSettings)
+  defaultMainWith benchConfig $
+        [ -- bgroup "Yices"     (benches yices)
+          bgroup "Boolector" (benches boolector)
+        , bgroup "CVC4"      (benches cvc4)
+        , bgroup "Z3"        (benches z3)
       -- , bgroup "Z3" (compRatioBenches z3DefConf)
         ]

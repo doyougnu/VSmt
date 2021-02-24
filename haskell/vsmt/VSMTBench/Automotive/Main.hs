@@ -215,12 +215,15 @@ main = do
       --   , mkCompBench "p-->p" "V3*V4"  (bfWithConf (toDimProp pD23Conf) vc) justbPropV34
         -- ]
 
-  -- diagnostics "raw_data/auto_diagnostics.csv" defSettings
+  -- diagnostics "raw_data/auto_diagnostics.csv" z3
 
-  defaultMain $
-    [  bgroup "Z3" (benches defSettings)
-    --   bgroup "Z3" (compRatioBenches z3DefConf)
-    ]
+  defaultMainWith benchConfig $
+        [ -- bgroup "Z3"        (benches z3{generateModels=True})
+        -- , bgroup "Boolector" (benches boolector{generateModels=True})
+        -- , bgroup "CVC4"      (benches cvc4)
+          bgroup "Yices"     (benches yices{generateModels=True})
+      -- , bgroup "Z3" (compRatioBenches z3DefConf)
+        ]
 
   -- let t = bRef "two" ||| bChc "AA" (bRef "a") (bRef "a") <+>  bChc "BB" (bRef "c") (bRef "c") -- &&&  bChc "CC" (bRef "c") (bRef "f")&&&  bChc "DD" (bRef "g") (bRef "h")
   -- let t = bRef "one" &&& bRef "one" &&& bChc "AA" (bnot $ bRef "one") (bRef "b") -- ||| bChc "BB" (bRef "c") (bRef "d")
@@ -228,7 +231,7 @@ main = do
   -- putStrLn $ show $ bProp
   -- let t = bChc "AA" (bRef "Aleft") (bRef "two" ==> bRef "Aright" ||| bRef "one")  -- &&& bRef "two"
   -- _ <- solveVerbose Nothing defWithModels (bnot $ bnot t)
-  -- !res <- solveGetDiag Nothing defWithModels t
+  -- !res <- solve Nothing yices{generateModels = True} bProp
   -- putStrLn $ show res
   -- putStrLn $ show . length $ take 10 $ show res
   -- putStrLn "asddf"
