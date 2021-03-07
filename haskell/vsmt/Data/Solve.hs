@@ -136,9 +136,8 @@ solve :: Maybe VariantContext -> Settings -> Prop' Var -> IO Result
 solve v s p = sFst <$> internalSolver runPreSolverNoLog runSolverNoLog v s p
 
 -- | the solve but return the diagnostics
-solveGetDiag :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
-solveGetDiag vc s p = readDiagnostics . sSnd =<< internalSolver runPreSolverNoLog runSolverNoLog vc s p
-
+solveForDiagnostics :: Maybe VariantContext -> Settings -> Prop' Var -> IO FrozenDiags
+solveForDiagnostics vc s p = readDiagnostics . sSnd =<< internalSolver runPreSolverNoLog runSolverNoLog vc s p
 
 
 -- TODO fix this horrendous type signature
@@ -426,17 +425,9 @@ type CtxCache = Cache Loc
 newtype Results = Results { unResults :: STM.TVar Result }
 
 -- | A counter for the diagnostics portion of the state
-data Counter =  Counter {-# UNPACK #-} !Int
-  deriving (Eq,Show,Generic)
-
-instance Enum Counter where
-  toEnum               = Counter
-  fromEnum (Counter i) = i
-instance Semigroup Counter where (<>) (Counter l) (Counter r) = Counter $! l + r
-instance Monoid    Counter where mempty = Counter 0
-
-unCounter :: Counter -> Int
-unCounter = fromEnum
+newtype Counter = Counter { unCounter :: Int }
+  deriving (Num, Enum,Show)    via Int
+  deriving (Semigroup, Monoid) via Sum Int
 
 data Constants = Constants { genModels  :: STM.TVar Bool
                            }
@@ -472,7 +463,7 @@ data Caches = Caches
 
 data Stores = Stores
     { vConfig    :: STM.TVar (Maybe VariantContext)  -- the formula representation of the config
-    , sConfig    :: STM.TVar SVariantContext -- symbolic representation of a config
+    , sConfig    :: STM.TVar SVariantContext         -- symbolic representation of a config
     , config     :: STM.TVar Context                 -- a map or set representation of the config
     , ints       :: STM.TVar Ints
     , doubles    :: STM.TVar Doubles
@@ -482,7 +473,7 @@ data Stores = Stores
 
 data FrozenStores = FrozenStores
     { fvConfig    :: !(Maybe VariantContext)  -- the formula representation of the config
-    , fsConfig    :: !SVariantContext -- symbolic representation of a config
+    , fsConfig    :: !SVariantContext         -- symbolic representation of a config
     , fconfig     :: !Context                 -- a map or set representation of the config
     , fints       :: !Ints
     , fdoubles    :: !Doubles

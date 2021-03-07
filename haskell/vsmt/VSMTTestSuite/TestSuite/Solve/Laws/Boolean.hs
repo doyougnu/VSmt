@@ -32,7 +32,7 @@ properties =
 --     liftIO $ putStrLn "--------------------- Start  -----------------------------------"
 --     liftIO $ T.putStrLn $ "Proposition: " <> pretty p
 --     plainRes <- liftIO $! filter sSnd <$> vOnPByConfig p
---     !res    <- liftIO $! unCounter . fSatCnt <$> solveGetDiag Nothing defSettings p
+--     !res    <- liftIO $! unCounter . fSatCnt <$> solveForDiag Nothing defSettings p
 --     !res2    <- liftIO $! getSatisfiableVCs <$> solve Nothing defSettings p
 --     liftIO $! putStrLn $ "Variational Result: " <> show res               <> "\n"
 --     liftIO $! putStrLn $ "Variational Model: " <> show (length res2)               <> "\n"
@@ -44,6 +44,6 @@ properties =
 ------------------------------- Boolean Laws -----------------------------------
 doubleNegation :: OnlyBools -> QC.Property
 doubleNegation (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt . sSnd <$> solveGetDiag Nothing defSettings p
-     right <- liftIO $ unCounter . fSatCnt . sSnd <$> solveGetDiag Nothing defSettings (bnot $ bnot p)
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (bnot $ bnot p)
      return $! left == right

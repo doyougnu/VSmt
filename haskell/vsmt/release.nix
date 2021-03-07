@@ -1,4 +1,4 @@
-{ compiler ? "ghc8102" }:
+{ compiler ? "ghc8103" }:
 
 let
   config = {
@@ -19,7 +19,7 @@ let
               # };
 
               # sbv = haskellPackagesNew.callPackage ./lib/sbv/sbv.nix { };
-              sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
+              # sbv = haskellPackagesNew.callPackage ./sbv-git.nix { };
               # sbv = haskellPackagesNew.callPackage ~/Programming/sbv/sbv.nix { };
               unordered-containers = haskellPackagesNew.callPackage ./unordered-containers.nix {};
             };
@@ -50,7 +50,6 @@ in
                       pkgs.zlib
                       pkgs.z3
                       pkgs.cabal-install
-                      unstable.julia_13
                       # unstable.julia
                     ];
     };
