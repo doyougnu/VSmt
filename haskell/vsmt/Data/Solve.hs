@@ -418,8 +418,8 @@ data State = State
   , constants   :: !Constants
   }
 
-type Cache a = IMap.IntMap a
-type ACache  = Cache (V :/\ IL)
+type Cache a  = IMap.IntMap a
+type ACache   = Cache (V :/\ IL)
 type CtxCache = Cache Loc
 
 newtype Results = Results { unResults :: STM.TVar Result }
@@ -455,8 +455,8 @@ data FrozenCaches = FrozenCaches
                     }
 
 data Caches = Caches
-              { accCache :: STM.TVar ACache
-              , ctxCache :: STM.TVar CtxCache
+              { accCache   :: STM.TVar ACache
+              , ctxCache   :: STM.TVar CtxCache
               , accTagSeed :: STM.TVar Tag
               , ctxTagSeed :: STM.TVar Tag
               }
