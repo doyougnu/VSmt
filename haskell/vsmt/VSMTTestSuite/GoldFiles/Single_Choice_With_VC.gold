@@ -1,5 +1,4 @@
 =: Model := 
-Aleft   -->   (ite AA (True :: Bool) Undefined)
 
 =: Sat_Model := 
-AA
+(~AA or AA)
