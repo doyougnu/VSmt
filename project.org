@@ -158,10 +158,20 @@
       over a dimension asking the solver to check if the dimension is true in
       current context and then return the result
 
-*** TODO Investigate possible uses of StableName
+*** DONE Investigate possible uses of StableName
+    CLOSED: [2021-03-24 Wed 12:32]
 
-*** TODO Investigate possible uses with IORef patterns
+    - Note taken on [2021-03-24 Wed 12:32] \\
+      Tried to use StableNames to memoize accumulation. This is a no-go, the
+      references in the sat solver are lost with stable names and the
+      memoization is too expensive without StableNames to use on ASTs
 
+*** DONE Investigate possible uses with IORef patterns
+    CLOSED: [2021-03-24 Wed 12:32]
+
+    - Note taken on [2021-03-24 Wed 12:33] \\
+      I tried IORef's vs STM and found no difference between then for this
+      workload. Going to stick with STM which has a better interface
 * Testing
 
 ** TODO hedgehog properties vs quickcheck properties
@@ -175,6 +185,8 @@
 ** DONE Quickcheck/smallcheck properties
    CLOSED: [2020-09-19 Sat 14:39]
 
+   - Note taken on [2021-03-24 Wed 12:34] \\
+     Newtype wrapper for only booleans is done
    - Note taken on [2020-09-19 Sat 14:39] \\
      soundness is setup and working but we need newtype wrappers instead of
      predicates, see https://github.com/doyougnu/VSmt/issues/4
@@ -187,7 +199,8 @@
 
 *** Mathematical equivalences which should always hold
 
-*** Boolean equivalences which should always hold
+*** DONE Boolean equivalences which should always hold
+    CLOSED: [2021-03-24 Wed 12:34]
 
 * Benchmarking
 
