@@ -584,6 +584,7 @@ freezeCache = do st          <- R.asks caches
                  faccTagSeed <- read accTagSeed st
                  fctxTagSeed <- read ctxTagSeed st
                  return FrozenCaches{..}
+
 -- | A solver is just a reader over a solver enabled monad. The reader
 -- maintains information during the variational execution, such as
 -- configuration, variable stores

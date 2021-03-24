@@ -19,12 +19,12 @@ import Utils.VSMTTestFramework
 ------------------------------- Bool Equivalences ------------------------------
 tests :: TestTree
 tests = testGroup "Variational formulas"
-  [ goldenVsStringShow "Singleton_Choice" singletonChoice
-  , goldenVsStringShow "Two_Choices" twoChoices
-  , goldenVsStringShow "Tree_of_Choices" treeOfChoices
+  [ goldenVsStringShow "Singleton_Choice"        singletonChoice
+  , goldenVsStringShow "Two_Choices"             twoChoices
+  , goldenVsStringShow "Tree_of_Choices"         treeOfChoices
   , goldenVsStringShow "Single_Choice_With_Vars" singletonChoiceWithVars
-  , goldenVsStringShow "Single_Choice_With_VC"  singletonChoiceWithVC
-  , goldenVsStringShow "Two_Choices_With_VC"  twoChoicesWithVC
+  , goldenVsStringShow "Single_Choice_With_VC"   singletonChoiceWithVC
+  , goldenVsStringShow "Two_Choices_With_VC"     twoChoicesWithVC
   ]
 
 singletonChoice :: IO Result

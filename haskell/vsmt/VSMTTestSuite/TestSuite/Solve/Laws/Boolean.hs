@@ -72,8 +72,14 @@ andAnnhilates (unOnlyBools -> p) = QCM.monadicIO $
 
 orAnnhilates :: UnaryProperty
 orAnnhilates (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| true)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings true
+  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| true)
+     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings true
+     -- note that we need to check the unsat count because the sat cnt could
+     -- change depending on if we have a choice:
+     -- chc D a b ||| true
+     -- could have 2 models but
+     -- true, only has one
+     -- in this case annilation is still preserved
      return $! left == right
 
 andIdentity :: UnaryProperty
@@ -103,14 +109,16 @@ orOverAnd (unOnlyBools -> p) (unOnlyBools -> q) (unOnlyBools -> r) = QCM.monadic
 
 andAbsorbsOr :: BinaryProperty
 andAbsorbsOr (unOnlyBools -> p) (unOnlyBools -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p &&& (p ||| q))
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings (p &&& (p ||| q))
+     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings p
+     -- same problem as testing annhilation
      return $! left == right
 
 orAbsorbsAnd :: BinaryProperty
 orAbsorbsAnd (unOnlyBools -> p) (unOnlyBools -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| (p &&& q))
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| (p &&& q))
+     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings p
+     -- same problem as testing annhilation
      return $! left == right
 
 ---------------------------- General Cases -------------------------------------
