@@ -28,6 +28,9 @@ import           Core.Types
 newtype OnlyBools = OnlyBools { unOnlyBools :: Proposition }
   deriving (Generic,Show)
 
+newtype OnlyArith = OnlyArith { unOnlyArith :: NExpression }
+  deriving (Generic, Show)
+
 -------------------------- Helpers ---------------------------------------------
 -- | Generate only alphabetical characters
 genAlphaNum :: Gen Text
@@ -70,6 +73,9 @@ genNN = elements [Neg]
 genRefN :: Gen (ExRefType Var)
 genRefN = do v <- genVar; elements [ExRefTypeI v, ExRefTypeD v]
 
+genRefN' :: Gen (ExRefType Var)
+genRefN' = ExRefTypeI <$> genVar
+
 genBB :: Gen B_B
 genBB = elements [Not]
 
@@ -85,12 +91,12 @@ genNNB = elements [LT, LTE, GT, GTE, EQ, NEQ]
 
 -------------------------- Prop Generators ----------------------------------
 arbExpression :: Gen Dim -> Gen Var -> [Int] -> Int -> Gen NExpression
-arbExpression _ _ _ 0 = RefI <$> genRefN
-arbExpression genDm genVr ifreqs n = frequency $ zip ifreqs [ LitI <$> genPrim
+arbExpression _ _ _ 0 = RefI <$> genRefN' -- no floats
+arbExpression genDm genVr ifreqs n = frequency $ zip ifreqs [ LitI <$> genInt -- Lit <$> genPrim, don't gen floats they take too long to test
                                                             , liftM2 OpI genNN l
                                                             , liftM3 OpII genNNN l l
                                                             , liftM3 ChcI genDim l l
-                                                              ]
+                                                            ]
   where l = arbExpression genDm genVr ifreqs (n `div` 2)
 
 arbProposition_ :: Gen Dim -> Gen Var -> ([Int], [Int]) -> Int -> Gen Proposition
@@ -115,6 +121,7 @@ onlyBoolProp gd gv bfreqs n = frequency $ zip bfreqs [ liftM2 OpB genBB l
                                                      , liftM3 ChcB gd l l
                                                      ]
   where l  = onlyBoolProp gd gv bfreqs (n `div` 2)
+
 
 ------------------------------- Instances --------------------------------------
 instance Arbitrary Var where arbitrary = genVar
@@ -143,3 +150,7 @@ instance Arbitrary NExpression where
 instance Arbitrary OnlyBools where
   arbitrary = fmap OnlyBools . sized $ onlyBoolProp genSharedDim genVar (repeat 3)
   shrink = genericShrink
+
+instance Arbitrary OnlyArith where
+  arbitrary = fmap OnlyArith  . sized $ arbExpression genSharedDim genVar (repeat 3)
+  shrink    = genericShrink

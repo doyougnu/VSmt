@@ -35,7 +35,7 @@ singletonChoiceLHS =  solve Nothing defSettings $
 
 
 singletonChoiceRHS :: IO Result
-singletonChoiceRHS =  solve Nothing defSettings $ 100 + iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright") .== 23
+singletonChoiceRHS =  solve Nothing defSettings $ (100 + iChc "AA" (iRef ("Aleft" :: Text)) (iRef "Aright")) .== 23
 
 twoChoicesLHS :: IO Result
 twoChoicesLHS =  solve Nothing defSettings $

@@ -207,3 +207,8 @@
 ** TODO Gauge setup
 
 ** TODO bench-show
+
+* Variational String generator
+
+** Use the text-metrics package
+   link: http://hackage.haskell.org/package/text-metrics-0.3.0/docs/Data-Text-Metrics.html

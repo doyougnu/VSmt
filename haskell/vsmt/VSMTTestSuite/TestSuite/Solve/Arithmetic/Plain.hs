@@ -26,7 +26,7 @@ tests = testGroup "Plain formulas"
   , goldenVsStringShow "two_variables_in_addition" twoVars
   , testCase "quickcheck-replay=739384" sub
   , goldenVsStringShow "infinite prop" infinite
-    -- goldenVsStringShow "edgeCase" edgeCase
+  , goldenVsStringShow "edgeCase" edgeCase
   ]
 
 properties :: TestTree

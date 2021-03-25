@@ -41,7 +41,7 @@ data Settings = Settings { seed             :: Maybe Integer
 -- | A default configuration uses z3 and tries to shrink propositions
 defSettings :: Settings
 defSettings = Settings{ seed            = Nothing
-                      , generateModels  = False
+                      , generateModels  = True
                       , verboseMode     = False
                       , vcBufSize       = 25000
                       , producerBufSize = 250

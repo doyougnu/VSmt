@@ -1102,21 +1102,23 @@ accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  -- memo t $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
      let !res = IBOp t op (P :/\ l') (P :/\ r')
+     logInProducer "Numeric to Bool case plains so reducing"
      accumulate res
 
 accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp t op a b
+     logInProducer "Numeric to Bool case more than one plain"
      return (vl <@> vr :/\  res)
 
 iAccumulate' :: (Z.MonadZ3 z3
                 , MonadReader State z3
                 ) => IL' -> z3 (V :/\ IL')
   -- computation rules
-iAccumulate' x@(Ref' _)                               = return (P :/\  x)
+iAccumulate' x@(Ref' _)                                 = return (P :/\  x)
 iAccumulate' (IOp _ op (_ :/\ Ref' n))                  = (P :/\ ) . Ref' <$> dispatchUOp' op n
-iAccumulate' (IIOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r))  = (P :/\) . Ref' <$> dispatchIOp' op l r
+iAccumulate' (IIOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r))  = (P :/\)  . Ref' <$> dispatchIOp' op l r
   -- choices
 iAccumulate' x@Chc' {}                                    = return (V :/\ x)
 iAccumulate' x@(IIOp _ _ (_ :/\ Chc' {}) (_ :/\ Chc' {})) = return (V :/\ x)
@@ -1590,8 +1592,12 @@ choose loc =
       (InNum (_ :/\ Chc' d cl cr) (_ :/\ ctx)) -> do
         logInProducer "Got choice in context InNum"
         conf <- reads config
-        let goLeft  = toIL' cl >>= iAccumulate' . sSnd >>= accumulateCtx . toLocWith' ctx >>= findChoice >>= choose
-            goRight = toIL' cr >>= iAccumulate' . sSnd >>= accumulateCtx . toLocWith' ctx >>= findChoice >>= choose
+        let goLeft  = do i@(v :/\ _) <- toIL' cl >>= iAccumulate' . sSnd
+                         let lCtx = updateCtxVs ctx v
+                         accumulateCtx (toLocWith' lCtx i) >>= findChoice >>= choose
+            goRight = do i@(v :/\ _) <- toIL' cr >>= iAccumulate' . sSnd
+                         let rCtx = updateCtxVs ctx v
+                         accumulateCtx (toLocWith' rCtx i) >>= findChoice >>= choose
 
         case find d conf of
           Just True  -> logInProducer "Cache hit --- Left Selected"  >> goLeft

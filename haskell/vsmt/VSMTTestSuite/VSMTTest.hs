@@ -16,23 +16,24 @@ import System.Environment (setEnv)
 
 import qualified TestSuite.Solve.Boolean.Plain
 import qualified TestSuite.Solve.Boolean.Choices
--- import qualified TestSuite.Solve.Arithmetic.Plain
--- import qualified TestSuite.Solve.Arithmetic.Choices
+import qualified TestSuite.Solve.Arithmetic.Plain
+import qualified TestSuite.Solve.Arithmetic.Choices
 -- import qualified TestSuite.Solve.Sound
 import qualified TestSuite.Solve.Laws.Boolean
+import qualified TestSuite.Solve.Laws.Arithmetic
 -- import qualified TestSuite.Core.Parser.Result
 
 main :: IO ()
 main = do
-  setEnv "TASTY_QUICKCHECK_TESTS" "300"
+  setEnv "TASTY_QUICKCHECK_TESTS" "30"
   defaultMain $ testGroup "Tests"
     [ booleans
-    -- , arithmetics
+    , arithmetics
     -- , booleanPs
     -- , arithmeticPs
     -- , parsers
     -- , soundness
-    , laws
+      -- laws
     ]
 
 booleans :: TestTree
@@ -41,11 +42,11 @@ booleans = testGroup "Boolean Tests"
   , TestSuite.Solve.Boolean.Choices.tests
   ]
 
--- arithmetics :: TestTree
--- arithmetics = testGroup "Arithmetic Tests"
---   [ TestSuite.Solve.Arithmetic.Plain.tests
---   , TestSuite.Solve.Arithmetic.Choices.tests
---   ]
+arithmetics :: TestTree
+arithmetics = testGroup "Arithmetic Tests"
+  [ TestSuite.Solve.Arithmetic.Plain.tests
+  , TestSuite.Solve.Arithmetic.Choices.tests
+  ]
 
 -- booleanPs :: TestTree
 -- booleanPs = testGroup "Boolean Properties"
@@ -65,6 +66,7 @@ booleans = testGroup "Boolean Tests"
 laws :: TestTree
 laws = testGroup "Laws"
   [ TestSuite.Solve.Laws.Boolean.properties
+  , TestSuite.Solve.Laws.Arithmetic.properties
   ]
 
 -- parsers :: TestTree
