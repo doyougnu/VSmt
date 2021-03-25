@@ -1,4 +1,7 @@
 =: Model := 
+foo   -->   True
+baz   -->   True
+bar   -->   True
 
 =: Sat_Model := 
 

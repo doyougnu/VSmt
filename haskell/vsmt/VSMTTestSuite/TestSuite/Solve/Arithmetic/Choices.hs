@@ -59,6 +59,6 @@ memoryBlow = solve Nothing defSettings p
 
 
 infinite2 :: IO Result
-infinite2 = solve Nothing defSettings p
+infinite2 = solveVerbose Nothing defSettings p
   -- where p = OpB Not (OpIB LTE (ChcI "BQ" (iRef  ("rzoql" :: Text)) (iRef "iyfa")) (LitI (D (-3.835702833833845))))
-  where p = OpB Not (OpIB LTE (ChcI "BQ" (iRef  ("rzoql" :: Text)) (iRef "iyfa")) (LitI (D (-3.835702833833845))))
+  where p = OpB Not (OpIB LTE (ChcI "BQ" (iRef  ("rzoql" :: Text)) (iRef "iyfa")) (LitI (I (-3))))

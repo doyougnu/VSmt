@@ -1,4 +1,7 @@
 =: Model := 
+Aleft   -->   (ite AA (True) Undefined)
+two   -->   (ite ~AA (True) (ite AA (True) Undefined))
+one   -->   (ite ~AA (True) Undefined)
 
 =: Sat_Model := 
 (~AA or AA)
