@@ -30,6 +30,7 @@ module Utils.VSMTTestFramework
   , solveVerbose
   , solveForCore
   , defSettings
+  , defNoModels
   , pretty
   , FrozenDiags(..)
   , Counter(..)
@@ -46,7 +47,7 @@ import qualified Data.ByteString.Lazy.Char8 as LBC
 import Utils.VSMTGen
 
 import Solve (solve, solveForDiagnostics, solveVerbose, solveForCore,FrozenDiags(..),Counter(..))
-import Settings (defSettings)
+import Settings (defSettings, defNoModels)
 import Core.Types
 import Core.Result
 import Core.Core

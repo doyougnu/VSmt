@@ -1065,7 +1065,7 @@ accumulate (BOp _ Not (_ :/\ Ref r))  = -- memo t $!
 accumulate (BBOp _ op (_ :/\ Ref l) (_ :/\ Ref r)) = -- memo t $!
   (P :/\ ) . Ref <$> dispatchOp op l r
   -- numerics
-accumulate (IBOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r)) = -- memo t $!
+accumulate (IBOp _ op (_ :/\ Ref' l) (_ :/\ Ref' r)) =
   (P :/\ ) . Ref <$> dispatchOp' op l r
   -- choices
 accumulate x@(BBOp _ _ (_ :/\ Chc {})  (_ :/\ Chc {}))  = return (V :/\ x)
@@ -1089,7 +1089,6 @@ accumulate (BBOp t op (P :/\ l) (P :/\ r)) = --  memo t $!
   do (_ :/\ l') <- accumulate l
      (_ :/\ r') <- accumulate r
      let !res = BBOp t op (P :/\ l') (P :/\ r')
-     logInProducerWith "accumulating two refs: " res
      accumulate res
 
 accumulate (BBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
@@ -1102,14 +1101,12 @@ accumulate (IBOp t op (P :/\ l) (P :/\ r)) =  -- memo t $!
   do (_ :/\ l') <- iAccumulate' l
      (_ :/\ r') <- iAccumulate' r
      let !res = IBOp t op (P :/\ l') (P :/\ r')
-     logInProducer "Numeric to Bool case plains so reducing"
      accumulate res
 
 accumulate (IBOp t op (_ :/\ l) (_ :/\ r)) =  -- memo t $!
   do a@(vl :/\ _) <- iAccumulate' l
      b@(vr :/\ _) <- iAccumulate' r
      let !res = IBOp t op a b
-     logInProducer "Numeric to Bool case more than one plain"
      return (vl <@> vr :/\  res)
 
 iAccumulate' :: (Z.MonadZ3 z3
@@ -1268,10 +1265,12 @@ updateCtxVs Top                                 _ = Top
 updateCtxVs (InL (_ :/\ parent) k o r@(P :/\ _))  P = InL (P :/\ updateCtxVs parent P) k o r
 updateCtxVs (InR r@(P :/\ _) k o (_ :/\ parent))  P = InR r k o (P :/\ updateCtxVs parent P)
 updateCtxVs (InU k o (_ :/\ parent))              P = InU k o (P :/\ updateCtxVs parent P)
+updateCtxVs (InLB (_ :/\ parent) k o r@(P :/\ _))  P = InLB (P :/\ updateCtxVs parent P) k o r
+updateCtxVs (InRB r@(P :/\ _) k o (_ :/\ parent))  P = InRB r k o (P :/\ updateCtxVs parent P)
 updateCtxVs (InL' (_ :/\ parent) k o r@(P :/\ _)) P = InL' (P :/\ updateCtxVs parent P) k o r
 updateCtxVs (InR' r@(P :/\ _) k o (_ :/\ parent)) P = InR' r k o (P :/\ updateCtxVs parent P)
 updateCtxVs (InU' k o (_ :/\ parent))             P = InU' k o (P :/\ updateCtxVs parent P)
-updateCtxVs ctx                                 _ = ctx
+updateCtxVs ctx                                 _   = ctx
 
 toLocWith :: Ctx -> (V :/\ IL) -> Loc
 toLocWith Top     il = InBool il (P :/\ Top)

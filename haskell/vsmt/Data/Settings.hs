@@ -15,8 +15,7 @@
 module Settings
   ( Settings(..)
   , defSettings
-  , defWithModels
-  , defSettingsOnlySat
+  , defNoModels
   , minSettings
   , debugSettings
   , minAsyncSettings
@@ -52,8 +51,8 @@ defSettings = Settings{ seed            = Nothing
                       , numVCWorkers    = 1
                       }
 
-defSettingsOnlySat :: Settings
-defSettingsOnlySat = defSettings{generateModels = False}
+defNoModels :: Settings
+defNoModels = defSettings{generateModels = False}
 
 minSettings :: Settings
 minSettings = Settings{ seed            = Nothing
@@ -73,6 +72,3 @@ minAsyncSettings = minSettings{numProducers = 1, numConsumers = 1, numVCWorkers 
 
 debugSettings :: Settings
 debugSettings = minSettings{verboseMode=True}
-
-defWithModels :: Settings
-defWithModels = defSettings{generateModels=True}

@@ -25,7 +25,7 @@ import qualified TestSuite.Solve.Laws.Arithmetic
 
 main :: IO ()
 main = do
-  setEnv "TASTY_QUICKCHECK_TESTS" "30"
+  setEnv "TASTY_QUICKCHECK_TESTS" "300"
   defaultMain $ testGroup "Tests"
     [ booleans
     , arithmetics
@@ -33,7 +33,7 @@ main = do
     -- , arithmeticPs
     -- , parsers
     -- , soundness
-      -- laws
+    , laws
     ]
 
 booleans :: TestTree

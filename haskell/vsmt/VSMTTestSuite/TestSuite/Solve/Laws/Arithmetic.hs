@@ -105,9 +105,8 @@ type TernaryProperty = OnlyArith -> OnlyArith -> OnlyArith -> QC.Property
 
 commutes :: (NExpression -> NExpression -> NExpression) -> BinaryProperty
 commutes operator (unOnlyArith -> p) (unOnlyArith -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (0 .== (p `operator` q))
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (0 .== (q `operator` p))
-     liftIO $ putStrLn $ show $ p
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (0 .== (p `operator` q))
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (0 .== (q `operator` p))
      return $! left == right
 
 -- associates :: (Proposition -> Proposition -> Proposition) -> TernaryProperty

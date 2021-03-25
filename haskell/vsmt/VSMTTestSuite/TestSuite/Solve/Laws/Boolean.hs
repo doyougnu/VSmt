@@ -66,14 +66,14 @@ type TernaryProperty = OnlyBools -> OnlyBools -> OnlyBools -> QC.Property
 ---------------------------- Special Cases -------------------------------------
 andAnnhilates :: UnaryProperty
 andAnnhilates (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p &&& false)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings false
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p &&& false)
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels false
      return $! left == right
 
 orAnnhilates :: UnaryProperty
 orAnnhilates (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| true)
-     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings true
+  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defNoModels (p ||| true)
+     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defNoModels true
      -- note that we need to check the unsat count because the sat cnt could
      -- change depending on if we have a choice:
      -- chc D a b ||| true
@@ -84,66 +84,66 @@ orAnnhilates (unOnlyBools -> p) = QCM.monadicIO $
 
 andIdentity :: UnaryProperty
 andIdentity (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p &&& true)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p &&& true)
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels p
      return $! left == right
 
 orIdentity :: UnaryProperty
 orIdentity (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| false)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p ||| false)
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels p
      return $! left == right
 
 andOverOr :: TernaryProperty
 andOverOr (unOnlyBools -> p) (unOnlyBools -> q) (unOnlyBools -> r) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p &&& (q ||| r))
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings ((p &&& q) ||| (p &&& r))
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p &&& (q ||| r))
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels ((p &&& q) ||| (p &&& r))
      return $! left == right
 
 orOverAnd :: TernaryProperty
 orOverAnd (unOnlyBools -> p) (unOnlyBools -> q) (unOnlyBools -> r) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| (q &&& r))
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings ((p ||| q) &&& (p ||| r))
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p ||| (q &&& r))
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels ((p ||| q) &&& (p ||| r))
      return $! left == right
 
 
 andAbsorbsOr :: BinaryProperty
 andAbsorbsOr (unOnlyBools -> p) (unOnlyBools -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings (p &&& (p ||| q))
-     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defNoModels (p &&& (p ||| q))
+     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defNoModels p
      -- same problem as testing annhilation
      return $! left == right
 
 orAbsorbsAnd :: BinaryProperty
 orAbsorbsAnd (unOnlyBools -> p) (unOnlyBools -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings (p ||| (p &&& q))
-     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defNoModels (p ||| (p &&& q))
+     right <- liftIO $ unCounter . fUnSatCnt <$> solveForDiagnostics Nothing defNoModels p
      -- same problem as testing annhilation
      return $! left == right
 
 ---------------------------- General Cases -------------------------------------
 doubleNegation :: UnaryProperty
 doubleNegation (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (bnot $ bnot p)
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels p
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (bnot $ bnot p)
      return $! left == right
 
 commutes :: (Proposition -> Proposition -> Proposition) -> BinaryProperty
 commutes operator (unOnlyBools -> p) (unOnlyBools -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p `operator` q)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (q `operator` p)
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p `operator` q)
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (q `operator` p)
      return $! left == right
 
 associates :: (Proposition -> Proposition -> Proposition) -> TernaryProperty
 associates operator (unOnlyBools -> p) (unOnlyBools -> q) (unOnlyBools -> r) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings ((p `operator` q) `operator` r)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p `operator` (q `operator` r))
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels ((p `operator` q) `operator` r)
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p `operator` (q `operator` r))
      return $! left == right
 
 idempotence :: (Proposition -> Proposition -> Proposition) -> UnaryProperty
 idempotence operator (unOnlyBools -> p) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p `operator` p)
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
+  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (p `operator` p)
+     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels p
      return $! left == right
 
 

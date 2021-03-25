@@ -25,8 +25,6 @@ tests = testGroup "Plain formulas"
   [ goldenVsStringShow "simple_arithmetic_to_variable" singletonVar
   , goldenVsStringShow "two_variables_in_addition" twoVars
   , testCase "quickcheck-replay=739384" sub
-  , goldenVsStringShow "infinite prop" infinite
-  , goldenVsStringShow "edgeCase" edgeCase
   ]
 
 properties :: TestTree
@@ -55,6 +53,7 @@ plainBecomesUnit = QC.testProperty
           do core <- liftIO $ sFst <$> solveForCore p
              QCM.assert $ isUnit core
 
+-- | both of these use signum which will not be implemented
 infinite :: IO Result
 infinite = solve Nothing defSettings p
   where p = iChc "DD" (14.451303985118729 - (-(-22))) (signum 29.38464737058025) .== abs (iChc "EE" (signum (iRef ("uqqhmomillqezrrtwiunpyrdxqy" :: Text))) (-32) + (-29))
