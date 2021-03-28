@@ -24,9 +24,14 @@ import Utils.VSMTTestFramework
 properties :: TestTree
 properties =
   testGroup
-    "Arithmetic" [ QC.testProperty "addition is commutative"       addCommutativity
-                 , QC.testProperty "multiplication is commutative" multCommutativity
-                 ]
+  "Arithmetic" [ QC.testProperty "double negation"               doubleNegation
+
+               , QC.testProperty "addition is commutative"       addCommutativity
+               , QC.testProperty "multiplication is commutative" multCommutativity
+
+               , QC.testProperty "addition is associative"       addAssociativity
+               , QC.testProperty "multiplication is associative" multAssociativity
+               ]
 
 ------------------------------ Boolean Laws ------------------------------------
 -- | shorthand type synonyms for properties over binary relations
@@ -97,23 +102,25 @@ type TernaryProperty = OnlyArith -> OnlyArith -> OnlyArith -> QC.Property
 --      return $! left == right
 
 -- ---------------------------- General Cases -------------------------------------
--- doubleNegation :: UnaryProperty
--- doubleNegation (unOnlyBools -> p) = QCM.monadicIO $
---   do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings p
---      right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (bnot $ bnot p)
---      return $! left == right
+doubleNegation :: UnaryProperty
+doubleNegation (unOnlyArith -> p) = QCM.monadicIO $
+  do left  <- liftIO $ flip get "a" <$> solve Nothing defSettings (iRef "a" .== p)
+     right <- liftIO $ flip get "a" <$> solve Nothing defSettings (iRef "a" .== (negate $ negate p))
+     return $! left == right
 
 commutes :: (NExpression -> NExpression -> NExpression) -> BinaryProperty
 commutes operator (unOnlyArith -> p) (unOnlyArith -> q) = QCM.monadicIO $
-  do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (0 .== (p `operator` q))
-     right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defNoModels (0 .== (q `operator` p))
+  do left  <- liftIO $ flip get "a" <$> solve Nothing defNoModels (iRef "a" .== (p `operator` q))
+     right <- liftIO $ flip get "a" <$> solve Nothing defNoModels (iRef "a" .== (q `operator` p))
+     liftIO $ putStrLn $ show p
+     liftIO $ putStrLn $ show q
      return $! left == right
 
--- associates :: (Proposition -> Proposition -> Proposition) -> TernaryProperty
--- associates operator (unOnlyBools -> p) (unOnlyBools -> q) (unOnlyBools -> r) = QCM.monadicIO $
---   do left  <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings ((p `operator` q) `operator` r)
---      right <- liftIO $ unCounter . fSatCnt <$> solveForDiagnostics Nothing defSettings (p `operator` (q `operator` r))
---      return $! left == right
+associates :: (NExpression -> NExpression -> NExpression) -> TernaryProperty
+associates operator (unOnlyArith -> p) (unOnlyArith -> q) (unOnlyArith -> r) = QCM.monadicIO $
+  do left  <- liftIO $ flip get "a" <$> solve Nothing defSettings (iRef "a" .== ((p `operator` q) `operator` r))
+     right <- liftIO $ flip get "a" <$> solve Nothing defSettings (iRef "a" .== p `operator` (q `operator` r))
+     return $! left == right
 
 -- idempotence :: (Proposition -> Proposition -> Proposition) -> UnaryProperty
 -- idempotence operator (unOnlyBools -> p) = QCM.monadicIO $
@@ -127,3 +134,9 @@ addCommutativity = commutes (+)
 
 multCommutativity :: BinaryProperty
 multCommutativity = commutes (*)
+
+addAssociativity :: TernaryProperty
+addAssociativity = associates (+)
+
+multAssociativity :: TernaryProperty
+multAssociativity = associates (*)

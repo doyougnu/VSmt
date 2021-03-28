@@ -20,7 +20,7 @@
 {-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE TypeOperators              #-}
-{-# LANGUAGE TupleSections              #-}
+{-# LANGUAGE ViewPatterns               #-}
 
 module Core.Result where
 
@@ -55,11 +55,11 @@ newtype ResultFormula = ResultFormula (Seq.Seq (Maybe VariantContext :/\ Value))
 -- | We store the raw output from SBV (I.CV) to avoid having to use existentials
 -- and to leverage the instance already made in the SBV library. This leads to
 -- cleaner implementation on our end.
-newtype VariableMap d = VariableMap { getVMap :: M.HashMap d ResultFormula }
+newtype VariableMap d = VariableMap { unVariableMap :: M.HashMap d ResultFormula }
   deriving (Eq,Show,Generic,NFData)
 
 -- | newtype wrapper for better printing
-newtype Result = Result { unboxResult :: Result' Var} deriving (Eq,Generic,NFData)
+newtype Result = Result { unResult :: Result' Var} deriving (Eq,Generic,NFData)
 
 
 data Result' d = Result' { variables      :: VariableMap d
@@ -130,7 +130,7 @@ instance (Eq d, Hashable d, NFData d) => Monoid (Result' d) where
 
 -- | get satisfiable VCs from a result
 getSatisfiableVCs :: Result -> Maybe VariantContext
-getSatisfiableVCs = satisfiableVCs . unboxResult
+getSatisfiableVCs = satisfiableVCs . unResult
 
 -- | check if the current context is sat or not
 isSat :: Z.MonadZ3 m => Maybe VariantContext -> m (Bool :/\ Result)
@@ -139,7 +139,7 @@ isSat vcs = do cs <- Z.check
                            Z.Sat -> (True :/\) $ Result $! Result' {variables=mempty
                                                                    ,satisfiableVCs=vcs
                                                                    }
-                           _     -> (False :/\ mempty)
+                           _     -> False :/\ mempty
 
 -- | Generate a VSMT model
 getResult :: (Z.MonadZ3 m, MonadIO m, MonadLogger m) => Maybe VariantContext -> m (Bool :/\ Result)
@@ -156,3 +156,7 @@ getResult !vc =
                            fmap (\(k :/\ v) ->
                                    (k, ResultFormula $! pure (vc :/\ v))) ms
             return $ (True :/\) . Result $! Result' {variables = bindings, satisfiableVCs = vc}
+
+-- | With a result get a value
+get :: Result -> Var -> Maybe ResultFormula
+get (unVariableMap . variables . unResult -> r) v = M.lookup v r
