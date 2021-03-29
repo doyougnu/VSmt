@@ -35,6 +35,7 @@ library
                  , Core.Utils
                  , Parser.Result
                  , Parser.Z3
+                 , Parser.SMTLIB2
                  , Solve
                  , Settings
                  , Utils
