@@ -10,7 +10,6 @@
 -- identical as possible to SMTLIB2 except should not expose push/pop
 -----------------------------------------------------------------------------
 
-{-# OPTIONS_GHC -Wall -Werror #-}
 
 {-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DerivingStrategies         #-}

@@ -23,7 +23,7 @@ import           Data.Csv                (DefaultOrdered, ToField(..),
                                           encodeDefaultOrderedByName)
 import           Settings
 import           Solve                   (Counter (..), FrozenDiags (..),
-                                          solveGetDiag, vCoreMetrics)
+                                          solveForDiagnostics, vCoreMetrics)
 import           Utils                   (genConfigPool)
 
 
@@ -43,7 +43,7 @@ runDiagnostics fn alg variant numVariants ss p = do let a = Bl.toLazyByteString 
                                                         v = Bl.toLazyByteString . Bl.stringUtf8 $ variant
                                                         n = Bl.toLazyByteString . Bl.stringUtf8 $ show $ numVariants
                                                         sep = Bl.toLazyByteString . Bl.stringUtf8 $ ","
-                                                    res <- solveGetDiag Nothing ss p
+                                                    res <- solveForDiagnostics Nothing ss p
                                                     BS.appendFile fn $
                                                       a <> sep <> v <> sep <> n <> sep <>
                                                       encodeDefaultOrderedByName (pure res)

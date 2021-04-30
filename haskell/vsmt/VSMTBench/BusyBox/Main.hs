@@ -17,9 +17,9 @@ analysisToVariational :: Analysis T.Text -> Proposition
 analysisToVariational a = fm &&& nM &&& lexProblems &&& parseProblems &&& tcProblems
   where fm            = featureModel a
         nM            = conjoin $ noMode a
-        lexProblems   = conjoin $ (\p -> bChc "Lexing" p true)       <$> lexing       a
-        parseProblems = conjoin $ (\p -> bChc "Parsing" p true)      <$> parsing      a
-        tcProblems    = conjoin $ (\p -> bChc "TypeChecking" p true) <$> typeChecking a
+        lexProblems   = conjoin $ (\p -> bChc (T.pack "Lexing") p true)       <$> lexing       a
+        parseProblems = conjoin $ (\p -> bChc (T.pack "Parsing") p true)      <$> parsing      a
+        tcProblems    = conjoin $ (\p -> bChc (T.pack "TypeChecking") p true) <$> typeChecking a
 
 
 constructVariational :: [Analysis T.Text] -> Proposition
