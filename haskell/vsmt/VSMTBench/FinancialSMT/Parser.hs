@@ -148,6 +148,16 @@ rExpr = do
   b <- aTerm
   return (RBinary op a b)
 
+bad :: Parser AutoLang
+bad = do
+  feature <- aTerm
+  op      <- relation
+  value   <- aTerm
+  let featConstraint = RBinary op a b
+  op'     <- relation
+  featSums <- aTerm
+  return (BBinary And featConstraint featSums)
+
 
 aExpr :: Parser ALang
 aExpr = makeExprParser aTerm aOperators
