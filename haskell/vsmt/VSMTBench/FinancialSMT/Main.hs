@@ -126,8 +126,7 @@ main = do
       bPs'' = lefts bPs'
       bPs = rights bPs'
 
-      !bProp = true
-      -- !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
+      !bProp = ((renameDims sameDims) . naiveEncode . autoToVSat) $ autoAndJoin (bPs)
       -- dmapping = getDimMap $ autoAndJoin bPs
       -- !bPropOpts = applyOpts defConf bProp
 
@@ -371,11 +370,9 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnP (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
-  putStrLn $ show $ length bPs''
-  putStrLn $ show $ length bPs
-  -- diagnostics "raw_data/financial_diagnostics.csv" defSettings
+  diagnostics "raw_data/financial_diagnostics.csv" defSettings
 
-  -- defaultMain $
-  --       [ bgroup "Z3" (benches defSettings)
-  --     -- , bgroup "Z3" (compRatioBenches z3DefConf)
-  --       ]
+  defaultMain $
+        [ bgroup "Z3" (benches defSettings)
+      -- , bgroup "Z3" (compRatioBenches z3DefConf)
+        ]

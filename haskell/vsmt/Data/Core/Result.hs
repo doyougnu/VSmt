@@ -24,7 +24,7 @@
 
 module Core.Result where
 
-import           Control.Monad.IO.Class (MonadIO,liftIO)
+import           Control.Monad.IO.Class (MonadIO)
 
 import           Control.Monad.Logger   (MonadLogger)
 import           Control.DeepSeq        (NFData)
@@ -146,8 +146,8 @@ getResult :: (Z.MonadZ3 m, MonadIO m, MonadLogger m) => Maybe VariantContext -> 
 getResult !vc =
   do (!r,!m) <- Z.getModel
      case r of
-       Z.Unsat -> liftIO $ putStrLn "Unsat" >> return (False :/\ mempty)
-       Z.Undef -> liftIO $ putStrLn "undef" >> return (False :/\ mempty)
+       Z.Unsat -> return (False :/\ mempty)
+       Z.Undef -> return (False :/\ mempty)
        _       ->
          do m' <- maybe (pure mempty) Z.modelToString m
             let !ms  = parseModel . pack $! m'
