@@ -369,6 +369,7 @@ main = do
 --       , mkCompBench "v-->p" "V9*V10" (vOnP (toDimProp pD89Conf) solverConf) justbPropV910
 --       ]
 
+  putStrLn $ show $ length
   diagnostics "raw_data/financial_diagnostics.csv" defSettings
 
   -- defaultMain $
