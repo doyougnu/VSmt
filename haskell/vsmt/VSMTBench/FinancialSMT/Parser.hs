@@ -9,6 +9,7 @@ import           Text.Megaparsec.Debug
 import           Text.Megaparsec.Char
 import qualified Text.Megaparsec.Char.Lexer as L
 import           Control.Monad.Combinators.Expr
+import           Control.Monad (void)
 
 import           Lang
 
@@ -51,15 +52,16 @@ bExpr :: Parser AutoLang
 bExpr = makeExprParser bTerm bOperators
 
 bTerm :: Parser AutoLang
-bTerm =  try (parens bExpr)
-         <|> rExpr
-         <|> boolRef
-         <|> bExpr
-         <|> (try contextRef)
-         <|> atMost1Expr
-         <|> (AutoLit True  <$ reserved "true")
-         <|> (AutoLit False <$ reserved "false")
-
+bTerm = choice
+  [ (parens bExpr)
+  , (try contextRef)
+  , boolRef
+  , rExpr
+  , atMost1Expr
+  , bad
+  , (AutoLit True  <$ reserved "true")
+  , (AutoLit False <$ reserved "false")
+  ]
 
 aTerm :: Parser ALang
 aTerm = (parens aExpr)
@@ -81,7 +83,7 @@ contextRef_ = do _ <- aContextRef
                  return $ Ctx op (ALit rhs)
 
 contextRef :: Parser AutoLang
-contextRef = do f <- parens contextRef_
+contextRef = do f <- contextRef_
                 reserved "impl"
                 rest <- bTerm
                 return $ f rest
@@ -142,7 +144,7 @@ relation = pure EQL      <* symbol "="
 
 
 rExpr :: Parser AutoLang
-rExpr = do
+rExpr = try $ do
   a <- aTerm
   op <- relation
   b <- aTerm
@@ -150,13 +152,17 @@ rExpr = do
 
 bad :: Parser AutoLang
 bad = do
-  feature <- aTerm
-  op      <- relation
-  value   <- aTerm
-  let featConstraint = RBinary op a b
-  op'     <- relation
+  let parseFeature = do
+        feature <- arithRef
+        op      <- relation
+        value   <- integer
+        return (feature,op,value)
+  (f,o,v) <- parens parseFeature
+  let featConstraint = RBinary o f (ALit v)
+  void $ symbol "="
   featSums <- aTerm
-  return (BBinary And featConstraint featSums)
+  let oneOfConstraint = RBinary EQL f featSums
+  return (BBinary And featConstraint oneOfConstraint)
 
 
 aExpr :: Parser ALang
@@ -181,3 +187,13 @@ one' = "(feature[_0e8e9baa-56f5-48d3-93dd-1f4db1d546d4] = 1)"
 
 two :: T.Text
 two = "(feature[_53e5b7e7-7ae7-44cd-a740-8d993d7eb86a] = 1) = (feature[_158db4b6-1e64-4e90-91ea-f8c7942e501f] + feature[_2f760b29-63d0-4f79-bb3e-f748fcf20382] + feature[_252935a5-1693-4c2d-97b9-5b796f1d5348])"
+
+fileChunk :: [T.Text]
+fileChunk = [ "feature[_b960bcd1-ffd8-474f-9232-646cca213681]"
+        , "(context[_evolution-context] < 0) impl (feature[_b960bcd1-ffd8-474f-9232-646cca213681] impl (feature[_d1492ad4-8b92-490c-a89b-df8145237ee8] and feature[_d44790f0-b510-4940-a24e-ac0c652bd66f] and feature[_cf824b02-367f-42dd-bc2e-7e75ffc208d9]))"
+        , "(context[_evolution-context] < 0) impl ((feature[_d1492ad4-8b92-490c-a89b-df8145237ee8] or feature[_d44790f0-b510-4940-a24e-ac0c652bd66f] or feature[_cf824b02-367f-42dd-bc2e-7e75ffc208d9]) impl feature[_b960bcd1-ffd8-474f-9232-646cca213681])"
+        , "(context[_evolution-context] >= 0 and context[_evolution-context] < 4) impl (feature[_b960bcd1-ffd8-474f-9232-646cca213681] impl (feature[_d1492ad4-8b92-490c-a89b-df8145237ee8] and feature[_d44790f0-b510-4940-a24e-ac0c652bd66f] and feature[_cf824b02-367f-42dd-bc2e-7e75ffc208d9] and feature[_bc862939-7f8f-4f4f-9934-7512a48c4724]))"
+        , "(context[_evolution-context] >= 0 and context[_evolution-context] < 4) impl ((feature[_d1492ad4-8b92-490c-a89b-df8145237ee8] or feature[_d44790f0-b510-4940-a24e-ac0c652bd66f] or feature[_cf824b02-367f-42dd-bc2e-7e75ffc208d9] or feature[_bc862939-7f8f-4f4f-9934-7512a48c4724]) impl feature[_b960bcd1-ffd8-474f-9232-646cca213681])"
+        , "(context[_evolution-context] >= 4 and context[_evolution-context] < 6) impl (feature[_b960bcd1-ffd8-474f-9232-646cca213681] impl (feature[_d1492ad4-8b92-490c-a89b-df8145237ee8] and feature[_d44790f0-b510-4940-a24e-ac0c652bd66f] and feature[_cf824b02-367f-42dd-bc2e-7e75ffc208d9] and feature[_bc862939-7f8f-4f4f-9934-7512a48c4724] and feature[_697ed0f6-bf87-4557-88d6-be7d89b8a70a] and feature[_e9abfa15-d9ed-412a-9c5e-bcf8152de26b]))"
+        , "(context[_evolution-context] >= 4 and context[_evolution-context] < 6) impl ((feature[_d1492ad4-8b92-490c-a89b-df8145237ee8] or feature[_d44790f0-b510-4940-a24e-ac0c652bd66f] or feature[_cf824b02-367f-42dd-bc2e-7e75ffc208d9] or feature[_bc862939-7f8f-4f4f-9934-7512a48c4724] or feature[_697ed0f6-bf87-4557-88d6-be7d89b8a70a] or feature[_e9abfa15-d9ed-412a-9c5e-bcf8152de26b]) impl feature[_b960bcd1-ffd8-474f-9232-646cca213681])"
+        ]
