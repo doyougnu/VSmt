@@ -27,6 +27,9 @@ import           Financial
 import           Lang
 import           Parser
 
+benchConfig :: Gauge.Config
+benchConfig = defaultConfig{minSamples = Just 3, quickMode = True}
+
 dataFile :: FilePath
 dataFile = "VSMTBench/Financial/financial_merged.json"
 
@@ -372,7 +375,7 @@ main = do
 
   diagnostics "raw_data/financial_diagnostics.csv" defSettings
 
-  defaultMain $
+  defaultMainWith benchConfig $
         [ bgroup "Z3" (benches defSettings)
       -- , bgroup "Z3" (compRatioBenches z3DefConf)
         ]
